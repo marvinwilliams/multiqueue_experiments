@@ -24,6 +24,9 @@
 #elif defined PQ_MQ_INT || defined PQ_MQ_INT_MERGING || defined PQ_MQ_INT_NB
 #include "multiqueue/configurations.hpp"
 #include "multiqueue/int_multiqueue.hpp"
+#elif defined PQ_MQ_INT_AS
+#include "multiqueue/configurations.hpp"
+#include "multiqueue/int_multiqueue_assigned.hpp"
 #else
 #include "multiqueue/configurations.hpp"
 #include "multiqueue/multiqueue.hpp"
@@ -51,7 +54,7 @@ using BaseConfig = multiqueue::configuration::NoBuffering;
 using BaseConfig = multiqueue::configuration::DeleteBuffering;
 #elif defined PQ_MQ_INSERT_BUFFERING
 using BaseConfig = multiqueue::configuration::InsertBuffering;
-#elif defined PQ_MQ_FULL_BUFFERING || defined PQ_MQ_INT
+#elif defined PQ_MQ_FULL_BUFFERING || defined PQ_MQ_INT || defined PQ_MQ_INT_AS
 using BaseConfig = multiqueue::configuration::FullBuffering;
 #elif defined PQ_MQ_MERGING || defined PQ_MQ_INT_MERGING
 using BaseConfig = multiqueue::configuration::Merging;
@@ -104,11 +107,42 @@ struct PriorityQueueFactory {
 #elif defined PQ_DLSM
     using type = wrapper::dlsm<KeyType, ValueType>;
 #elif defined PQ_LINDEN
-    using type = wrapper::linden<KeyType, ValueType>;
 #elif defined PQ_SPRAYLIST
-    using type = wrapper::spraylist<KeyType, ValueType>;
 #elif defined PQ_MQ_INT || defined PQ_MQ_INT_MERGING || defined PQ_MQ_INT_NB
     using type = multiqueue::int_multiqueue<KeyType, ValueType, Config>;
+#elif defined PQ_MQ_INT_AS
+    using type = multiqueue::int_multiqueue_assigned<KeyType, ValueType, Config>;
+#else
+    using type = multiqueue::multiqueue<KeyType, ValueType, std::less<KeyType>, Config>;
+#endif
+};
+
+template <>
+struct PriorityQueueFactory<unsigned long, unsigned long> {
+  using KeyType = unsigned long;
+  using ValueType = unsigned long;
+#if defined PQ_CAPQ || defined PQ_CAPQ1
+    using type = wrapper::capq<KeyType, ValueType, true, true, true>;
+#elif defined PQ_CAPQ2
+    using type = wrapper::capq<KeyType, ValueType, true, false, true>;
+#elif defined PQ_CAPQ3
+    using type = wrapper::capq<KeyType, ValueType, false, true, true>;
+#elif defined PQ_CAPQ4
+    using type = wrapper::capq<KeyType, ValueType, false, false, true>;
+#elif defined PQ_KLSM || defined PQ_KLSM256
+    using type = wrapper::klsm<KeyType, ValueType, 256>;
+#elif defined PQ_KLSM1024
+    using type = wrapper::klsm<KeyType, ValueType, 1024>;
+#elif defined PQ_DLSM
+    using type = wrapper::dlsm<KeyType, ValueType>;
+#elif defined PQ_LINDEN
+    using type = wrapper::linden;
+#elif defined PQ_SPRAYLIST
+    using type = wrapper::spraylist;
+#elif defined PQ_MQ_INT || defined PQ_MQ_INT_MERGING || defined PQ_MQ_INT_NB
+    using type = multiqueue::int_multiqueue<KeyType, ValueType, Config>;
+#elif defined PQ_MQ_INT_AS
+    using type = multiqueue::int_multiqueue_assigned<KeyType, ValueType, Config>;
 #else
     using type = multiqueue::multiqueue<KeyType, ValueType, std::less<KeyType>, Config>;
 #endif
