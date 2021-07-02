@@ -82,7 +82,7 @@ struct Settings {
       InsertPolicy::Uniform,
       KeyDistribution::Uniform,
       std::numeric_limits<value_type>::min(),
-      std::numeric_limits<value_type>::max() - 3,  // Some pqs use sentinels
+      static_cast<value_type>(std::numeric_limits<std::uint32_t>::max() - 3),  // Some pqs use sentinels
       1,
       100,
   };
