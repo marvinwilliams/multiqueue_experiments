@@ -92,7 +92,8 @@ struct Config : BaseConfig {
 
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
-#if defined PQ_KLSM || defined PQ_KLSM256
+#if defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || defined PQ_CAPQ3 || defined PQ_CAPQ4
+#elif defined PQ_KLSM || defined PQ_KLSM256
     using type = wrapper::klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024
     using type = wrapper::klsm<KeyType, ValueType, 1024>;
