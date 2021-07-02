@@ -92,15 +92,7 @@ struct Config : BaseConfig {
 
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
-#if defined PQ_CAPQ || defined PQ_CAPQ1
-    using type = wrapper::capq<KeyType, ValueType, true, true, true>;
-#elif defined PQ_CAPQ2
-    using type = wrapper::capq<KeyType, ValueType, true, false, true>;
-#elif defined PQ_CAPQ3
-    using type = wrapper::capq<KeyType, ValueType, false, true, true>;
-#elif defined PQ_CAPQ4
-    using type = wrapper::capq<KeyType, ValueType, false, false, true>;
-#elif defined PQ_KLSM || defined PQ_KLSM256
+#if defined PQ_KLSM || defined PQ_KLSM256
     using type = wrapper::klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024
     using type = wrapper::klsm<KeyType, ValueType, 1024>;
@@ -122,13 +114,13 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
   using KeyType = unsigned long;
   using ValueType = unsigned long;
 #if defined PQ_CAPQ || defined PQ_CAPQ1
-    using type = wrapper::capq<KeyType, ValueType, true, true, true>;
+    using type = wrapper::capq<true, true, true>;
 #elif defined PQ_CAPQ2
-    using type = wrapper::capq<KeyType, ValueType, true, false, true>;
+    using type = wrapper::capq<true, false, true>;
 #elif defined PQ_CAPQ3
-    using type = wrapper::capq<KeyType, ValueType, false, true, true>;
+    using type = wrapper::capq<false, true, true>;
 #elif defined PQ_CAPQ4
-    using type = wrapper::capq<KeyType, ValueType, false, false, true>;
+    using type = wrapper::capq<false, false, true>;
 #elif defined PQ_KLSM || defined PQ_KLSM256
     using type = wrapper::klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024
