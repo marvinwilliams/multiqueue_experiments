@@ -26,8 +26,8 @@ class capq {
         return Handle{};
     }
 
-    void push(Handle, std::pair<uint32_t, uint32_t> const& value);
-    bool extract_top(Handle, std::pair<uint32_t, uint32_t>& retval);
+    void push(Handle, std::pair<unsigned long, unsigned long> const& value);
+    bool extract_top(Handle, std::pair<unsigned long, unsigned long>& retval);
 
     static std::string description() {
         std::stringstream ss;

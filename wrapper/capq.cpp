@@ -15,32 +15,31 @@ __thread ptst_t* ptst;
 namespace wrapper {
 
 struct capq_wrapper_type {
-    char pad1[64 - sizeof(CAPQ*)];
-    CAPQ* pq;
-    char pad2[64];
+  char pad1[64 - sizeof(CAPQ*)];
+  CAPQ* pq;
+  char pad2[64];
 };
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 capq<remove_min_relax, put_relax, catree_adapt>::capq(unsigned int) {
-    _init_gc_subsystem();
-    /* init_thread(1); */
-    pq_ = new capq_wrapper_type;
-    pq_->pq = capq_new();
+  _init_gc_subsystem();
+  /* init_thread(1); */
+  pq_ = new capq_wrapper_type;
+  pq_->pq = capq_new();
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-void capq<remove_min_relax, put_relax, catree_adapt>::push(Handle, std::pair<uint32_t, uint32_t> const& value) {
-    capq_put_param(pq_->pq, static_cast<unsigned long>(value.first), static_cast<unsigned long>(value.second),
-                   catree_adapt);
+void capq<remove_min_relax, put_relax, catree_adapt>::push(
+    Handle, std::pair<unsigned long, unsigned long> const& value) {
+  capq_put_param(pq_->pq, value.first, value.second, catree_adapt);
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-bool capq<remove_min_relax, put_relax, catree_adapt>::extract_top(Handle, std::pair<uint32_t, uint32_t>& retval) {
-    unsigned long key_write_back;
-    retval.second = static_cast<uint32_t>(
-        capq_remove_min_param(pq_->pq, &key_write_back, remove_min_relax, put_relax, catree_adapt));
-    retval.first = static_cast<uint32_t>(key_write_back);
-    return key_write_back != std::numeric_limits<unsigned long>::max();
+bool capq<remove_min_relax, put_relax, catree_adapt>::extract_top(
+    Handle, std::pair<unsigned long, unsigned long>& retval) {
+  retval.second = capq_remove_min_param(
+      pq_->pq, &retval.first, remove_min_relax, put_relax, catree_adapt);
+  return retval.first != std::numeric_limits<unsigned long>::max();
 }
 
 template class capq<true, true, true>;
