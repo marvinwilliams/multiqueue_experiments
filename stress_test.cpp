@@ -174,6 +174,9 @@ struct Task {
     std::size_t num_local_failed_deletions = 0;
 
 #ifdef PQ_SPRAYLIST
+    if (ctx.is_main()) {
+      std::clog << "init spraylist\n";
+    }
     pq.init_thread(ctx.get_num_threads());
 #endif
     std::seed_seq seq{thread_seeds[ctx.get_id()]};
