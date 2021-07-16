@@ -1,3 +1,11 @@
+#include "cxxopts.hpp"
+#include "multiqueue/configurations.hpp"
+#include "multiqueue/int_multiqueue.hpp"
+#include "system_config.hpp"
+#include "utils/inserting_strategy.hpp"
+#include "utils/thread_coordination.hpp"
+#include "utils/threading.hpp"
+
 #include <x86intrin.h>
 #include <array>
 #include <atomic>
@@ -14,14 +22,6 @@
 #include <type_traits>
 #include <utility>
 #include <vector>
-
-#include "multiqueue/int_multiqueue.hpp"
-#include "multiqueue/configurations.hpp"
-#include "system_config.hpp"
-#include "cxxopts.hpp"
-#include "utils/inserting_strategy.hpp"
-#include "utils/thread_coordination.hpp"
-#include "utils/threading.hpp"
 
 using key_type = unsigned long;
 using value_type = unsigned long;
@@ -151,16 +151,20 @@ template <unsigned int c>
 bool dispatch_k(unsigned int k, Settings const& settings) {
   switch (k) {
     case 1:
-      benchmark<multiqueue::int_multiqueue<key_type, value_type, MQConfiguration<c, 1>>>(settings);
+      benchmark<multiqueue::int_multiqueue<key_type, value_type,
+                                           MQConfiguration<c, 1>>>(settings);
       return true;
     case 4:
-      benchmark<multiqueue::int_multiqueue<key_type, value_type, MQConfiguration<c, 4>>>(settings);
+      benchmark<multiqueue::int_multiqueue<key_type, value_type,
+                                           MQConfiguration<c, 4>>>(settings);
       return true;
     case 8:
-      benchmark<multiqueue::int_multiqueue<key_type, value_type, MQConfiguration<c, 8>>>(settings);
+      benchmark<multiqueue::int_multiqueue<key_type, value_type,
+                                           MQConfiguration<c, 8>>>(settings);
       return true;
     case 16:
-      benchmark<multiqueue::int_multiqueue<key_type, value_type, MQConfiguration<c, 16>>>(settings);
+      benchmark<multiqueue::int_multiqueue<key_type, value_type,
+                                           MQConfiguration<c, 16>>>(settings);
       return true;
     default:
       std::cerr << "Invalid stickiness!\n";
@@ -168,7 +172,7 @@ bool dispatch_k(unsigned int k, Settings const& settings) {
   return false;
 }
 
-bool dispatch_task(unsigned int c, unsigned int k, Settings const& settings) {
+bool dispatch_c(unsigned int c, unsigned int k, Settings const& settings) {
   switch (c) {
     case 2:
       return dispatch_k<2>(k, settings);
@@ -177,7 +181,7 @@ bool dispatch_task(unsigned int c, unsigned int k, Settings const& settings) {
     case 8:
       return dispatch_k<8>(k, settings);
     case 16:
-      return dispatch_k<16>(k,settings);
+      return dispatch_k<16>(k, settings);
     default:
       std::cerr << "Invalid number of queues per thread!\n";
   }
@@ -337,7 +341,7 @@ int main(int argc, char* argv[]) {
   seq.generate(thread_seeds, thread_seeds + settings.num_threads);
   start_flag.store(false, std::memory_order_relaxed);
   std::atomic_thread_fence(std::memory_order_release);
-  bool success = dispatch_task(c, k, settings);
+  bool success = dispatch_c(c, k, settings);
   if (!success) {
     return 1;
   }

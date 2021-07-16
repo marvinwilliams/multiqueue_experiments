@@ -4,6 +4,9 @@ library(dplyr)
 library(reshape2)
 library(stringr)
 library(scales)
+library(grid)
+library(gridExtra)
+library(xtable)
 
 read_histogram <- function(file, name, threads, prefill, dist, sleep) {
   if (file.exists(file)) {
@@ -86,6 +89,7 @@ p_labeller <- function(variable, value) {
 
 plot_rank_histogram_theory_wrapped <- function(data, outdir) {
   names <- c("nobufferingmq_c_2_k_1_numa", "nobufferingmq_c_4_k_1_numa", "nobufferingmq_c_8_k_1_numa")
+  # names <- c("nbmq_c_2_k_1", "nbmq_c_4_k_1", "nbmq_c_8_k_1")
   plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0" & threads %in% c(8, 64))
   theory <- plot_data %>%
     mutate(cumulated_2 = (1 - 2 / (2 * threads))^(rank), cumulated_4 = (1 - 2 / (4 * threads))^(rank ), cumulated_8 = (1 - 2 / (8 * threads))^(rank))
@@ -103,8 +107,8 @@ plot_rank_histogram_theory_wrapped <- function(data, outdir) {
     guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
     facet_wrap(~threads, nrow = 1, labeller = p_labeller) + 
     theme_bw() +
-    theme(legend.position = "top", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_blank())
-    ggsave(plot, file = paste(outdir, "/rank_theory.pdf", sep = ""), width = 5.5, height = 3)
+    theme(legend.position = "top", panel.grid.major = element_blank(), panel.grid.minor = element_blank(), strip.background = element_blank(), axis.title=element_text(size=rel(0.8)))
+    ggsave(plot, file = paste(outdir, "/rank_theory.pdf", sep = ""), width = 6, height = 2.8)
 }
 
  plot_throughput_buffer_size_c_2 <- function(data, outdir) {
@@ -125,8 +129,8 @@ plot_rank_histogram_theory_wrapped <- function(data, outdir) {
      scale_shape_manual(values = c(2, 3, 4, 6, 7), labels = c("no buffering", "b = 4", "b = 8", "b = 16", "b = 64")) +
      guides(color = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
      theme_bw() +
-    theme(legend.position = c(0.25, 0.65), panel.grid.major.x = element_blank())
-     ggsave(plot, file = paste(outdir, "/throughput_buffer_size_c_2.pdf", sep = ""), width = 3.5, height = 2.7)
+    theme(legend.position = c(0.25, 0.65), panel.grid.major.x = element_blank(), axis.title=element_text(size=rel(1.1)), axis.text=element_text(size=rel(1.1)))
+     ggsave(plot, file = paste(outdir, "/throughput_buffer_size_c_2.pdf", sep = ""), width = 4, height = 3)
  }
 
 plot_throughput_buffer_size_c_4 <- function(data, outdir) {
@@ -147,8 +151,8 @@ plot_throughput_buffer_size_c_4 <- function(data, outdir) {
     scale_shape_manual(values = c(2, 3, 4, 6, 7), labels = c("no buffering", "b = 4", "b = 8", "b = 16", "b = 64")) +
     guides(color = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
     theme_bw() +
-    theme(legend.position = "none", panel.grid.major.x = element_blank())
-    ggsave(plot, file = paste(outdir, "/throughput_buffer_size_c_4.pdf", sep = ""), width = 3.5, height = 2.7)
+    theme(legend.position = "none", panel.grid.major.x = element_blank(), axis.title=element_text(size=rel(1.1)), axis.text=element_text(size=rel(1.1)))
+    ggsave(plot, file = paste(outdir, "/throughput_buffer_size_c_4.pdf", sep = ""), width = 4, height = 3)
 }
 
 plot_rank_buffer_size <- function(data, outdir) {
@@ -195,11 +199,15 @@ plot_delay_buffer_size <- function(data, outdir) {
 }
 
 table_by_c_and_stickiness <- function(data, outdir) {
-  rank_data <- data$rank %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_rank = weighted.mean(rank, frequency))
-  delay_data <- data$delay %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_delay = weighted.mean(rank, frequency))
+  # rank_data <- data$rank %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_rank = weighted.mean(rank, frequency))
+  # delay_data <- data$delay %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_delay = weighted.mean(rank, frequency))
+  # throughput_data <- data$throughput %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64)
+  rank_data <- data$rank %>% filter(str_detect(name, "nbmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_rank = weighted.mean(rank, frequency))
+  delay_data <- data$delay %>% filter(str_detect(name, "nbmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_delay = weighted.mean(rank, frequency))
+  # throughput_data <- data$throughput %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64)
   throughput_data <- data$throughput %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64)
-  table_data <- inner_join(throughput_data, rank_data)
-  table_data <- inner_join(table_data, delay_data)
+  # table_data <- inner_join(throughput_data, rank_data)
+  table_data <- inner_join(rank_data, delay_data)
 
   table_data$c <- as.factor(str_extract(table_data$name, "(?<=_c_)\\d+"))
   c_order <- paste(sort(unique(as.integer(levels(table_data$c)))))
@@ -209,7 +217,7 @@ table_by_c_and_stickiness <- function(data, outdir) {
   s_order <- paste(sort(unique(as.integer(levels(table_data$s)))))
   table_data$s <- factor(table_data$s, levels = s_order)
 
-  table_data <- table_data %>% select(c, s, mean, avg_rank, avg_delay);
+  # table_data <- table_data %>% select(c, s, mean, avg_rank, avg_delay);
   table <- xtable(table_data[with(table_data, order(c, s)),], digits = 1)
 
   print(table, file = paste(outdir, "/c_and_stickiness.tex", sep=''), include.rownames = F)
@@ -226,7 +234,7 @@ plot_throughput_merging <- function(data, outdir) {
              "intmergingmq_c_8_k_8_ns_16_numa",
              "intmergingmq_c_16_k_8_ns_16_numa",
              "intmergingmq_c_16_k_64_ns_16_numa")
-  labels <- c("8-ary heap, (2, 1)", "8-ary heap, (4, 4)", "8-ary heap, (8, 8)", "8-ary heap, (16, 8)",  "8-ary heap, (16, 64)", "merging heap, (2, 1)", "merging heap, (4, 1)", "merging heap, (8, 8)", "merging heap, (16, 8)",  "merging heap, (16, 64)")
+  labels <- c("8-ary, (2, 1)", "8-ary, (4, 4)", "8-ary, (8, 8)", "8-ary, (16, 8)",  "8-ary, (16, 64)", "merging, (2, 1)", "merging, (4, 1)", "merging, (8, 8)", "merging, (16, 8)",  "merging, (16, 64)")
   # names <- c("fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_8_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_16_k_16_ibs_16_dbs_16_numa", "mergingmq_c_4_k_1_ns_128_numa", "mergingmq_c_4_k_8_ns_128_numa", "mergingmq_c_8_k_8_ns_128_numa", "mergingmq_c_16_k_16_ns_128_numa")
   plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform")
   plot_data$name <- factor(plot_data$name, levels = names)
@@ -244,7 +252,7 @@ plot_throughput_merging <- function(data, outdir) {
     scale_shape_manual(breaks = names, values = 1:10, labels = labels) +
     guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
     theme_bw() +
-    theme(panel.grid.major.x = element_blank())
+    theme(panel.grid.major.x = element_blank(), axis.title=element_text(size=rel(1)), axis.text=element_text(size=rel(1.1)), legend.text=element_text(size=rel(1.1)))
     ggsave(plot, file = paste(outdir, "/throughput_merging.pdf", sep = ""), width = 6, height = 4)
 }
 
@@ -283,6 +291,7 @@ plot_rank_merging <- function(data, outdir) {
 
 plot_rank_comparison <- function(data, outdir) {
   names <- c("intmq_c_2_k_1_ibs_16_dbs_16_numa", "intmq_c_4_k_1_ibs_16_dbs_16_numa",  "intmq_c_4_k_4_ibs_16_dbs_16_numa",   "intmq_c_8_k_8_ibs_16_dbs_16_numa", "wrapper_linden", "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
+  # names <- c("nbmq_c_2_k_1", "nbmq_c_4_k_1",  "nbmq_c_4_k_4",   "nbmq_c_8_k_8", "wrapper_linden", "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
   labels <- c("MultiQueue (2, 1)", "MultiQueue (4, 1)",   "MultiQueue (4, 4)",    "MultiQueue (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
   # names <- c("fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_8_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_16_k_16_ibs_16_dbs_16_numa", "mergingmq_c_4_k_1_ns_128_numa", "mergingmq_c_4_k_8_ns_128_numa", "mergingmq_c_8_k_8_ns_128_numa", "mergingmq_c_16_k_16_ns_128_numa")
   plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
@@ -298,7 +307,7 @@ plot_rank_comparison <- function(data, outdir) {
         scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 1, 1, 1, 2, 1), labels = labels) +
         guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
         theme_bw() +
-        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "none")
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "none", axis.text=element_text(size=rel(1)), axis.title=element_text(size=rel(1.2)))
       ggsave(plot, file = paste(outdir, "/", "rank_compare_", .$threads[1], ".pdf", sep = ""), width = 4, height = 2.5)
       .
     })
@@ -311,7 +320,8 @@ plot_delay_comparison <- function(data, outdir) {
              "intmq_c_8_k_8_ibs_16_dbs_16_numa", "wrapper_linden",
              "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024",
              "wrapper_capq")
-  labels <- c("MultiQueue (2, 1)", "MultiQueue (4, 1)",   "MultiQueue (4, 4)", "MultiQueue (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
+  # names <- c("nbmq_c_2_k_1", "nbmq_c_4_k_1",  "nbmq_c_4_k_4",   "nbmq_c_8_k_8", "wrapper_linden", "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
+  labels <- c("MQ (2, 1)", "MQ (4, 1)", "MQ (4, 4)", "MQ (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
   # names <- c("fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_8_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_16_k_16_ibs_16_dbs_16_numa", "mergingmq_c_4_k_1_ns_128_numa", "mergingmq_c_4_k_8_ns_128_numa", "mergingmq_c_8_k_8_ns_128_numa", "mergingmq_c_16_k_16_ns_128_numa")
   plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
   plot_data %>%
@@ -326,15 +336,15 @@ plot_delay_comparison <- function(data, outdir) {
         scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 1, 1, 1, 2, 1), labels = labels) +
         guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
         theme_bw() +
-        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.y = element_blank(), axis.text.y=element_blank(), axis.ticks.y = element_blank())
-      ggsave(plot, file = paste(outdir, "/", "delay_compare_", .$threads[1], ".pdf", sep = ""), width = 5, height = 2.5)
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.y = element_blank(), axis.text.y=element_blank(), axis.ticks.y = element_blank(),axis.title=element_text(size=rel(1.1)), axis.text=element_text(size=rel(1.1)) , legend.text=element_text(size=rel(1.2)))
+      ggsave(plot, file = paste(outdir, "/", "delay_compare_", .$threads[1], ".pdf", sep = ""), width = 4.5, height = 2.5)
       .
     })
 }
 
 plot_throughput_comparison <- function(data, outdir) {
   names <- c("intmq_c_2_k_1_ibs_16_dbs_16_numa", "intmq_c_4_k_1_ibs_16_dbs_16_numa",  "intmq_c_4_k_4_ibs_16_dbs_16_numa", "intmq_c_8_k_8_ibs_16_dbs_16_numa", "wrapper_linden", "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
-  labels <- c("MultiQueue (2, 1)", "MultiQueue (4, 1)",   "MultiQueue (4, 4)", "MultiQueue (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
+  labels <- c("MQ (2, 1)", "MQ (4, 1)",   "MQ (4, 4)", "MQ (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
   # names <- c("fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_8_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_16_k_16_ibs_16_dbs_16_numa", "mergingmq_c_4_k_1_ns_128_numa", "mergingmq_c_4_k_8_ns_128_numa", "mergingmq_c_8_k_8_ns_128_numa", "mergingmq_c_16_k_16_ns_128_numa")
   plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform")
   plot_data$name <- factor(plot_data$name, levels = names)
@@ -352,9 +362,9 @@ plot_throughput_comparison <- function(data, outdir) {
     scale_shape_manual(breaks = names, values = 1:9, labels = labels) +
     guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
     theme_bw() +
-    theme(legend.position = "none", panel.grid.major.x = element_blank())
+    theme(legend.position = "none", panel.grid.major.x = element_blank(), axis.text=element_text(size=rel(1.2)), axis.title=element_text(size=rel(1.2)), legend.text=element_text(size=rel(1.1)))
     # theme(panel.grid.major.x = element_blank(), legend.position = "none")
-    ggsave(plot, file = paste(outdir, "/throughput_compare.pdf", sep = ""), width = 5, height = 4)
+    ggsave(plot, file = paste(outdir, "/throughput_compare_icx.pdf", sep = ""), width = 4.5, height = 3.6)
 }
 
 prefill_labeller <- function(variable, value) {
@@ -457,34 +467,36 @@ plot_delay_comparison_by_dist <- function(data, outdir) {
 
 plot_sssp <- function(data, outdir, graph_name) {
   names <- c("intmq_c_2_k_1_ibs_16_dbs_16_numa", "intmq_c_4_k_1_ibs_16_dbs_16_numa",  "intmq_c_4_k_4_ibs_16_dbs_16_numa",   "intmq_c_8_k_8_ibs_16_dbs_16_numa", "wrapper_linden", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
-  labels <- c("MultiQueue (2, 1)", "MultiQueue (4, 1)",   "MultiQueue (4, 4)",    "MultiQueue (8, 8)", "linden", "klsm256", "klsm1024", "capq")
+  labels <- c("MQ (2, 1)", "MQ (4, 1)",   "MQ (4, 4)",    "MQ (8, 8)", "linden", "klsm256", "klsm1024", "capq")
   plot_data <- data %>% filter(name %in% names & graph == graph_name)
   plot <- ggplot(plot_data, aes(x = threads, y = time, color = name, linetype = name, shape = name)) +
     geom_line() +
     geom_point() +
-    labs(x = "p", y = bquote("Time [ms]")) +
+    labs(x = "p", y = bquote("Time (ms)")) +
     scale_x_continuous("p", labels = c("1", "2", "4", "8", "16", "32", "64", "64 ht"), breaks = c(1, 2, 4, 8, 16, 32, 64, 100) , minor_breaks = NULL, limits=c(1, 100), oob = squish, trans="log2") +
     scale_y_continuous(limits=c(0, NA)) +
     scale_color_manual(breaks = names, values = c(3, 3, 3, 3, 2, 6, 6, 7), labels = labels) +
-    scale_linetype_manual(breaks = names, values = c(1, 1, 1, 1, 1, 1, 1, 1), labels = labels) +
-    scale_shape_manual(breaks = names, values = c(1, 2, 3, 4, 8, 7, 6, 5), labels = labels) +
+    scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 1, 1, 2, 1), labels = labels) +
+    scale_shape_manual(breaks = names, values = c(1, 2, 3, 4, 5, 7, 8, 9), labels = labels) +
     guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
     theme_bw() +
-    theme(panel.grid.major.x = element_blank(), legend.position = "none")
-  ggsave(plot, file = paste(outdir, "/sssp_time_", graph_name, ".pdf", sep = ""), width = 5, height = 3)
+    theme(panel.grid.major.x = element_blank(), legend.position = "none", axis.text=element_text(size=rel(1.2)), axis.title=element_text(size=rel(1.2)), legend.text=element_text(size=rel(1.1)))
+  ggsave(plot, file = paste(outdir, "/sssp_time_", graph_name, ".pdf", sep = ""), width = 4.3, height = 3)
   plot <- ggplot(plot_data, aes(x = threads, y = relaxed / 1000000, color = name, linetype = name, shape = name)) +
     geom_line() +
     geom_point() +
-    labs(x = "p", y = bquote("Relaxed nodes")) +
+    labs(x = "p", y = bquote("Relaxed nodes /" ~ 10^6)) +
     scale_x_continuous("p", labels = c("1", "2", "4", "8", "16", "32", "64", "64 ht"), breaks = c(1, 2, 4, 8, 16, 32, 64, 100) , minor_breaks = NULL, limits=c(1, 100), oob = squish, trans="log2") +
     # scale_y_continuous(labels = c("3.8m", "4.0m", "4.2m", "4.4m", "4.6m"), breaks = c(3.8, 4, 4.2, 4.4, 4.6)) +
     scale_color_manual(breaks = names, values = c(3, 3, 3, 3, 2, 6, 6, 7), labels = labels) +
-    scale_linetype_manual(breaks = names, values = c(1, 1, 1, 1, 1, 1, 1, 1), labels = labels) +
-    scale_shape_manual(breaks = names, values = 1:8, labels = labels) +
+    scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 1, 1, 2, 1), labels = labels) +
+    scale_shape_manual(breaks = names, values = c(1, 2, 3, 4, 5, 7, 8, 9), labels = labels) +
     guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
     theme_bw() +
-    theme(legend.position = "right", panel.grid.major.x = element_blank())
-  ggsave(plot, file =paste(outdir, "/sssp_nodes_", graph_name, ".pdf", sep = ""), width = 6, height = 3)
+    theme(legend.position = c(0.2, 0.55), panel.grid.major.x = element_blank(), axis.text=element_text(size=rel(1.2)), axis.title=element_text(size=rel(1.2)), legend.text=element_text(size=rel(1.1)))
+  ggsave(plot, file =paste(outdir, "/sssp_nodes_", graph_name, ".pdf", sep = ""), width = 4.3, height = 3)
+  # final <- grid.arrange(arrangeGrob(plot, ncol = 1, nrow = 1), arrangeGrob(plot2, ncol = 2, nrow = 1))
+  # ggsave(final, file =paste(outdir, "/sssp_", graph_name, ".pdf", sep = ""), width = 4.3, height = 3)
 }
 
 plot_throughput_icx <- function(data, outdir) {
@@ -554,6 +566,74 @@ plot_rank_with_old_theory <- function(data, outdir) {
     })
 }
 
+plot_throughput_asmq <- function(data, outdir) {
+  names <- c("mq_c_4_k_1_ibs_16_dbs_16", "mq_c_4_k_4_ibs_16_dbs_16", "mq_c_8_k_1_ibs_16_dbs_16",  "mq_c_8_k_8_ibs_16_dbs_16", "asmq_c_3_k_4_ibs_16_dbs_16", "asmq_c_3_k_16_ibs_16_dbs_16", "asmq_c_3_k_64_ibs_16_dbs_16")
+  labels = c("c = 4, k = 1", "c = 4, k = 4", "c = 8, k = 1", "c = 8, k = 8", "perm k = 4", "perm k = 16", "perm k = 64")
+  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform")
+  plot_data$name <- factor(plot_data$name, levels = names)
+  plot <- ggplot(plot_data, aes(x = threads, y = mean, color = name, shape = name, linetype = name)) +
+    geom_line() +
+    geom_point() +
+    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
+      width = .2,
+      position = position_dodge(0.05)
+    ) +
+    labs(x = "p", y = bquote(10^6 ~ "Ops/s")) +
+    scale_x_continuous("p", labels = c("1", "2", "4", "8", "16", "32", "64", "64 ht"), breaks = c(1, 2, 4, 8, 16, 32, 64, 100) , minor_breaks = NULL, limits=c(1, 100), oob = squish, trans="log2") +
+     # scale_y_continuous(labels = c("0", "100", "200", "300"), breaks = c(0, 100, 200, 300), limits=c(0, 330)) +
+    scale_color_manual(breaks = names, values = c(2, 3, 4, 6, 7, 8, 9), labels = labels) +
+    scale_shape_manual(breaks = names, values = rep(1:7), labels = labels) +
+    scale_linetype_manual(breaks = names, values = c(1, 1, 1, 1, 2, 2, 2), labels = labels) +
+    guides(color = guide_legend(title = NULL), shape = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
+    theme_bw() +
+    theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = c(0.15, 0.7))
+    ggsave(plot, file = paste(outdir, "/throughput_asmq.pdf", sep = ""), width = 5, height = 4)
+}
+
+plot_rank_asmq <- function(data, outdir) {
+  names <- c("mq_c_4_k_1_ibs_16_dbs_16", "mq_c_4_k_4_ibs_16_dbs_16", "mq_c_8_k_1_ibs_16_dbs_16",  "mq_c_8_k_8_ibs_16_dbs_16", "asmq_c_3_k_4_ibs_16_dbs_16", "asmq_c_3_k_16_ibs_16_dbs_16", "asmq_c_3_k_64_ibs_16_dbs_16")
+  labels = c("c = 4, k = 1", "c = 4, k = 4", "c = 8, k = 1", "c = 8, k = 8", "perm k = 4", "perm k = 16", "perm k = 64")
+  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
+  plot_data %>%
+    group_by(threads) %>%
+    do({
+      plot <- ggplot(., aes(x = rank + 1, y = cumulated, color = name, linetype = name)) +
+        geom_line() +
+        scale_x_log10() +
+        coord_cartesian(xlim = c(1, 20000)) +
+        labs(x = "Rank", y = "Cumulative Frequency") +
+        scale_color_manual(breaks = names, values = c(2, 3, 4, 6, 7, 8, 9), labels = labels) +
+        scale_linetype_manual(breaks = names, values = c(1, 1, 1, 1, 2, 2, 2), labels = labels) +
+        guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
+        theme_bw() +
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = c(0.85, 0.7))
+      ggsave(plot, file = paste(outdir, "/", "rank_asmq_", .$threads[1], ".pdf", sep = ""), width = 6, height = 5)
+      .
+    })
+}
+
+plot_delay_asmq <- function(data, outdir) {
+  names <- c("mq_c_4_k_1_ibs_16_dbs_16", "mq_c_4_k_4_ibs_16_dbs_16", "mq_c_8_k_1_ibs_16_dbs_16",  "mq_c_8_k_8_ibs_16_dbs_16", "asmq_c_3_k_4_ibs_16_dbs_16", "asmq_c_3_k_16_ibs_16_dbs_16", "asmq_c_3_k_64_ibs_16_dbs_16")
+  labels = c("c = 4, k = 1", "c = 4, k = 4", "c = 8, k = 1", "c = 8, k = 8", "perm k = 4", "perm k = 16", "perm k = 64")
+  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
+  plot_data %>%
+    group_by(threads) %>%
+    do({
+      plot <- ggplot(., aes(x = rank + 1, y = cumulated, color = name, linetype = name)) +
+        geom_line() +
+        scale_x_log10() +
+        coord_cartesian(xlim = c(1, 20000)) +
+        labs(x = "Delay", y = "Cumulative Frequency") +
+        scale_color_manual(breaks = names, values = c(2, 3, 4, 6, 7, 8, 9), labels = labels) +
+        scale_linetype_manual(breaks = names, values = c(1, 1, 1, 1, 2, 2, 2), labels = labels) +
+        guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
+        theme_bw() +
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = c(0.85, 0.7))
+      ggsave(plot, file = paste(outdir, "/", "delay_asmq_", .$threads[1], ".pdf", sep = ""), width = 6, height = 5)
+      .
+    })
+}
+
 read_scenario <- function(scenario) {
   scenario_data <- list()
   rank_list <- list()
@@ -603,6 +683,8 @@ read_scenario <- function(scenario) {
 
         hist_index <- hist_index + 1
       }
+      rank_data <- read_histogram(paste(pq, "/rank_", j, "_dist_restrict", ".txt", sep = ""), name, as.integer(j), "1000000", dist, "0")
+      rank_list[[hist_index]] <- rank_data
 
       for (sleep in c("100000")) {
         rank_data <- read_histogram(paste(pq, "/rank_", j, "_s_", sleep, ".txt", sep = ""), name, as.integer(j), "1000000", "uniform", sleep)

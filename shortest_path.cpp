@@ -23,7 +23,7 @@
 #include <vector>
 
 using PriorityQueue =
-    typename util::PriorityQueueFactory<std::uint32_t, std::uint32_t>::type;
+    typename util::PriorityQueueFactory<unsigned long, unsigned long>::type;
 
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
@@ -38,15 +38,15 @@ struct Settings {
 
 struct Graph {
   struct Edge {
-    std::uint32_t target;
-    std::uint32_t weight;
+    unsigned long target;
+    unsigned long weight;
   };
-  std::vector<std::uint32_t> nodes;
+  std::vector<unsigned long> nodes;
   std::vector<Edge> edges;
 };
 
 struct Distance {
-  alignas(2 * L1_CACHE_LINESIZE) std::atomic_uint32_t distance;
+  alignas(2 * L1_CACHE_LINESIZE) std::atomic_ulong distance;
 };
 
 struct IdleState {
@@ -98,11 +98,11 @@ struct Task {
       _mm_pause();
     }
     std::atomic_thread_fence(std::memory_order_acquire);
-    std::pair<std::uint32_t, std::uint32_t> retval;
+    std::pair<unsigned long, unsigned long> retval;
     while (true) {
       if (pq.extract_top(handle, retval)) {
       found:
-        std::uint32_t const current_distance =
+        unsigned long const current_distance =
             distances[retval.second].distance.load(std::memory_order_relaxed);
         if (retval.first > current_distance) {
           continue;
@@ -111,10 +111,10 @@ struct Task {
         bool pushed = false;
         for (std::size_t i = graph.nodes[retval.second];
              i < graph.nodes[retval.second + 1]; ++i) {
-          std::uint32_t target = graph.edges[i].target;
-          std::uint32_t const new_target_distance =
+          unsigned long target = graph.edges[i].target;
+          unsigned long const new_target_distance =
               current_distance + graph.edges[i].weight;
-          std::uint32_t old_target_distance =
+          unsigned long old_target_distance =
               distances[target].distance.load(std::memory_order_relaxed);
           while (old_target_distance > new_target_distance &&
                  !distances[target].distance.compare_exchange_weak(
@@ -192,9 +192,9 @@ static Graph read_graph(Settings const& settings) {
   }
   Graph graph;
   std::vector<std::vector<Graph::Edge>> edges_per_node;
-  std::uint32_t source;
-  std::uint32_t target;
-  std::uint32_t weight;
+  unsigned long source;
+  unsigned long target;
+  unsigned long weight;
   std::string problem;
   std::string first;
   while (graph_stream >> first) {
@@ -217,21 +217,21 @@ static Graph read_graph(Settings const& settings) {
   }
   for (std::size_t i = 0; i < edges_per_node.size(); ++i) {
     graph.nodes[i + 1] =
-        graph.nodes[i] + static_cast<std::uint32_t>(edges_per_node[i].size());
+        graph.nodes[i] + static_cast<unsigned long>(edges_per_node[i].size());
     std::copy(edges_per_node[i].begin(), edges_per_node[i].end(),
               std::back_inserter(graph.edges));
   }
   return graph;
 }
 
-static std::vector<std::uint32_t> read_solution(Settings const& settings) {
+static std::vector<unsigned long> read_solution(Settings const& settings) {
   std::ifstream solution_stream{settings.solution_file};
   if (!solution_stream) {
     throw std::runtime_error{"Could not open solution file"};
   }
-  std::vector<std::uint32_t> solution;
-  std::uint32_t node;
-  std::uint32_t distance;
+  std::vector<unsigned long> solution;
+  unsigned long node;
+  unsigned long distance;
   while (solution_stream >> node >> distance) {
     solution.push_back(distance);
   }
@@ -278,7 +278,7 @@ int main(int argc, char* argv[]) {
 
   std::clog << "Using priority queue: " << PriorityQueue::description() << '\n';
   Graph graph;
-  std::vector<std::uint32_t> solution;
+  std::vector<unsigned long> solution;
   std::clog << "Reading graph..." << std::flush;
   try {
     graph = read_graph(settings);
@@ -297,7 +297,7 @@ int main(int argc, char* argv[]) {
   for (unsigned int threads = 1; threads <= settings.num_threads;
        threads = 2 * threads) {
     for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
-      distances[i].distance = std::numeric_limits<std::uint32_t>::max() - 1;
+      distances[i].distance = std::numeric_limits<unsigned long>::max() - 1;
     }
     idle_counter = 0;
     idle_state = new IdleState[threads]();

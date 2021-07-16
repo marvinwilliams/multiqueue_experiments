@@ -26,8 +26,8 @@
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
 
-using weight_type = std::uint32_t;
-using value_type = std::uint32_t;
+using weight_type = unsigned long;
+using value_type = unsigned long;
 
 using PriorityQueue =
     typename util::PriorityQueueFactory<value_type, weight_type>::type;
@@ -126,7 +126,8 @@ struct Task {
     auto handle = pq.get_handle(ctx.get_id());
 
     if (ctx.is_main()) {
-      pq.push(handle, {std::numeric_limits<value_type>::max(), to_node(0, 0)});
+      // Some pqs need higher values as sentinels
+      pq.push(handle, {std::numeric_limits<value_type>::max() - 3, to_node(0, 0)});
     }
 
     std::size_t num_local_processed_nodes = 0;
@@ -146,7 +147,7 @@ struct Task {
         auto const index = get_element_index(retval.second);
         auto const used_capacity = get_weight(retval.second);
         auto const value =
-            std::numeric_limits<value_type>::max() - retval.first;
+            std::numeric_limits<value_type>::max() - retval.first - 3;
         if (value + get_upper_bound(instance, index, used_capacity) <=
             lower_bound.load(std::memory_order_relaxed)) {
           continue;
@@ -169,7 +170,7 @@ struct Task {
                       get_upper_bound(instance, index + 1, capacity_with_next) >
                   lower_bound.load(std::memory_order_relaxed)) {
             pq.push(handle,
-                    {std::numeric_limits<value_type>::max() - value_with_next,
+                    {std::numeric_limits<value_type>::max() - value_with_next - 3,
                      to_node(index + 1, capacity_with_next)});
             inserted = true;
           }
@@ -177,7 +178,7 @@ struct Task {
         if (index + 1 < instance.items.size() &&
             value + get_upper_bound(instance, index + 1, used_capacity) >
                 lower_bound.load(std::memory_order_relaxed)) {
-          pq.push(handle, {std::numeric_limits<value_type>::max() - value,
+          pq.push(handle, {std::numeric_limits<value_type>::max() - value - 3,
                            to_node(index + 1, used_capacity)});
           inserted = true;
         }
