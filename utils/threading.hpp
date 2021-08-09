@@ -45,8 +45,7 @@ class barrier {
     void wait() {
         int rc;
         rc = pthread_barrier_wait(&b_);
-        if (rc == PTHREAD_BARRIER_SERIAL_THREAD) {
-        } else if (rc != 0) {
+        if (rc != PTHREAD_BARRIER_SERIAL_THREAD && rc != 0) {
             throw std::system_error{rc, std::system_category(), "Failed to wait for barrier: "};
         }
     }

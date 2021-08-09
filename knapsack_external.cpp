@@ -25,6 +25,11 @@
 #include <utility>
 #include <vector>
 
+#ifdef KNAPSACK_DEBUG_PRINT
+#include <mutex>
+std::mutex write_mutex;
+#endif
+
 using namespace std::chrono_literals;
 using clock_type = std::chrono::steady_clock;
 
@@ -36,17 +41,18 @@ static_assert(sizeof(pointer_type) >= sizeof(std::uintptr_t),
               "Pointer must fit into value type of pq");
 
 // some pqs need sentinels
-static constexpr value_type max_value =
-    std::numeric_limits<value_type>::max() - 3;
+constexpr value_type max_value = std::numeric_limits<value_type>::max() - 3;
 
 using PriorityQueue =
     typename util::PriorityQueueFactory<value_type, pointer_type>::type;
 
-static constexpr auto retries = 400;
+// Number of retries before idle state is entered
+constexpr auto retries = 400;
 
 struct Settings {
   std::filesystem::path instance_file;
   unsigned int num_threads = 4;
+  bool verbose = false;
 };
 
 struct KnapsackInstance {
@@ -56,67 +62,204 @@ struct KnapsackInstance {
   };
   std::vector<Item> items;
   weight_type capacity;
+  weight_type min_weight;
+  std::vector<std::vector<KnapsackInstance::Item>> prefix_sums;
 };
 
-std::vector<std::vector<KnapsackInstance::Item>> prefix_sums;
-
 struct Node {
-  unsigned int index;
-  weight_type weight;
+  std::size_t index;
+  weight_type free_capacity;
   value_type value;
 };
 
-static value_type get_upper_bound(KnapsackInstance const& instance,
-                                  Node const& node) {
-  assert(node.index < instance.items.size());
-  auto const free_capacity = instance.capacity - node.weight;
-  auto last_to_include = std::lower_bound(
-      prefix_sums[node.index].begin(), prefix_sums[node.index].end(),
-      free_capacity, [&](auto const& prefix, auto const& capacity) {
-        return prefix.weight < capacity;
-      });
-  if (last_to_include == prefix_sums[node.index].end()) {
-    return node.value + prefix_sums[node.index].back().value;
-  }
-  if (last_to_include->weight == free_capacity) {
-    return node.value + last_to_include->value;
-  }
-  auto const excess = last_to_include->weight - free_capacity;
-  auto const& excess_item =
-      instance.items[node.index +
-                     (last_to_include - prefix_sums[node.index].begin())];
-  assert(excess < excess_item.weight);
-  return node.value + last_to_include->value -
-         static_cast<value_type>(
-             (static_cast<double>(excess) / excess_item.weight) *
-             excess_item.value);
-}
-
-alignas(2 * L1_CACHE_LINESIZE) static std::atomic<value_type> best_value;
-
-static std::atomic_size_t num_pushed_nodes = 0;
-static std::atomic_size_t num_ignored_nodes = 0;
-static std::atomic_size_t num_extracted_nodes = 0;
-static std::atomic_size_t num_failed_extractions = 0;
-static std::atomic_size_t num_allocated_nodes = 0;
-static std::atomic_size_t num_freed_nodes = 0;
-static std::atomic_size_t num_processed_nodes = 0;
-static std::size_t* idle_count;
-
-struct IdleState {
-  alignas(2 * L1_CACHE_LINESIZE) std::atomic_uint state;
+struct StatCounters {
+  std::size_t pushed_nodes = 0;
+  std::size_t ignored_nodes = 0;
+  std::size_t extracted_nodes = 0;
+  std::size_t failed_extractions = 0;
+  std::size_t allocated_nodes = 0;
+  std::size_t freed_nodes = 0;
+  std::size_t processed_nodes = 0;
 };
 
-alignas(2 * L1_CACHE_LINESIZE) static std::atomic_size_t idle_counter = 0;
-static IdleState* idle_state;
+StatCounters& operator+=(StatCounters& lhs, StatCounters const& rhs) {
+  lhs.pushed_nodes += rhs.pushed_nodes;
+  lhs.ignored_nodes += rhs.ignored_nodes;
+  lhs.extracted_nodes += rhs.extracted_nodes;
+  lhs.failed_extractions += rhs.failed_extractions;
+  lhs.allocated_nodes += rhs.allocated_nodes;
+  lhs.freed_nodes += rhs.freed_nodes;
+  lhs.processed_nodes += rhs.processed_nodes;
+  return lhs;
+}
 
-std::atomic_bool start_flag;
+StatCounters operator+(StatCounters lhs, StatCounters const& rhs) {
+  lhs += rhs;
+  return lhs;
+}
 
-static inline bool idle(unsigned int id, unsigned int num_threads) {
-  idle_state[id].state.store(2, std::memory_order_relaxed);
+// The best known solution value
+alignas(2 * L1_CACHE_LINESIZE) std::atomic<value_type> best_value;
+
+// Each thread has a state, which is either working (0), check_idle (1) or idle
+// (2)
+struct alignas(2 * L1_CACHE_LINESIZE) IdleState {
+  std::atomic_uint state;
+};
+IdleState* idle_state;
+
+alignas(2 * L1_CACHE_LINESIZE) std::atomic_size_t idle_counter = 0;
+
+std::atomic_bool start_flag = false;
+
+value_type get_upper_bound(KnapsackInstance const& instance, std::size_t index,
+                           weight_type capacity) {
+  assert(index < instance.items.size());
+  auto it = std::lower_bound(instance.prefix_sums[index].begin(),
+                             instance.prefix_sums[index].end(), capacity,
+                             [&](auto const& sum, auto total_weight) {
+                               return sum.weight < total_weight;
+                             });
+  if (it != instance.prefix_sums[index].end()) {
+    // Imprecise but faster than fractional items
+    return it->value;
+  }
+  return instance.prefix_sums[index].back();
+}
+
+// Returns true if new items were added by this node
+bool process_node(PriorityQueue& pq, KnapsackInstance& instance,
+                  std::pair<value_type, pointer_type> const& pq_item,
+                  StatCounters& counters
+#ifdef KNAPSACK_DEBUG_PRINT
+                  ,
+                  unsigned int id
+#endif
+) {
+  ++counters.extracted_nodes;
+  auto node_ptr = reinterpret_cast<Node*>(pq_item.second);
+  auto current_best_value = best_value.load(std::memory_order_relaxed);
+#ifdef KNAPSACK_DEBUG_PRINT
+  if (verbose) {
+    auto l = std::scoped_lock{write_mutex};
+    std::clog << '[' << std::setw(3) << id
+              << "] Current best value:  " << current_best_value << '\n';
+    std::clog << '[' << std::setw(3) << id << "] Extracting node ("
+              << node_ptr->index << ", " << node_ptr->weight << ", "
+              << node_ptr->value << ") with upper bound "
+              << max_value - pq_item.first << '\n';
+  }
+#endif
+  if (max_value - pq_item.first <= current_best_value) {
+    // The upper bound of this node is worse than the currently best value
+    ++num_local_ignored_nodes;
+#ifdef KNAPSACK_DEBUG_PRINT
+    if (verbose) {
+      auto l = std::scoped_lock{write_mutex};
+      std::clog << '[' << std::setw(3) << id << "] Skipping node\n";
+    }
+#endif
+    alloc_traits::destroy(alloc, node_ptr);
+    alloc_traits::deallocate(alloc, node_ptr, 1);
+    ++num_local_freed_nodes;
+    return false;
+  }
+  ++counters.processed_nodes;
+  if (node.index + 1 < instance.items) {
+    // We only generate new nodes if the next item is not the last
+    auto node = *node_ptr;
+    if (instance.items[node.index].weight <= node.free_capacity) {
+      ++node_ptr->index;
+      node_ptr->free_capacity -= instance.items[node.index].weight;
+      node_ptr->value += instance.items[node.index].value;
+#ifdef KNAPSACK_DEBUG_PRINT
+      if (verbose) {
+        auto l = std::scoped_lock{write_mutex};
+        std::clog << '[' << std::setw(3) << id
+                  << "] Pushing node with next item (" << node_ptr->index
+                  << ", " << node_ptr->weight << ", " << node_ptr->value
+                  << ") and upper bound " << max_value - pq_item.first << '\n';
+      }
+#endif
+      pq.push(handle,
+              {pq_item.first, reinterpret_cast<pointer_type>(node_ptr)});
+      node_ptr = nullptr;
+      ++num_local_pushed_nodes;
+    }
+    ++node.index;
+    auto const ub_no_next =
+        node.value + get_upper_bound(instance, node.index, node.free_capacity);
+#ifdef KNAPSACK_DEBUG_PRINT
+    if (verbose) {
+      auto l = std::scoped_lock{write_mutex};
+      std::clog << '[' << std::setw(3) << id << "] Node without next item ("
+                << node_ptr->index << ", " << node_ptr->weight << ", "
+                << node_ptr->value << ") has upper bound " << ub_no_next
+                << '\n';
+    }
+#endif
+    if (ub_no_next > current_best_value) {
+      if (node_ptr == nullptr) {
+        node_ptr = alloc_traits::allocate(alloc, 1);
+        alloc_traits::construct(alloc, node_ptr, node);
+        ++num_local_allocated_nodes;
+      } else {
+        ++node_ptr->index;
+      }
+#ifdef KNAPSACK_DEBUG_PRINT
+      if (verbose) {
+        auto l = std::scoped_lock{write_mutex};
+        std::clog << '[' << std::setw(3) << id
+                  << "] Pushing node without next item" << '\n';
+      }
+#endif
+      pq.push(handle, {max_value - ub_no_next,
+                       reinterpret_cast<pointer_type>(node_ptr)});
+      node_ptr = nullptr;
+      ++num_local_pushed_nodes;
+    }
+    if (node_ptr == nullptr) {
+      return true;
+    }
+    alloc_traits::destroy(alloc, node_ptr);
+    alloc_traits::deallocate(alloc, node_ptr, 1);
+    ++num_local_freed_nodes;
+    return false;
+  }
+
+  // The next item is the last
+  auto const final_value =
+      node_ptr->value +
+      (instance.items[node_ptr->index].weight <= node_ptr->free_capacity
+           ? instance.items[node_ptr->index].value
+           : 0);
+#ifdef KNAPSACK_DEBUG_PRINT
+  if (verbose) {
+    auto l = std::scoped_lock{write_mutex};
+    std::clog << '[' << std::setw(3) << id
+              << "] Node has only one item left, final value: " << final_value
+              << '\n';
+    if (final_value > current_best_value) {
+      std::clog << '[' << std::setw(3) << id << "] Updating best value\n";
+    }
+  }
+#endif
+  while (final_value > current_best_value &&
+         !best_value.compare_exchange_weak(current_best_value, final_value)) {
+  }
+  alloc_traits::destroy(alloc, node_ptr);
+  alloc_traits::deallocate(alloc, node_ptr, 1);
+  ++num_local_freed_nodes;
+  return false;
+}
+
+// Returns true if all work is done
+bool idle(thread_coordination::Context const& ctx) {
+  idle_state[ctx.get_id()].state.store(2, std::memory_order_relaxed);
   idle_counter.fetch_add(1, std::memory_order_release);
   while (true) {
-    if (idle_counter.load(std::memory_order_relaxed) == 2 * num_threads) {
+    if (idle_counter.load(std::memory_order_relaxed) ==
+        2 * ctx.get_num_threads()) {
       return true;
     }
     if (idle_state[id].state.load(std::memory_order_relaxed) == 0) {
@@ -128,7 +271,7 @@ static inline bool idle(unsigned int id, unsigned int num_threads) {
 
 struct Task {
   static void run(thread_coordination::Context ctx, PriorityQueue& pq,
-                  KnapsackInstance const& instance) {
+                  KnapsackInstance const& instance, bool verbose) {
 #ifdef PQ_SPRAYLIST
     pq.init_thread(ctx.get_num_threads());
 #endif
@@ -148,76 +291,38 @@ struct Task {
     std::size_t num_local_processed_nodes = 0;
 
     if (ctx.is_main()) {
-      Node* ptr = alloc_traits::allocate(alloc, 1);
-      alloc_traits::construct(alloc, ptr, Node{0, 0, 0});
+      Node* node_ptr = alloc_traits::allocate(alloc, 1);
+      alloc_traits::construct(alloc, node_ptr, Node{0, instance.capacity, 0});
       ++num_local_allocated_nodes;
-      // Some pqs need higher values as sentinels
-      pq.push(handle, {max_value - get_upper_bound(instance, *ptr),
-                       reinterpret_cast<pointer_type>(ptr)});
+      auto const ub = get_upper_bound(instance, *node_ptr);
+#ifdef KNAPSACK_DEBUG_PRINT
+      if (verbose) {
+        auto l = std::scoped_lock{write_mutex};
+        std::clog << '[' << std::setw(3) << ctx.get_id() << "] Pushing node ("
+                  << node_ptr->index << ", " << node_ptr->weight << ", "
+                  << node_ptr->value << ") with upper bound " << ub << '\n';
+      }
+#endif
+      pq.push(handle, {max_value - ub, reinterpret_cast<pointer_type>(ptr)});
       ++num_local_pushed_nodes;
     }
 
-    ctx.synchronize(stage++, [&ctx]() {
-      std::clog << "Calculating knapsack solution...\n" << std::flush;
-      ctx.notify_coordinator();
-    });
+    std::pair<value_type, pointer_type> retval;
+    ctx.synchronize(stage++, [&ctx]() { ctx.notify_coordinator(); });
     while (!start_flag.load(std::memory_order_relaxed)) {
       _mm_pause();
     }
     std::atomic_thread_fence(std::memory_order_acquire);
-    std::pair<value_type, pointer_type> retval;
+    unsigned int try_count = 0;
     while (true) {
       if (pq.extract_top(handle, retval)) {
-      extracted:
-        ++num_local_extracted_nodes;
-        auto node_ptr = reinterpret_cast<Node*>(retval.second);
-        auto current_node = *node_ptr;
-        auto current_best_value = best_value.load(std::memory_order_relaxed);
-        if (max_value - retval.first <= current_best_value) {
-          ++num_local_ignored_nodes;
-          alloc_traits::destroy(alloc, node_ptr);
-          alloc_traits::deallocate(alloc, node_ptr, 1);
-          ++num_local_freed_nodes;
-          continue;
-        }
-        ++num_local_processed_nodes;
-        if (current_node.index + 1 < instance.items.size()) {
-          if (current_node.weight + instance.items[current_node.index].weight <=
-              instance.capacity) {
-            ++node_ptr->index;
-            node_ptr->weight += instance.items[current_node.index].weight;
-            node_ptr->value += instance.items[current_node.index].value;
-            pq.push(handle, retval);
-            node_ptr = nullptr;
-            ++num_local_pushed_nodes;
-          }
-          ++current_node.index;
-          auto const upper_bound_without_next =
-              get_upper_bound(instance, current_node);
-          if (upper_bound_without_next > current_best_value) {
-            if (node_ptr == nullptr) {
-              node_ptr = alloc_traits::allocate(alloc, 1);
-              alloc_traits::construct(alloc, node_ptr, current_node);
-              ++num_local_allocated_nodes;
-            } else {
-              ++node_ptr->index;
-            }
-            pq.push(handle, {max_value - upper_bound_without_next,
-                             reinterpret_cast<pointer_type>(node_ptr)});
-            node_ptr = nullptr;
-            ++num_local_pushed_nodes;
-          }
-        } else {
-          if (current_node.weight + instance.items[current_node.index].weight <=
-              instance.capacity) {
-            current_node.value += instance.items[current_node.index].value;
-          }
-          while (current_node.value > current_best_value &&
-                 !best_value.compare_exchange_weak(current_best_value,
-                                                   current_node.value)) {
-          }
-        }
-        if (node_ptr == nullptr) {
+        bool new_work = process_node(pq, instance, retval, counters
+#ifdef KNAPSACK_DEBUG_PRINT
+                                     ,
+                                     ctx.get_id()
+#endif
+        );
+        if (new_work) {
           if (idle_counter.load(std::memory_order_acquire) > 0) {
             for (std::size_t i = 0; i < ctx.get_num_threads(); ++i) {
               if (i == ctx.get_id()) {
@@ -238,21 +343,22 @@ struct Task {
             }
           }
         } else {
-          alloc_traits::destroy(alloc, node_ptr);
-          alloc_traits::deallocate(alloc, node_ptr, 1);
-          ++num_local_freed_nodes;
+#ifdef KNAPSACK_DEBUG_PRINT
+          if (verbose) {
+            auto l = std::scoped_lock{write_mutex};
+            std::clog << '[' << std::setw(3) << ctx.get_id()
+                      << "] Node has no children\n";
+          }
+#endif
         }
       } else {
         ++num_local_failed_extractions;
-        for (std::size_t i = 0; i < retries; ++i) {
-          if (i < 20) {
-            _mm_pause();
-          } else {
-            std::this_thread::yield();
-          }
-          if (pq.extract_top(handle, retval)) {
-            goto extracted;
-          }
+        ++try_count;
+        if (try_count > 100) {
+          std::this_thread::yield();
+        }
+        if (try_count < retries) {
+          continue;
         }
         idle_state[ctx.get_id()].state.store(1, std::memory_order_relaxed);
         idle_counter.fetch_add(1, std::memory_order_release);
@@ -339,6 +445,7 @@ int main(int argc, char* argv[]) {
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
       ("f,file", "The input graph", cxxopts::value<std::filesystem::path>(settings.instance_file)->default_value("knapsack.kp"), "PATH")
+      ("v,verbose", "Verbose output", cxxopts::value<bool>(), "BOOL")
       ("h,help", "Print this help");
   // clang-format on
 
@@ -351,6 +458,9 @@ int main(int argc, char* argv[]) {
     if (result.count("threads") > 0) {
       settings.num_threads = result["threads"].as<unsigned int>();
     }
+    if (result.count("verbose") > 0) {
+      settings.verbose = true;
+    }
   } catch (cxxopts::OptionParseException const& e) {
     std::cerr << e.what() << std::endl;
     return 1;
@@ -358,6 +468,9 @@ int main(int argc, char* argv[]) {
 
 #ifndef NDEBUG
   std::clog << "Using debug build!\n\n";
+#endif
+#ifdef KNAPSACK_DEBUG_PRINT
+  std::clog << "With debug print capability\n\n";
 #endif
   std::clog << "Settings: \n\t"
             << "Threads: " << settings.num_threads << "\n\t"
@@ -377,16 +490,18 @@ int main(int argc, char* argv[]) {
   std::clog << "Num items: " << instance.items.size() << '\n';
   std::clog << "Capacity: " << instance.capacity << '\n';
 #ifdef KNAPSACK_DEBUG_PRINT
-  std::clog << "\nItems\n"
-            << std::setw(5) << "id" << std::setw(7) << "weight" << std::setw(7)
-            << "value" << std::setw(6) << "ratio" << '\n';
-  for (std::size_t i = 0; i < instance.items.size(); ++i) {
-    std::clog << std::setw(5) << i << std::setw(8) << instance.items[i].weight
-              << std::setw(8) << instance.items[i].value << std::setw(7)
-              << std::setprecision(3)
-              << static_cast<double>(instance.items[i].value) /
-                     instance.items[i].weight
-              << '\n';
+  if (settings.verbose) {
+    std::clog << "\nItems\n"
+              << std::setw(5) << "id" << std::setw(8) << "weight"
+              << std::setw(8) << "value" << std::setw(7) << "ratio" << '\n';
+    for (std::size_t i = 0; i < instance.items.size(); ++i) {
+      std::clog << std::setw(5) << i << std::setw(8) << instance.items[i].weight
+                << std::setw(8) << instance.items[i].value << std::setw(7)
+                << std::setprecision(3)
+                << static_cast<double>(instance.items[i].value) /
+                       instance.items[i].weight
+                << '\n';
+    }
   }
 #endif
   std::clog << "Preprocessing...";
@@ -397,49 +512,56 @@ int main(int argc, char* argv[]) {
                      (static_cast<double>(rhs.value) /
                       static_cast<double>(rhs.weight));
             });
-  prefix_sums.resize(instance.items.size());
+  instance.prefix_sums.resize(instance.items.size());
   for (std::size_t i = 0; i < instance.items.size(); ++i) {
+    instance.prefix_sums[i].push_back({0, 0});
     std::partial_sum(instance.items.begin() + i, instance.items.end(),
-                     std::back_inserter(prefix_sums[i]),
+                     std::back_inserter(instance.prefix_sums[i]),
                      [](auto const& lhs, auto const& rhs) {
                        return KnapsackInstance::Item{lhs.weight + rhs.weight,
                                                      lhs.value + rhs.value};
                      });
+    auto end = std::upper_bound(
+        instance.prefix_sums[i].begin(), instance.prefix_sums[i].end(),
+        instance.capacity, [](auto capacity, auto const& prefix) {
+          return capacity < prefix.weight;
+        });
+    instance.prefix_sums[i].erase(end, instance.prefix_sums[i].end());
   }
   std::clog << "done\n";
 #ifdef KNAPSACK_DEBUG_PRINT
-  std::clog << "\nSorted items after ratio\n"
-            << std::setw(5) << "id" << std::setw(7) << "weight" << std::setw(7)
-            << "value" << std::setw(6) << "ratio" << '\n';
-  for (std::size_t i = 0; i < instance.items.size(); ++i) {
-    std::clog << std::setw(5) << i << std::setw(8) << instance.items[i].weight
-              << std::setw(8) << instance.items[i].value << std::setw(7)
-              << std::setprecision(3)
-              << static_cast<double>(instance.items[i].value) /
-                     instance.items[i].weight
-              << '\n';
+  if (settings.verbose) {
+    std::clog << "\nSorted items after ratio\n"
+              << std::setw(5) << "id" << std::setw(8) << "weight"
+              << std::setw(8) << "value" << std::setw(7) << "ratio" << '\n';
+    for (std::size_t i = 0; i < instance.items.size(); ++i) {
+      std::clog << std::setw(5) << i << std::setw(8) << instance.items[i].weight
+                << std::setw(8) << instance.items[i].value << std::setw(7)
+                << std::setprecision(3)
+                << static_cast<double>(instance.items[i].value) /
+                       instance.items[i].weight
+                << '\n';
+    }
+    std::clog << "\nPrefix sum\n"
+              << std::setw(5) << "id" << std::setw(8) << "weight"
+              << std::setw(8) << "value" << '\n';
+    for (std::size_t i = 0; i < prefix_sums[0].size(); ++i) {
+      std::clog << std::setw(5) << i << std::setw(8) << prefix_sums[0][i].weight
+                << std::setw(8) << prefix_sums[0][i].value << '\n';
+    }
+    std::clog << '\n';
   }
-  std::clog << "\nPrefix sum\n"
-            << std::setw(5) << "id" << std::setw(7) << "weight" << std::setw(7)
-            << "value" << '\n';
-  for (std::size_t i = 0; i < prefix_sums[0].size(); ++i) {
-    std::clog << std::setw(5) << i << std::setw(8) << prefix_sums[0][i].weight
-              << std::setw(8) << prefix_sums[0][i].value << '\n';
-  }
-  std::clog << '\n';
 #endif
-  auto greedy_fit = std::lower_bound(
-      prefix_sums[0].begin(), prefix_sums[0].end(), instance.capacity,
-      [&](auto const& prefix, auto const& capacity) {
-        return prefix.weight < capacity;
-      });
+  auto greedy_fit = std::upper_bound(prefix_sums[0].begin(),
+                                     prefix_sums[0].end(), instance.capacity,
+                                     [&](auto capacity, auto const& prefix) {
+                                       return prefix.weight < capacity;
+                                     });
   if (greedy_fit == prefix_sums[0].end()) {
     best_value = prefix_sums[0].back().value;
   } else {
-    if (greedy_fit->value > instance.capacity) {
-      best_value =
-          (greedy_fit == prefix_sums[0].begin()) ? 0 : (greedy_fit - 1)->value;
-    }
+    best_value =
+        (greedy_fit == prefix_sums[0].begin()) ? 0 : (greedy_fit - 1)->value;
   }
   std::clog << "Greedy lower bound: " << best_value << '\n';
   idle_state = new IdleState[settings.num_threads]();
@@ -450,7 +572,8 @@ int main(int argc, char* argv[]) {
   start_flag.store(false, std::memory_order_relaxed);
   std::atomic_thread_fence(std::memory_order_release);
   thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-  coordinator.run<Task>(std::ref(pq), instance);
+  std::clog << "Calculating knapsack solution...\n" << std::flush;
+  coordinator.run<Task>(std::ref(pq), instance, settings.verbose);
   coordinator.wait_until_notified();
   start_flag.store(true, std::memory_order_release);
   auto start_tick = clock_type::now();
