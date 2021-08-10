@@ -12,10 +12,6 @@ include(GNUInstallDirs)
 
 prevent_intree_builds()
 
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE "Release")
-endif()
-
 option("experiments_BUILD_TESTS" "Build unit tests for multiqueue experiments" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
@@ -133,13 +129,14 @@ function(add_benchmarks_for priority_queue_target)
   endif()
   add_executable(${name}_knapsack)
   target_link_libraries(${name}_knapsack PRIVATE ${priority_queue_target} knapsack)
-  add_executable(${name}_knapsack_external)
-  target_link_libraries(${name}_knapsack_external PRIVATE ${priority_queue_target} knapsack_external tbbmalloc)
-  target_compile_definitions(${name}_knapsack_external PRIVATE KNAPSACK_DEBUG_PRINT)
   if(BUILD_TESTING)
     add_test(NAME ${name}_knapsack_small COMMAND /bin/bash -c "$<TARGET_FILE:${name}_knapsack> -j 1 -f  data/knapsack_small.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     add_test(NAME ${name}_knapsack_large COMMAND /bin/bash -c "$<TARGET_FILE:${name}_knapsack> -j 8 -f data/knapsack_large" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
+  add_executable(${name}_knapsack_external)
+  set_target_properties(${name}_knapsack_external PROPERTIES DEBUG_POSTFIX _debug)
+  target_link_libraries(${name}_knapsack_external PRIVATE ${priority_queue_target} knapsack_external tbbmalloc)
+  target_compile_definitions(${name}_knapsack_external PRIVATE KNAPSACK_DEBUG_PRINT)
 endfunction()
 
 function(add_mq_configuration c k ibs dbs)
