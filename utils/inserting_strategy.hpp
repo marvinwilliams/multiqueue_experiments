@@ -32,6 +32,7 @@ constexpr char const* get_insert_policy_name(InsertPolicy policy) {
             return "unknown";
     }
 }
+
 enum class KeyDistribution : std::size_t { Uniform, Dijkstra, Ascending, Descending, ThreadId };
 constexpr char const* get_key_distribution_name(KeyDistribution distribution) {
     switch (distribution) {

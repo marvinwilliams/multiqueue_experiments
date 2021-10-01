@@ -16,14 +16,6 @@ option("experiments_BUILD_TESTS" "Build unit tests for multiqueue experiments" O
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
-execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
-
-configure_file(
-  "system_config.hpp.in"
-  "system_config.hpp"
-)
-
 add_library("experiment_base" INTERFACE)
 
 string(
@@ -37,7 +29,7 @@ target_compile_options(
   "experiment_base" INTERFACE ${WARNING_FLAGS}
 )
 
-add_subdirectory(multiqueue)
+add_subdirectory(multiqueue_simple)
 
 # Find the pthread library
 set(THREADS_PREFER_PTHREAD_FLAG ON)
@@ -47,25 +39,15 @@ find_package(TBB)
 
 function(generate_mq_target name compiler_define)
   add_library(${name} INTERFACE)
-  target_compile_definitions(${name} INTERFACE ${compiler_define} MQ_CONFIG_NUMA)
+  target_compile_definitions(${name} INTERFACE ${compiler_define})
   target_link_libraries(${name} INTERFACE multiqueue::multiqueue)
   set_property(TARGET ${name} PROPERTY pq_name ${name})
 endfunction()
 
-generate_mq_target(mq PQ_MQ_INT)
-generate_mq_target(nbmq PQ_MQ_INT_NB)
-generate_mq_target(asmq PQ_MQ_INT_AS)
+generate_mq_target(mq PQ_MQ_RANDOM)
+generate_mq_target(nbmq PQ_MQ_STICKY)
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
-
-# if(IS_DIRECTORY "${EXTERNAL_DIR}/Catch2")
-#   add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
-#   list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
-#   set(Catch2_FOUND TRUE)
-# else()
-#   message(WARNING "Could not find Catch2 in ${EXTERNAL_DIR}")
-#   set(Catch2_FOUND FALSE)
-# endif()
 
 add_subdirectory(utils)
 add_subdirectory(tools)

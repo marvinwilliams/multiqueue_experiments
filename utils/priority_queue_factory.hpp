@@ -11,6 +11,12 @@
 #ifndef UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 #define UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 
+#if defined PQ_MQ || defined PQ_MQ_MERGING || defined defined PQ_MQ_INT_AS
+#include "multiqueue/configurations.hpp"
+#include "multiqueue/multiqueue.hpp"
+#else
+#include "multiqueue/configurations.hpp"
+#include "multiqueue/multiqueue.hpp"
 #if defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "capq.hpp"
 #elif defined PQ_KLSM || defined PQ_KLSM256 || defined PQ_KLSM1024
@@ -21,15 +27,6 @@
 #include "linden.hpp"
 #elif defined PQ_SPRAYLIST
 #include "spraylist.hpp"
-#elif defined PQ_MQ_INT || defined PQ_MQ_INT_MERGING || defined PQ_MQ_INT_NB
-#include "multiqueue/configurations.hpp"
-#include "multiqueue/int_multiqueue.hpp"
-#elif defined PQ_MQ_INT_AS
-#include "multiqueue/configurations.hpp"
-#include "multiqueue/int_multiqueue_assigned.hpp"
-#else
-#include "multiqueue/configurations.hpp"
-#include "multiqueue/multiqueue.hpp"
 #endif
 
 #include <cstdint>
