@@ -70,7 +70,7 @@ class ThreadCoordinator {
         for (unsigned int i = 0; i < num_threads_; ++i) {
             // No forward, since we don't want to move the args
             // We could forward in the last iteration, but it does not matter, since rvalue overloads are useless
-            // for f
+            // for Task::run
             Context ctx{*this, i, num_threads_};
             threading::thread_config config = Task::get_config(ctx);
             threads_.emplace_back(config, Task::run, ctx, args...);

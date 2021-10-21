@@ -10,33 +10,32 @@ extern "C" {
 
 namespace wrapper {
 
-struct linden_pq_wrapper {
-    pq_t* pq;
+struct Linden::wrapper_type {
+  pq_t* pq;
+  ~wrapper_type() { pq_destroy(pq); }
 };
 
-linden::linden(unsigned int, int const max_offset) {
-    _init_gc_subsystem();
-    pq_ = new linden_pq_wrapper;
-    pq_->pq = pq_init(max_offset);
+Linden::Linden() : pq_(new wrapper_type) {
+  _init_gc_subsystem();
+  pq_->pq = pq_init(32);
 }
 
-linden::~linden() {
-    // Avoid segfault
-    push(Handle{}, {1u, 1u});
-    pq_destroy(pq_->pq);
-    delete pq_;
-    _destroy_gc_subsystem();
+Linden::~Linden() {
+  // Avoid segfault
+  ::insert(pq_->pq, 1, 1);
+  pq_.reset();
+  _destroy_gc_subsystem();
 }
 
-void linden::push(Handle, std::pair<unsigned long, unsigned long> const& value) {
-    ::insert(pq_->pq, value.first + 1, value.second);
+void Linden::push(Handle&, value_type value) {
+  ::insert(pq_->pq, value.key + 1, value.data);
 }
 
-bool linden::extract_top(Handle, std::pair<unsigned long, unsigned long>& retval) {
-    unsigned long k_ret;
-    retval.second = deletemin_key(pq_->pq, &k_ret);
-    retval.first = k_ret - 1;
-    return k_ret != -1;
+bool Linden::try_delete_min(Handle&, value_type& retval) {
+  unsigned long k_ret;
+  retval.data = deletemin_key(pq_->pq, &retval.key);
+  --retval.key;
+  return retval.key != empty_key;
 }
 
 }  // namespace wrapper

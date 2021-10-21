@@ -1,37 +1,54 @@
+#pragma once
 #ifndef WRAPPER_LINDEN_HPP_INCLUDED
 #define WRAPPER_LINDEN_HPP_INCLUDED
 
 // Adapted from klsm
 
-#include <cstddef>
-#include <cstdint>
+#include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 
 namespace wrapper {
 
-struct linden_pq_wrapper;
+class Linden {
+ public:
+  using key_type = unsigned long;
+  using mapped_type = unsigned long;
 
-class linden {
-  linden_pq_wrapper* pq_;
+  struct value_type {
+    key_type key;
+    mapped_type data;
+  };
+
+  struct Handle {};
+
+  static constexpr key_type min_valid_key =
+      std::numeric_limits<key_type>::min();  // The queue itself only supports
+                                             // keys >= 1, so one is added on
+                                             // each insert
+  static constexpr key_type max_valid_key =
+      std::numeric_limits<key_type>::max() - 2;
+
+ private:
+  static constexpr key_type empty_key =
+      std::numeric_limits<key_type>::max() - 1;
+
+  struct wrapper_type;
+
+  alignas(64) std::unique_ptr<wrapper_type> pq_;
 
  public:
-  struct Handle {};
-  static constexpr int DEFAULT_OFFSET = 32;
+  Linden();
+  ~Linden();
 
-  linden(unsigned int num_threads = 0, int const max_offset = DEFAULT_OFFSET);
+  Handle get_handle() { return Handle{}; }
 
-  constexpr Handle get_handle(unsigned int) { return Handle{}; }
+  void push(Handle&, value_type value);
 
-  ~linden();
+  bool try_delete_min(Handle&, value_type& retval);
 
-  /* #define SENTINEL_KEYMIN (0UL)  /1* Key value of first dummy node. *1/ */
-  /* #define SENTINEL_KEYMAX (~1UL) /1* Key value of last dummy node.  *1/ */
-  void push(Handle, std::pair<unsigned long, unsigned long> const& value);
-
-  bool extract_top(Handle, std::pair<unsigned long, unsigned long>& retval);
-
-  static std::string description() { return "linden"; }
+  std::string description() const { return "linden"; }
 };
 
 }  // namespace wrapper

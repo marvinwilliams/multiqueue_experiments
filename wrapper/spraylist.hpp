@@ -1,39 +1,51 @@
+#pragma once
+#include <cstdint>
 #ifndef WRAPPER_SPRAYLIST_HPP_INCLUDED
 #define WRAPPER_SPRAYLIST_HPP_INCLUDED
 
 // Adapted from klsm
 
-#include <cstddef>
-#include <cstdint>
+#include <limits>
+#include <memory>
 #include <string>
 #include <utility>
 
-struct sl_intset;
-
 namespace wrapper {
 
-class spraylist {
-  using pq_t = sl_intset;
+class Spraylist {
+ public:
+  using key_type = unsigned long;
+  using mapped_type = unsigned long;
+  struct value_type {
+    key_type key;
+    mapped_type data;
+  };
 
-  pq_t* pq_;
+  struct Handle {};
+
+  static constexpr key_type min_valid_key =
+      std::numeric_limits<key_type>::min();
+  static constexpr key_type max_valid_key = std::numeric_limits<std::uint32_t>::max() - 1;
+
+ private:
+  static constexpr key_type empty_key = std::numeric_limits<key_type>::max();
+
+  struct wrapper_type;
+
+  alignas(64) std::unique_ptr<wrapper_type> pq_;
 
  public:
-  struct Handle {};
-  spraylist(size_t const num_threads);
-  virtual ~spraylist();
+  Spraylist();
+  ~Spraylist();
 
-  constexpr Handle get_handle(unsigned int) { return Handle{}; }
+  Handle get_handle() { return Handle{}; }
 
   void init_thread(size_t const num_threads);
 
-  /* typedef unsigned long slkey_t; */
-  /* typedef unsigned long val_t; */
-  /* #define KEY_MIN                         0 */
-  /* #define KEY_MAX                         UINT32_MAX */
-  void push(Handle, std::pair<unsigned long, unsigned long> const& value);
-  bool extract_top(Handle, std::pair<unsigned long, unsigned long>& retval);
+  void push(Handle&, value_type value);
+  bool try_delete_min(Handle&, value_type& retval);
 
-  static std::string description() { return "spraylist"; }
+  std::string description() const { return "spraylist"; }
 };
 
 }  // namespace wrapper

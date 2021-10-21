@@ -199,15 +199,14 @@ plot_delay_buffer_size <- function(data, outdir) {
 }
 
 table_by_c_and_stickiness <- function(data, outdir) {
-  # rank_data <- data$rank %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_rank = weighted.mean(rank, frequency))
-  # delay_data <- data$delay %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_delay = weighted.mean(rank, frequency))
-  # throughput_data <- data$throughput %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64)
-  rank_data <- data$rank %>% filter(str_detect(name, "nbmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_rank = weighted.mean(rank, frequency))
-  delay_data <- data$delay %>% filter(str_detect(name, "nbmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_delay = weighted.mean(rank, frequency))
-  # throughput_data <- data$throughput %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64)
+  rank_data <- data$rank %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_rank = weighted.mean(rank, frequency))
+  delay_data <- data$delay %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_delay = weighted.mean(rank, frequency))
   throughput_data <- data$throughput %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64)
-  # table_data <- inner_join(throughput_data, rank_data)
-  table_data <- inner_join(rank_data, delay_data)
+  # rank_data <- data$rank %>% filter(str_detect(name, "nbmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_rank = weighted.mean(rank, frequency))
+  # delay_data <- data$delay %>% filter(str_detect(name, "nbmq_c_\\d+_k_\\d+") & prefill == "1000000" & dist == "uniform" & threads == 64 & sleep == "0") %>% group_by(name) %>% summarize(avg_delay = weighted.mean(rank, frequency))
+  # throughput_data <- data$throughput %>% filter(str_detect(name, "intmq_c_\\d+_k_\\d+_ibs_16_dbs_16_numa") & prefill == "1000000" & dist == "uniform" & threads == 64)
+  table_data <- inner_join(throughput_data, rank_data)
+  table_data <- inner_join(table_data, delay_data)
 
   table_data$c <- as.factor(str_extract(table_data$name, "(?<=_c_)\\d+"))
   c_order <- paste(sort(unique(as.integer(levels(table_data$c)))))
@@ -217,7 +216,7 @@ table_by_c_and_stickiness <- function(data, outdir) {
   s_order <- paste(sort(unique(as.integer(levels(table_data$s)))))
   table_data$s <- factor(table_data$s, levels = s_order)
 
-  # table_data <- table_data %>% select(c, s, mean, avg_rank, avg_delay);
+  table_data <- table_data %>% select(c, s, mean, avg_rank, avg_delay);
   table <- xtable(table_data[with(table_data, order(c, s)),], digits = 1)
 
   print(table, file = paste(outdir, "/c_and_stickiness.tex", sep=''), include.rownames = F)
@@ -334,10 +333,13 @@ plot_delay_comparison <- function(data, outdir) {
         labs(x = "Delay", y = "Cumulative Frequency") +
         scale_color_manual(breaks = names, values = c(3, 3, 3, 3, 2, 4, 6, 6, 7), labels = labels) +
         scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 1, 1, 1, 2, 1), labels = labels) +
+        # guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
+        # theme_bw() +
+        # theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.y = element_blank(), axis.text.y=element_blank(), axis.ticks.y = element_blank(),axis.title=element_text(size=rel(1.1)), axis.text=element_text(size=rel(1.1)) , legend.text=element_text(size=rel(1.2)))
         guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
         theme_bw() +
-        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.y = element_blank(), axis.text.y=element_blank(), axis.ticks.y = element_blank(),axis.title=element_text(size=rel(1.1)), axis.text=element_text(size=rel(1.1)) , legend.text=element_text(size=rel(1.2)))
-      ggsave(plot, file = paste(outdir, "/", "delay_compare_", .$threads[1], ".pdf", sep = ""), width = 4.5, height = 2.5)
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "none", axis.text=element_text(size=rel(1)), axis.title=element_text(size=rel(1.2)))
+      ggsave(plot, file = paste(outdir, "/", "delay_compare_", .$threads[1], ".pdf", sep = ""), width = 4, height = 2.5)
       .
     })
 }
@@ -493,7 +495,7 @@ plot_sssp <- function(data, outdir, graph_name) {
     scale_shape_manual(breaks = names, values = c(1, 2, 3, 4, 5, 7, 8, 9), labels = labels) +
     guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
     theme_bw() +
-    theme(legend.position = c(0.2, 0.55), panel.grid.major.x = element_blank(), axis.text=element_text(size=rel(1.2)), axis.title=element_text(size=rel(1.2)), legend.text=element_text(size=rel(1.1)))
+    theme(legend.position = "none", panel.grid.major.x = element_blank(), axis.text=element_text(size=rel(1.2)), axis.title=element_text(size=rel(1.2)), legend.text=element_text(size=rel(1.1)))
   ggsave(plot, file =paste(outdir, "/sssp_nodes_", graph_name, ".pdf", sep = ""), width = 4.3, height = 3)
   # final <- grid.arrange(arrangeGrob(plot, ncol = 1, nrow = 1), arrangeGrob(plot2, ncol = 2, nrow = 1))
   # ggsave(final, file =paste(outdir, "/sssp_", graph_name, ".pdf", sep = ""), width = 4.3, height = 3)

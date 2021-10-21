@@ -1,11 +1,10 @@
-#include "catch2/catch.hpp"
-#include "../utils/replay_tree.hpp"
+#include "tools/replay_tree.hpp"
+#include "catch2/catch_test_macros.hpp"
+
 #include <iostream>
 
 struct extract_key {
-    static int const& get(int const&i) {
-        return i;
-    }
+  static int const& get(int const& i) { return i; }
 };
 
 TEST_CASE("replay_tree insert", "[replay_tree]") {
@@ -117,7 +116,7 @@ TEST_CASE("replay_tree", "[replay_tree]") {
     REQUIRE(replay_tree.get_rank(4 - i) == 4 - i);
     auto it = replay_tree.find(4 - i);
     auto [success, delay] = replay_tree.erase(it);
-    replay_tree.increase_delay(4-i);
+    replay_tree.increase_delay(4 - i);
     REQUIRE(success);
     REQUIRE(delay == i + 1);
   }
@@ -172,4 +171,3 @@ TEST_CASE("replay_tree", "[replay_tree]") {
     REQUIRE(delay == 500'000);
   }
 }
-

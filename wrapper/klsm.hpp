@@ -1,3 +1,4 @@
+#pragma once
 #ifndef WRAPPER_KLSM_HPP_INCLUDED
 #define WRAPPER_KLSM_HPP_INCLUDED
 
@@ -12,12 +13,19 @@
 
 namespace wrapper {
 
-template <typename KeyType, typename ValueType, int Relaxation = 256>
-class klsm {
+// No known limitations
+
+template <typename KeyType, typename T, int Relaxation>
+class Klsm {
  public:
-  using key_type = unsigned long;
-  using mapped_type = unsigned long;
-  using value_type = std::pair<key_type, mapped_type>;
+  using key_type = KeyType;
+  using mapped_type = T;
+
+  struct value_type {
+    key_type key;
+    mapped_type data;
+  };
+
   struct Handle {};
 
   static constexpr key_type min_valid_key =
@@ -26,24 +34,25 @@ class klsm {
       std::numeric_limits<key_type>::max();
 
  private:
-  kpq::k_lsm<KeyType, ValueType, Relaxation> pq_;
+  kpq::k_lsm<key_type, mapped_type, Relaxation> pq_;
 
  public:
-  klsm() = default;
+  Klsm() = default;
 
   Handle get_handle() const { return Handle{}; }
 
   void push(Handle&, value_type value) {
-    pq_.insert(value.first, value.second);
+    pq_.insert(value.key, value.data);
   }
 
-  bool try_delete_min(Handle&, value_type retval) {
-    return pq_.delete_min(retval.first, retval.second);
+  bool try_delete_min(Handle&, value_type& retval) {
+    return pq_.delete_min(retval.key, retval.data);
   }
 
   std::string description() const {
     std::stringstream ss;
-    ss << "klsm\n\t" << Relaxation;
+    ss << "klsm\n";
+    ss << "Relaxation: " << Relaxation;
     return ss.str();
   }
 };

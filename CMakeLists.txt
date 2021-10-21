@@ -13,9 +13,24 @@ include(GNUInstallDirs)
 prevent_intree_builds()
 
 option("experiments_BUILD_TESTS" "Build unit tests for multiqueue experiments" OFF)
+option("experiments_PROFILE" "Enable profiling in the benchmarks" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
+set(CMAKE_DEBUG_POSTFIX _debug)
 
+# Read the system's L1 cache-line size and page size
+execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
+
+if(NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")
+  message(WARNING "Could not read L1 cache-line size, using default: 64")
+  set(L1_CACHE_LINESIZE 64)
+endif()
+
+# Generate header containing definitions for L1 cache-line size and page size
+configure_file(
+  "system_config.hpp.in"
+  "system_config.hpp"
+)
 add_library("experiment_base" INTERFACE)
 
 string(
@@ -25,9 +40,7 @@ string(
   "-Wpedantic;"
 )
 
-target_compile_options(
-  "experiment_base" INTERFACE ${WARNING_FLAGS}
-)
+target_compile_options("experiment_base" INTERFACE ${WARNING_FLAGS})
 
 add_subdirectory(multiqueue_simple)
 
@@ -37,6 +50,13 @@ find_package(Threads)
 
 find_package(TBB)
 
+set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
+
+if(experiments_BUILD_TESTS)
+  add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
+endif()
+list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
+
 function(generate_mq_target name compiler_define)
   add_library(${name} INTERFACE)
   target_compile_definitions(${name} INTERFACE ${compiler_define})
@@ -44,10 +64,8 @@ function(generate_mq_target name compiler_define)
   set_property(TARGET ${name} PROPERTY pq_name ${name})
 endfunction()
 
-generate_mq_target(mq PQ_MQ_RANDOM)
-generate_mq_target(nbmq PQ_MQ_STICKY)
-
-set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
+generate_mq_target(mq_random PQ_MQ_RANDOM)
+generate_mq_target(mq_sticky PQ_MQ_STICKY)
 
 add_subdirectory(utils)
 add_subdirectory(tools)
@@ -75,11 +93,11 @@ target_compile_features(throughput INTERFACE cxx_std_17)
 target_sources(throughput INTERFACE stress_test.cpp)
 target_compile_definitions(throughput INTERFACE THROUGHPUT)
 
-add_library(shortest_path INTERFACE)
-target_link_libraries(shortest_path INTERFACE thread_coordination benchmark_base)
-target_include_directories(shortest_path INTERFACE "utils" "wrapper" "${CMAKE_BINARY_DIR}")
-target_compile_features(shortest_path INTERFACE cxx_std_17)
-target_sources(shortest_path INTERFACE shortest_path.cpp)
+add_library(sssp INTERFACE)
+target_link_libraries(sssp INTERFACE thread_coordination benchmark_base)
+target_include_directories(sssp INTERFACE "utils" "wrapper" "${CMAKE_BINARY_DIR}")
+target_compile_features(sssp INTERFACE cxx_std_17)
+target_sources(sssp INTERFACE shortest_path.cpp)
 
 add_library(knapsack INTERFACE)
 target_link_libraries(knapsack INTERFACE thread_coordination benchmark_base)
@@ -95,116 +113,77 @@ target_sources(knapsack_external INTERFACE knapsack_external.cpp)
 
 function(add_benchmarks_for priority_queue_target)
   get_property(name TARGET ${priority_queue_target} PROPERTY pq_name)
-  add_executable(${name}_quality)
+
+  add_executable(quality_${name})
+  set_target_properties(quality_${name} PROPERTIES DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
+  target_link_libraries(quality_${name} PRIVATE ${priority_queue_target} quality)
+
+  add_executable(throughput_${name})
+  set_target_properties(throughput_${name} PROPERTIES DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
+  target_link_libraries(throughput_${name} PRIVATE ${priority_queue_target} throughput)
+
+  add_executable(sssp_${name})
+  set_target_properties(sssp_${name} PROPERTIES DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
+  target_link_libraries(sssp_${name} PRIVATE ${priority_queue_target} sssp)
+
+  add_executable(knapsack_${name})
+  set_target_properties(knapsack_${name} PROPERTIES DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
+  target_link_libraries(knapsack_${name} PRIVATE ${priority_queue_target} knapsack)
+
+  add_executable(knapsack_external_${name})
+  set_target_properties(knapsack_external_${name} PROPERTIES DEBUG_POSTFIX ${CMAKE_DEBUG_POSTFIX})
+  target_link_libraries(knapsack_external_${name} PRIVATE ${priority_queue_target} knapsack_external tbbmalloc)
+
   if(BUILD_TESTING)
-    add_test(NAME ${name}_quality_small COMMAND /bin/bash -c "$<TARGET_FILE:${name}_quality> -n 0 -j 1 | $<TARGET_FILE:evaluate_quality> -v")
-    add_test(NAME ${name}_quality_large COMMAND /bin/bash -c "$<TARGET_FILE:${name}_quality> -n 1000000 -j 8 | $<TARGET_FILE:evaluate_quality> -v")
+    add_test(NAME quality_${name}_small COMMAND /bin/bash -c "$<TARGET_FILE:quality_${name}> -p 10000 -n 10000 -j 1 | $<TARGET_FILE:evaluate_quality> -v")
+    add_test(NAME quality_${name}_large COMMAND /bin/bash -c "$<TARGET_FILE:quality_${name}> -j 8 | $<TARGET_FILE:evaluate_quality> -v")
+    add_test(NAME sssp_${name}_small COMMAND /bin/bash -c "$<TARGET_FILE:sssp_${name}> -j 1 -f data/NY_graph.gr -c data/NY_solution.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME sssp_${name}_large COMMAND /bin/bash -c "$<TARGET_FILE:sssp_${name}> -j 8 -f data/CAL_graph.gr -c data/CAL_solution.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME knapsack_${name}_small COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_${name}> -j 1 -f  data/knapsack_small.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME knapsack_${name}_large COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_${name}> -j 8 -f data/knapsack_large" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME knapsack_external_${name}_small COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_external_${name}> -j 1 -f  data/knapsack_external_small.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(NAME knapsack_external_${name}_large COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_external_${name}> -j 8 -f data/knapsack_external_large" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
-  target_link_libraries(${name}_quality PRIVATE ${priority_queue_target} quality)
-  add_executable(${name}_throughput)
-  target_link_libraries(${name}_throughput PRIVATE ${priority_queue_target} throughput)
-  add_executable(${name}_shortest_path)
-  target_link_libraries(${name}_shortest_path PRIVATE ${priority_queue_target} shortest_path)
-  if(BUILD_TESTING)
-    add_test(NAME ${name}_sssp_small COMMAND /bin/bash -c "$<TARGET_FILE:${name}_shortest_path> -j 1 -f data/NY_graph.gr -c data/NY_solution.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(NAME ${name}_sssp_large COMMAND /bin/bash -c "$<TARGET_FILE:${name}_shortest_path> -j 8 -f data/CAL_graph.gr -c data/CAL_solution.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  endif()
-  add_executable(${name}_knapsack)
-  target_link_libraries(${name}_knapsack PRIVATE ${priority_queue_target} knapsack)
-  if(BUILD_TESTING)
-    add_test(NAME ${name}_knapsack_small COMMAND /bin/bash -c "$<TARGET_FILE:${name}_knapsack> -j 1 -f  data/knapsack_small.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(NAME ${name}_knapsack_large COMMAND /bin/bash -c "$<TARGET_FILE:${name}_knapsack> -j 8 -f data/knapsack_large" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  endif()
-  add_executable(${name}_knapsack_external)
-  set_target_properties(${name}_knapsack_external PROPERTIES DEBUG_POSTFIX _debug)
-  target_link_libraries(${name}_knapsack_external PRIVATE ${priority_queue_target} knapsack_external tbbmalloc)
-  target_compile_definitions(${name}_knapsack_external PRIVATE KNAPSACK_DEBUG_PRINT)
 endfunction()
 
-function(add_mq_configuration c k ibs dbs)
-  get_property(name TARGET mq PROPERTY pq_name)
-  set(target_name ${name}_c_${c}_k_${k}_ibs_${ibs}_dbs_${dbs})
+function(add_mq_configuration target bufsize)
+  get_property(name TARGET ${target} PROPERTY pq_name)
+  set(target_name ${name}_bs_${bufsize})
   add_library(${target_name} INTERFACE)
-  target_link_libraries(${target_name} INTERFACE mq)
-  target_compile_definitions(${target_name}
+  target_link_libraries(${target_name} INTERFACE ${target})
+  target_compile_definitions(
+    ${target_name}
     INTERFACE
-      MQ_CONFIG_C=${c}
-      MQ_CONFIG_K=${k}
-      MQ_CONFIG_DELETION_BUFFER_SIZE=${dbs}
-      MQ_CONFIG_INSERTION_BUFFER_SIZE=${ibs}
-      )
+    MQ_CONFIG_DELETION_BUFFER_SIZE=${bufsize}
+    MQ_CONFIG_INSERTION_BUFFER_SIZE=${bufsize}
+  )
   set_property(TARGET ${target_name} PROPERTY pq_name ${target_name})
   add_benchmarks_for(${target_name})
 endfunction()
 
-function(add_nbmq_configuration c k)
-  get_property(name TARGET nbmq PROPERTY pq_name)
-  set(target_name ${name}_c_${c}_k_${k})
-  add_library(${target_name} INTERFACE)
-  target_link_libraries(${target_name} INTERFACE nbmq)
-  target_compile_definitions(${target_name}
-    INTERFACE
-      MQ_CONFIG_C=${c}
-      MQ_CONFIG_K=${k}
-      )
-  set_property(TARGET ${target_name} PROPERTY pq_name ${target_name})
-  add_benchmarks_for(${target_name})
-endfunction()
+add_mq_configuration(mq_random 1)
+add_mq_configuration(mq_random 2)
+add_mq_configuration(mq_random 4)
+add_mq_configuration(mq_random 8)
+add_mq_configuration(mq_random 16)
+add_mq_configuration(mq_random 64)
 
-function(add_asmq_configuration c k ibs dbs)
-  get_property(name TARGET asmq PROPERTY pq_name)
-  set(target_name ${name}_c_${c}_k_${k}_ibs_${ibs}_dbs_${dbs})
-  add_library(${target_name} INTERFACE)
-  target_link_libraries(${target_name} INTERFACE asmq)
-  target_compile_definitions(${target_name}
-    INTERFACE
-      MQ_CONFIG_C=${c}
-      MQ_CONFIG_K=${k}
-      MQ_CONFIG_DELETION_BUFFER_SIZE=${dbs}
-      MQ_CONFIG_INSERTION_BUFFER_SIZE=${ibs}
-      )
-  set_property(TARGET ${target_name} PROPERTY pq_name ${target_name})
-  add_benchmarks_for(${target_name})
-endfunction()
-
-add_nbmq_configuration(2 1)
-add_nbmq_configuration(4 1)
-add_nbmq_configuration(4 4)
-add_nbmq_configuration(8 1)
-add_nbmq_configuration(8 8)
-add_nbmq_configuration(8 16)
-add_nbmq_configuration(16 1)
-add_nbmq_configuration(16 16)
-add_nbmq_configuration(16 64)
-
-add_mq_configuration(2 1 16 16)
-add_mq_configuration(4 1 16 16)
-add_mq_configuration(4 4 16 16)
-add_mq_configuration(8 1 16 16)
-add_mq_configuration(8 8 16 16)
-add_mq_configuration(8 16 16 16)
-add_mq_configuration(16 1 16 16)
-add_mq_configuration(16 16 16 16)
-add_mq_configuration(16 64 16 16)
-
-add_asmq_configuration(3 4 16 16)
-add_asmq_configuration(3 16 16 16)
-add_asmq_configuration(3 64 16 16)
+add_mq_configuration(mq_sticky 16)
 
 add_benchmarks_for(capq_wrapper)
 add_benchmarks_for(klsm256_wrapper)
 add_benchmarks_for(klsm1024_wrapper)
-add_benchmarks_for(dlsm_wrapper)
+add_benchmarks_for(klsm4096_wrapper)
 add_benchmarks_for(linden_wrapper)
 add_benchmarks_for(spraylist_wrapper)
 
-add_executable(distribution)
-target_link_libraries(distribution thread_coordination benchmark_base multiqueue::multiqueue)
-target_include_directories(distribution PRIVATE "utils" "${CMAKE_BINARY_DIR}")
-target_include_directories(distribution PRIVATE "${CMAKE_SOURCE_DIR}/external")
-target_compile_features(distribution PRIVATE cxx_std_17)
-target_sources(distribution PRIVATE distribution.cpp)
+# add_executable(distribution)
+# target_link_libraries(distribution thread_coordination benchmark_base multiqueue::multiqueue)
+# target_include_directories(distribution PRIVATE "utils" "${CMAKE_BINARY_DIR}")
+# target_include_directories(distribution PRIVATE "${CMAKE_SOURCE_DIR}/external")
+# target_compile_features(distribution PRIVATE cxx_std_17)
+# target_sources(distribution PRIVATE distribution.cpp)
 
-if (experiments_BUILD_TESTS)
+if(experiments_BUILD_TESTS)
   add_subdirectory(unit_tests)
 endif()

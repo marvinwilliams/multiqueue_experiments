@@ -1,7 +1,7 @@
 set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 add_library(wrapper INTERFACE)
-target_include_directories(wrapper INTERFACE "${CMAKE_CURRENT_LIST_DIR}")
+target_include_directories(wrapper INTERFACE "..")
 
 add_library(
   capq_wrapper STATIC
@@ -14,14 +14,14 @@ add_library(
   capq.cpp
 )
 target_link_libraries(capq_wrapper PUBLIC wrapper)
-target_compile_options(capq_wrapper PRIVATE -w -std=gnu++11)
-target_compile_definitions(capq_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
   capq_wrapper PRIVATE
   ${EXTERNAL_DIR}/klsm/lib
   ${EXTERNAL_DIR}/klsm/lib/capq
   ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc
 )
+target_compile_options(capq_wrapper PRIVATE -w -std=gnu++11)
+target_compile_definitions(capq_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 set_property(TARGET capq_wrapper PROPERTY pq_name wrapper_capq)
 target_compile_definitions(capq_wrapper INTERFACE PQ_CAPQ)
 
@@ -43,19 +43,10 @@ add_library(klsm1024_wrapper INTERFACE)
 target_link_libraries(klsm1024_wrapper INTERFACE klsm_wrapper)
 set_property(TARGET klsm1024_wrapper PROPERTY pq_name wrapper_klsm1024)
 target_compile_definitions(klsm1024_wrapper INTERFACE PQ_KLSM1024)
-
-add_library(
-  dlsm_wrapper STATIC
-  ${EXTERNAL_DIR}/klsm/src/util/thread_local_ptr.cpp
-)
-target_link_libraries(dlsm_wrapper INTERFACE wrapper)
-target_include_directories(
-  dlsm_wrapper SYSTEM INTERFACE
-  ${EXTERNAL_DIR}/klsm/src
-  ${EXTERNAL_DIR}/klsm/src/util
-)
-set_property(TARGET dlsm_wrapper PROPERTY pq_name wrapper_dlsm)
-target_compile_definitions(dlsm_wrapper INTERFACE PQ_DLSM)
+add_library(klsm4096_wrapper INTERFACE)
+target_link_libraries(klsm4096_wrapper INTERFACE klsm_wrapper)
+set_property(TARGET klsm4096_wrapper PROPERTY pq_name wrapper_klsm4096)
+target_compile_definitions(klsm4096_wrapper INTERFACE PQ_KLSM4096)
 
 add_library(
   linden_wrapper STATIC
