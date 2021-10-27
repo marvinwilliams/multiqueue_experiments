@@ -5,9 +5,7 @@ extern "C" {
 #include "capq/gc/gc.h"
 }
 
-namespace {
 __thread ptst_t* ptst;
-}
 
 namespace wrapper {
 

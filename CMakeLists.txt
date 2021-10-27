@@ -14,6 +14,7 @@ prevent_intree_builds()
 
 option("experiments_BUILD_TESTS" "Build unit tests for multiqueue experiments" OFF)
 option("experiments_PROFILE" "Enable profiling in the benchmarks" OFF)
+option("experiments_FP" "Compile benchmarks with frame" OFF)
 
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 set(CMAKE_DEBUG_POSTFIX _debug)
@@ -91,6 +92,7 @@ target_link_libraries(throughput INTERFACE thread_coordination benchmark_base)
 target_include_directories(throughput INTERFACE "utils" "wrapper" "${CMAKE_BINARY_DIR}")
 target_compile_features(throughput INTERFACE cxx_std_17)
 target_sources(throughput INTERFACE stress_test.cpp)
+target_compile_options(throughput INTERFACE -fno-omit-frame-pointer)
 target_compile_definitions(throughput INTERFACE THROUGHPUT)
 
 add_library(sssp INTERFACE)
@@ -169,6 +171,8 @@ add_mq_configuration(mq_random 16)
 add_mq_configuration(mq_random 64)
 
 add_mq_configuration(mq_sticky 16)
+add_mq_configuration(mq_sticky 64)
+add_mq_configuration(mq_sticky 512)
 
 add_benchmarks_for(capq_wrapper)
 add_benchmarks_for(klsm256_wrapper)

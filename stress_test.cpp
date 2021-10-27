@@ -105,7 +105,7 @@ struct Settings {
   };
 };
 
-struct alignas(L1_CACHE_LINESIZE) OperationCount {
+struct OperationCount {
   std::size_t num_prefill_insertions = 0;
   std::size_t num_insertions = 0;
   std::size_t num_deletions = 0;
@@ -164,12 +164,12 @@ struct DeletionLogEntry {
 
 struct alignas(L1_CACHE_LINESIZE) ThreadData {
   OperationCount op_count;
-  std::uint32_t seed;
-  InsertingStrategy<key_type> inserter;
 #ifdef QUALITY
   std::vector<InsertionLogEntry> ins_log;
   std::vector<DeletionLogEntry> del_log;
 #endif
+  std::uint32_t seed;
+  InsertingStrategy<key_type> inserter;
 };
 
 static Settings settings;
@@ -230,12 +230,12 @@ void prefill(unsigned int id, PriorityQueue::Handle& handle,
 }
 
 void work(unsigned int id, PriorityQueue::Handle& handle, PriorityQueue& pq) {
-  std::seed_seq seq{thread_data[id].seed + 1};
+  std::seed_seq seq{thread_data[id].seed + 2};
   auto gen = std::mt19937(seq);
   auto dist = std::uniform_int_distribution<long>(
       0, settings.sleep_between_operations.count());
   execute_blockwise(settings.num_operations, [&, id](std::size_t begin,
-                                                   std::size_t end) {
+                                                     std::size_t end) {
     for (key_type* k = keys + begin; k != keys + end; ++k) {
       if (*k == std::numeric_limits<std::uint32_t>::max()) {
         PriorityQueue::value_type retval;
@@ -318,24 +318,22 @@ struct Task {
 
     auto handle = pq.get_handle();
 
+#ifdef PQ_IS_MQ
+    handle.data.seed(thread_data[ctx.get_id()].seed);
+#endif
+
     if (ctx.is_main()) {
       std::clog << "Generating operations..." << std::flush;
-      prefill_keys = new value_type[settings.prefill_size];
-      keys = new value_type[settings.num_operations];
       key_index = 0;
     }
-
-    ctx.synchronize(stage++);
-    generate_prefill_keys(ctx.get_id());
-    ctx.synchronize(stage++);
-    generate_keys(ctx.get_id());
+    ctx.execute_synchronized(stage++, generate_prefill_keys, ctx.get_id());
+    ctx.synchronize(stage++, []() { key_index = 0; });
+    ctx.execute_synchronized(stage++, generate_keys, ctx.get_id());
     ctx.synchronize(stage++, []() {
       std::clog << "done\nPrefilling..." << std::flush;
       key_index = 0;
     });
-    ctx.synchronize(stage++, []() {});
-
-    prefill(ctx.get_id(), handle, pq);
+    ctx.execute_synchronized(stage++, prefill, ctx.get_id(), handle, pq);
 
     ctx.synchronize(stage++, [&ctx]() {
       std::clog << "done\nStarting the stress test..." << std::flush;
@@ -365,9 +363,25 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
-  cxxopts::Options options("stress test",
-                           "This executable measures and records the "
-                           "performance of relaxed priority queues");
+#ifndef NDEBUG
+  std::clog << "DEBUG build!\n\n";
+#endif
+
+  std::clog << "Build configuration:\n\t";
+#if defined THROUGHPUT
+  std::clog << "Mode: Throughput\n\t";
+#elif defined QUALITY
+  std::clog << "Mode: Quality\n\t";
+#endif
+  std::clog << "L1 cache linesize (byte): " << L1_CACHE_LINESIZE << "\n\t";
+  std::clog << '\n';
+
+  std::clog << "Command line: ";
+  std::copy(argv, argv + argc,
+            std::ostream_iterator<char const*>(std::clog, " "));
+  std::clog << "\n\n";
+
+  cxxopts::Options options(argv[0]);
   // clang-format off
     options.add_options()
       ("p,prefill", "Specify the number of elements to prefill the queue with "
@@ -396,7 +410,7 @@ int main(int argc, char* argv[]) {
   #endif
   #ifdef PQ_MQ_STICKY
       ("k,stickiness", "The stickiness"
-       "(default: 8)", cxxopts::value<std::unsigned int>(), "NUMBER")
+       "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
   #endif
       ("h,help", "Print this help");
   // clang-format on
@@ -468,31 +482,14 @@ int main(int argc, char* argv[]) {
     }
 #endif
   } catch (cxxopts::OptionParseException const& e) {
-    std::cerr << e.what() << std::endl;
+    std::cerr << "Error parsing arguments: " << e.what() << '\n';
+    std::cerr << options.help() << std::endl;
     return 1;
   }
-
-#ifndef NDEBUG
-  std::clog << "Using debug build!\n\n";
-#endif
-
-#ifdef QUALITY
-  if (settings.num_threads > (1 << bits_for_thread_id) - 1) {
-    std::cerr << "Too many threads, increase the number of thread bits!"
-              << std::endl;
-    return 1;
-  }
-#endif
-
-#if defined THROUGHPUT
-  std::clog << "THROUGHPUT build\n\n";
-#elif defined QUALITY
-  std::clog << "QUALITY build\n\n";
-#endif
 
   std::clog << "Settings: \n\t"
-            << "Prefill size: " << settings.prefill_size << "\n\t"
-            << "Num operations: " << settings.num_operations << "\n\t"
+            << "Prefill: " << settings.prefill_size << "\n\t"
+            << "Operations: " << settings.num_operations << "\n\t"
             << "Threads: " << settings.num_threads << "\n\t"
             << "Insert policy: "
             << get_insert_policy_name(settings.insert_config.insert_policy)
@@ -514,6 +511,14 @@ int main(int argc, char* argv[]) {
             << "Seed: " << settings.seed;
   std::clog << "\n\n";
 
+#ifdef QUALITY
+  if (settings.num_threads > (1 << bits_for_thread_id) - 1) {
+    std::cerr << "Too many threads, increase the number of thread bits!"
+              << std::endl;
+    return 1;
+  }
+#endif
+
 #if defined PQ_MQ_RANDOM
   PriorityQueue pq{settings.num_threads, settings.c};
 #elif defined PQ_MQ_STICKY
@@ -531,12 +536,12 @@ int main(int argc, char* argv[]) {
   for (std::size_t i = 0; i < settings.num_threads; ++i) {
     thread_data[i].seed = seeds[i];
     thread_data[i].inserter =
-        InsertingStrategy<key_type>(settings.insert_config, seeds[i]);
+        InsertingStrategy<key_type>(settings.insert_config, seeds[i] + 1);
   }
   delete[] seeds;
   thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
   std::chrono::milliseconds duration;
-  coordinator.run<Task>(std::ref(pq), std::ref(duration));
+  coordinator.run_task<Task>(std::ref(pq), std::ref(duration));
   coordinator.join();
 
   OperationCount sum_ops = std::transform_reduce(
@@ -561,12 +566,6 @@ int main(int argc, char* argv[]) {
     }
   }
 
-  /* for (unsigned int t = 0; t < settings.num_threads; ++t) { */
-  /*   for (auto tick : failed_deletions[t]) { */
-  /*     std::cout << "f " << t << ' ' << tick << '\n'; */
-  /*   } */
-  /* } */
-
   std::cout << std::flush;
 #else
   std::cout << "Time (ms): " << std::chrono::milliseconds{duration}.count()
@@ -577,5 +576,7 @@ int main(int argc, char* argv[]) {
             << std::endl;
 #endif
   delete[] thread_data;
+  delete[] prefill_keys;
+  delete[] keys;
   return 0;
 }
