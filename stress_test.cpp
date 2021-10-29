@@ -53,21 +53,12 @@ using namespace std::chrono_literals;
 
 using tick_type = std::uint64_t;
 
-/* using clock_type = std::chrono::steady_clock; */
-/* using time_point_type = clock_type::time_point; */
-/* static inline time_point_type get_time_point() noexcept { */
-/*   return clock_type::now(); */
-/* } */
-
-/* static inline tick_type get_tick() noexcept { */
-/*   return
- * static_cast<tick_type>(clock_type::now().time_since_epoch().count()); */
-/* } */
-
 static inline tick_type get_tick() noexcept {
 #ifdef USE_TSC
   // Not synchronized among sockets
+  _mm_lfence();
   return __rdtsc();
+  _mm_lfence();
 #else
   timespec ts;
   clock_gettime(CLOCK_REALTIME, &ts);
@@ -88,11 +79,11 @@ struct Settings {
 #endif
   unsigned int num_threads = 4;
   std::uint32_t seed = 1;
-#if defined PQ_MQ_RANDOM || defined PQ_MQ_STICKY
+#if defined PQ_IS_MQ
   std::size_t c = 4;
-#endif
 #ifdef PQ_MQ_STICKY
   unsigned int stickiness = 8;
+#endif
 #endif
   OperationGenerator<key_type> insert_config{
       InsertPolicy::Uniform,
@@ -164,146 +155,142 @@ struct DeletionLogEntry {
 
 struct alignas(L1_CACHE_LINESIZE) ThreadData {
   OperationCount op_count;
+  std::uint32_t seed;
+  InsertingStrategy<key_type> inserter;
 #ifdef QUALITY
   std::vector<InsertionLogEntry> ins_log;
   std::vector<DeletionLogEntry> del_log;
+  std::vector<tick_type> failed_del_log;
 #endif
-  std::uint32_t seed;
-  InsertingStrategy<key_type> inserter;
 };
 
 static Settings settings;
 alignas(L1_CACHE_LINESIZE) static key_type* prefill_keys;
 alignas(L1_CACHE_LINESIZE) static key_type* keys;
-alignas(L1_CACHE_LINESIZE) static std::atomic_size_t key_index;
+alignas(L1_CACHE_LINESIZE) static std::atomic<key_type*> counter;
 alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
 
-template <typename F, typename... Args>
-void execute_blockwise(std::size_t n, F f, Args const&... args) {
-  static constexpr std::size_t block_size = 4096;
-  std::size_t current_begin, current_end;
-  current_begin = key_index.load(std::memory_order_relaxed);
-  while (current_begin < n) {
-    current_end = std::min(current_begin + block_size, n);
-    if (!key_index.compare_exchange_weak(current_begin, current_end,
-                                         std::memory_order_relaxed)) {
-      continue;
-    }
-    f(current_begin, current_end, args...);
-  }
-}
-
-void generate_prefill_keys(unsigned int id) {
-  execute_blockwise(
-      settings.prefill_size, [id](std::size_t begin, std::size_t end) {
-        std::generate(prefill_keys + begin, prefill_keys + end,
+void generate_prefill_keys(thread_coordination::Context& ctx) {
+  ctx.execute_synchronized_blockwise(
+      prefill_keys, prefill_keys + settings.prefill_size, counter,
+      [id = ctx.get_id()](key_type* begin, key_type* end) {
+        std::generate(begin, end,
                       [id]() { return thread_data[id].inserter.get_key(); });
       });
 }
 
-void generate_keys(unsigned int id) {
-  execute_blockwise(settings.num_operations,
-                    [id](std::size_t begin, std::size_t end) {
-                      std::generate(keys + begin, keys + end, [id]() {
-                        return thread_data[id].inserter.insert()
-                                   ? thread_data[id].inserter.get_key()
-                                   : std::numeric_limits<std::uint32_t>::max();
-                      });
-                    });
+void generate_keys(thread_coordination::Context& ctx) {
+  ctx.execute_synchronized_blockwise(
+      keys, keys + settings.num_operations, counter,
+      [id = ctx.get_id()](key_type* begin, key_type* end) {
+        std::generate(begin, end, [id]() {
+          return thread_data[id].inserter.insert()
+                     ? thread_data[id].inserter.get_key()
+                     : std::numeric_limits<std::uint32_t>::max();
+        });
+      });
+}
+
+void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
+             PriorityQueue& pq) {
+  ctx.execute_synchronized_blockwise(
+      prefill_keys, prefill_keys + settings.prefill_size, counter,
+      [&, id = ctx.get_id()](key_type* begin, key_type* end) {
+        std::for_each(begin, end, [&, id](key_type k) {
+#ifdef QUALITY
+          auto v = to_value(id, thread_data[id].ins_log.size());
+          pq.push(handle, {k, v});
+          thread_data[id].ins_log.push_back({0, k});
+#else
+          pq.push(handle, {k, k});
+#endif
+          ++thread_data[id].op_count.num_prefill_insertions;
+        });
+      });
 }
 
 #ifdef QUALITY
-void prefill(unsigned int id, PriorityQueue::Handle& handle,
-             PriorityQueue& pq) {
-  execute_blockwise(settings.prefill_size, [id, &handle, &pq](std::size_t begin,
-                                                              std::size_t end) {
-    for (key_type* k = prefill_keys + begin; k != prefill_keys + end; ++k) {
-      pq.push(
-          handle,
-          {*k,
-           to_value(id, static_cast<value_type>(
-                            thread_data[id].op_count.num_prefill_insertions))});
-      thread_data[id].ins_log.push_back(InsertionLogEntry{0, *k});
-      ++thread_data[id].op_count.num_prefill_insertions;
-    }
-  });
-}
 
-void work(unsigned int id, PriorityQueue::Handle& handle, PriorityQueue& pq) {
-  std::seed_seq seq{thread_data[id].seed + 2};
+void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
+          PriorityQueue& pq, std::chrono::milliseconds& duration) {
+  std::seed_seq seq{thread_data[ctx.get_id()].seed + 2};
   auto gen = std::mt19937(seq);
   auto dist = std::uniform_int_distribution<long>(
       0, settings.sleep_between_operations.count());
-  execute_blockwise(settings.num_operations, [&, id](std::size_t begin,
-                                                     std::size_t end) {
-    for (key_type* k = keys + begin; k != keys + end; ++k) {
-      if (*k == std::numeric_limits<std::uint32_t>::max()) {
-        PriorityQueue::value_type retval;
-        while (!pq.try_delete_min(handle, retval)) {
-          // Not expected due to prefill
-          ++thread_data[id].op_count.num_failed_deletions;
-        }
-        auto tick = get_tick();
-#ifdef USE_TSC
-        // https://stackoverflow.com/questions/54690703/solution-to-rdtsc-out-of-order-execution
-        _mm_lfence();
-#endif
-        thread_data[id].del_log.push_back(DeletionLogEntry{tick, retval.data});
-        ++thread_data[id].op_count.num_deletions;
-      } else {
-        value_type value =
-            to_value(id, thread_data[id].op_count.num_prefill_insertions +
-                             thread_data[id].op_count.num_insertions);
-        pq.push(handle, {*k, value});
-        auto tick = get_tick();
-#ifdef USE_TSC
-        _mm_lfence();
-#endif
-        thread_data[id].ins_log.push_back(InsertionLogEntry{tick, *k});
-        ++thread_data[id].op_count.num_insertions;
-      }
-      if (settings.sleep_between_operations !=
-          std::chrono::microseconds::zero()) {
-        std::this_thread::sleep_for(std::chrono::microseconds{dist(gen)});
-      }
-    }
-  });
+  std::chrono::steady_clock::time_point t_start;
+  ctx.execute_synchronized_blockwise(
+      [&t_start] { t_start = std::chrono::steady_clock::now(); },
+      [&duration, &t_start] {
+        auto t_end = std::chrono::steady_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            t_end - t_start);
+      },
+      keys, keys + settings.num_operations, counter,
+      [&, id = ctx.get_id()](key_type* begin, key_type* end) {
+        std::for_each(begin, end, [&, id](key_type k) {
+          if (k == std::numeric_limits<std::uint32_t>::max()) {
+            PriorityQueue::value_type retval;
+            while (!pq.try_delete_min(handle, retval)) {
+              // Not expected due to prefill
+              auto tick = get_tick();
+              thread_data[id].failed_del_log.push_back(tick);
+              ++thread_data[id].op_count.num_failed_deletions;
+            }
+            auto tick = get_tick();
+            thread_data[id].del_log.push_back({tick, retval.data});
+            ++thread_data[id].op_count.num_deletions;
+          } else {
+            value_type value =
+                to_value(id, thread_data[id].op_count.num_prefill_insertions +
+                                 thread_data[id].op_count.num_insertions);
+            pq.push(handle, {k, value});
+            auto tick = get_tick();
+            thread_data[id].ins_log.push_back({tick, k});
+            ++thread_data[id].op_count.num_insertions;
+          }
+          if (settings.sleep_between_operations !=
+              std::chrono::microseconds::zero()) {
+            std::this_thread::sleep_for(std::chrono::microseconds{dist(gen)});
+          }
+        });
+      });
+  return;
 }
 
 #else
 
-void prefill(unsigned int id, PriorityQueue::Handle& handle,
-             PriorityQueue& pq) {
-  execute_blockwise(
-      settings.prefill_size, [&](std::size_t begin, std::size_t end) {
-        for (key_type* k = prefill_keys + begin; k != prefill_keys + end; ++k) {
-          pq.push(handle, {*k, *k});
-          ++thread_data[id].op_count.num_insertions;
-        }
-      });
-}
+void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
+          PriorityQueue& pq) {
+  std::chrono::steady_clock::time_point t_start;
+  ctx.execute_synchronized_blockwise(
+      [&t_start] { t_start = std::chrono::steady_clock::now(); },
+      [&duration, &t_start] {
+        auto t_end = std::chrono::steady_clock::now();
+        duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+            t_end - t_start);
+      },
 
-void work(unsigned int id, PriorityQueue::Handle& handle, PriorityQueue& pq) {
-  PriorityQueue::value_type retval;
-  // Let retval escape
-  asm volatile("" ::"g"(&retval));
-  execute_blockwise(settings.num_operations,
-                    [&, id](std::size_t begin, std::size_t end) {
-                      for (key_type* k = keys + begin; k != keys + end; ++k) {
-                        if (*k == std::numeric_limits<std::uint32_t>::max()) {
-                          while (!pq.try_delete_min(handle, retval)) {
-                            // Not expected due to prefill
-                            ++thread_data[id].op_count.num_failed_deletions;
-                          }
-                          // "Use" memory to force write to retval
-                          asm volatile("" ::: "memory");
-                          ++thread_data[id].op_count.num_deletions;
-                        } else {
-                          pq.push(handle, {*k, *k});
-                          ++thread_data[id].op_count.num_insertions;
-                        }
-                      }
-                    });
+      keys, keys + settings.num_operations, counter,
+      [&, id = ctx.get_id()](key_type* begin, key_type* end) {
+        PriorityQueue::value_type retval;
+        // Let retval escape
+        asm volatile("" ::"g"(&retval));
+        std::for_each(begin, end, [&, id](key_type k) {
+          if (k == std::numeric_limits<std::uint32_t>::max()) {
+            while (!pq.try_delete_min(handle, retval)) {
+              // Not expected due to prefill
+              ++thread_data[id].op_count.num_failed_deletions;
+            }
+            // "Use" memory to force write to retval
+            asm volatile("" ::: "memory");
+            ++thread_data[id].op_count.num_deletions;
+          } else {
+            pq.push(handle, {k, k});
+            ++thread_data[id].op_count.num_insertions;
+          }
+        });
+      });
+  return std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start);
 }
 #endif
 
@@ -314,8 +301,6 @@ struct Task {
     pq.init_thread(ctx.get_num_threads());
 #endif
 
-    unsigned int stage = 0;
-
     auto handle = pq.get_handle();
 
 #ifdef PQ_IS_MQ
@@ -324,32 +309,21 @@ struct Task {
 
     if (ctx.is_main()) {
       std::clog << "Generating operations..." << std::flush;
-      key_index = 0;
     }
-    ctx.execute_synchronized(stage++, generate_prefill_keys, ctx.get_id());
-    ctx.synchronize(stage++, []() { key_index = 0; });
-    ctx.execute_synchronized(stage++, generate_keys, ctx.get_id());
-    ctx.synchronize(stage++, []() {
-      std::clog << "done\nPrefilling..." << std::flush;
-      key_index = 0;
-    });
-    ctx.execute_synchronized(stage++, prefill, ctx.get_id(), handle, pq);
+    generate_prefill_keys(ctx);
+    generate_keys(ctx);
 
-    ctx.synchronize(stage++, [&ctx]() {
-      std::clog << "done\nStarting the stress test..." << std::flush;
-      key_index = 0;
-    });
-    ctx.synchronize(stage++);
     if (ctx.is_main()) {
-      auto start_time = std::chrono::steady_clock::now();
-      work(ctx.get_id(), handle, pq);
-      ctx.synchronize(stage++);
-      duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-          std::chrono::steady_clock::now() - start_time);
+      std::clog << "done\nPrefilling..." << std::flush;
+    }
+    prefill(ctx, handle, pq);
+
+    if (ctx.is_main()) {
+      std::clog << "done\nStarting the stress test..." << std::flush;
+    }
+    work(ctx.get_id(), handle, pq, duration);
+    if (ctx.is_main()) {
       std::clog << "done\n";
-    } else {
-      work(ctx.get_id(), handle, pq);
-      ctx.synchronize(stage++);
     }
   }
 
@@ -372,6 +346,9 @@ int main(int argc, char* argv[]) {
   std::clog << "Mode: Throughput\n\t";
 #elif defined QUALITY
   std::clog << "Mode: Quality\n\t";
+#ifdef USE_TSC
+  std::clog << "Use the TSC for ticks\n\t";
+#endif
 #endif
   std::clog << "L1 cache linesize (byte): " << L1_CACHE_LINESIZE << "\n\t";
   std::clog << '\n';

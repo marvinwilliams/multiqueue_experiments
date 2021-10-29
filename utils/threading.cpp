@@ -1,9 +1,10 @@
 #include "threading.hpp"
 
-#include <optional>
 #include <pthread.h>
 #include <memory>
+#include <optional>
 #include <stdexcept>
+#include <utility>
 #include <variant>
 
 namespace threading {
@@ -273,13 +274,13 @@ std::chrono::milliseconds get_thread_runtime() {
   clockid_t cid;
   auto rc = pthread_getcpuclockid(pthread_self(), &cid);
   if (rc != 0) {
-    std::system_error{rc, std::system_category(),
-                      "Failed to get thread's clock id"};
+    throw std::system_error{rc, std::system_category(),
+                            "Failed to get thread's clock id"};
   }
   timespec ts;
   if (clock_gettime(cid, &ts) == -1) {
-    std::system_error{errno, std::system_category(),
-                      "Failed to get thread's time"};
+    throw std::system_error{errno, std::system_category(),
+                            "Failed to get thread's time"};
   }
   return std::chrono::seconds{ts.tv_sec} +
          std::chrono::duration_cast<std::chrono::milliseconds>(

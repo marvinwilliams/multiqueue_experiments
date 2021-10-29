@@ -1,6 +1,10 @@
 #ifndef THREADING_HPP_YHEJJOUQ
 #define THREADING_HPP_YHEJJOUQ
 
+#include "utils/barrier.hpp"
+
+#include <sched.h>
+
 #include <bitset>
 #include <chrono>
 #include <cstdio>
@@ -11,45 +15,7 @@
 #include <system_error>
 #include <variant>
 
-#include <pthread.h>
-#include <sched.h>
-
 namespace threading {
-
-class barrier {
-  pthread_barrier_t b_;
-
- public:
-  explicit barrier(unsigned int num_threads) {
-    if (int rc = pthread_barrier_init(&b_, NULL, num_threads); rc != 0) {
-      throw std::system_error{rc, std::system_category(),
-                              "Failed to create barrier: "};
-    }
-  }
-
-  barrier(barrier const &) = delete;
-  barrier &operator=(barrier const &) = delete;
-
-  // returns true for one of the waiting threads
-  bool wait() {
-    if (int rc = pthread_barrier_wait(&b_); rc == 0) {
-      return false;
-    } else if (rc == PTHREAD_BARRIER_SERIAL_THREAD) {
-      return true;
-    } else {
-      throw std::system_error{rc, std::system_category(),
-                              "Failed to wait for barrier: "};
-    }
-  }
-
-  ~barrier() noexcept {
-    if (int rc = pthread_barrier_destroy(&b_); rc != 0) {
-      auto e = std::system_error{rc, std::system_category(),
-                                 "Failed to destroy barrier: "};
-      std::cerr << e.what() << '\n';
-    }
-  }
-};
 
 namespace scheduling {
 namespace detail {
