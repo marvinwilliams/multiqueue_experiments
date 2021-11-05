@@ -6,9 +6,11 @@
 
 #include <pthread.h>
 
+#include <algorithm>
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <unordered_map>
 #include <utility>
 #include <vector>
 
@@ -37,40 +39,48 @@ class alignas(L1_CACHE_LINESIZE) Context {
   template <typename CompletionFunc>
   void synchronize(CompletionFunc&& f);
 
-  template <typename StartFunc, typename EndFunc, typename Work>
-  void execute_synchronized(StartFunc&& start_func, EndFunc&& end_func,
-                            Work work);
+  template <typename Work, typename... Args>
+  void execute_synchronized(Work work, Args&&... args);
 
-  template <typename Iter, typename Work>
-  void execute_synchronized_blockwise(Iter begin, Iter end,
-                                      std::atomic<Iter>& counter, Work work);
+  template <typename Work, typename... Args>
+  void execute_synchronized_timed(std::string name, Work work, Args&&... args);
 
-  template <typename StartFunc, typename EndFunc, typename Iter, typename Work>
-  void execute_synchronized_blockwise(StartFunc&& start_func,
-                                      EndFunc&& end_func, Iter begin, Iter end,
-                                      std::atomic<Iter>& counter, Work work);
+  template <typename Iter, typename Work, typename... Args>
+  void execute_synchronized_blockwise(Iter begin, Iter end, Work work,
+                                      Args const&... args);
+
+  template <typename Iter, typename Work, typename... Args>
+  void execute_synchronized_blockwise_timed(std::string name, Iter begin,
+                                            Iter end, Work work,
+                                            Args const&... args);
 };
 
 class ThreadCoordinator {
   friend Context;
+  static constexpr std::ptrdiff_t block_size = 4096;
+
   unsigned int num_threads_;
   utils::barrier barrier_;
-  std::vector<threading::pthread> threads_;
+  threading::pthread* threads_;
+  alignas(L1_CACHE_LINESIZE) std::atomic_size_t index_;
+  std::chrono::steady_clock::time_point start_;
+  std::unordered_map<std::string, std::chrono::steady_clock::duration>
+      durations_;
 
  public:
   explicit ThreadCoordinator(unsigned int num_threads)
-      : num_threads_{num_threads}, barrier_{num_threads} {}
+      : num_threads_{num_threads}, barrier_{num_threads} {
+    threads_ = new threading::pthread[num_threads];
+  }
 
   unsigned int get_num_threads() const noexcept { return num_threads_; }
 
   template <typename Task, typename... Args>
   void run_task(Args&&... args) {
-    threads_.clear();
-    threads_.reserve(num_threads_);
     for (unsigned int i = 0; i < num_threads_; ++i) {
       Context ctx{*this, i};
       threading::thread_config config = Task::get_config(ctx);
-      threads_.emplace_back(config, Task::run, ctx, args...);
+      threads_[i] = threading::pthread(config, Task::run, ctx, args...);
     }
   }
 
@@ -94,19 +104,29 @@ inline void Context::synchronize(CompletionFunc&& f) {
   coordinator_.barrier_.wait(std::forward<CompletionFunc>(f));
 }
 
-template <typename StartFunc, typename EndFunc, typename Work>
-inline void Context::execute_synchronized(StartFunc&& start_func,
-                                          EndFunc&& end_func, Work work) {
-  coordinator_.barrier_.wait(std::forward<StartFunc>(start_func));
-  work();
-  coordinator_.barrier_.wait(std::forward<EndFunc>(end_func));
+template <typename Work, typename... Args>
+inline void Context::execute_synchronized(Work work, Args&&... args) {
+  coordinator_.barrier_.wait();
+  work(std::forward<Args>(args)...);
+  coordinator_.barrier_.wait();
 }
 
-template <typename Iter, typename Work>
+template <typename Work, typename... Args>
+inline void Context::execute_synchronized_timed(std::string name, Work work,
+                                                Args&&... args) {
+  coordinator_.barrier_.wait(
+      [this] { coordinator_.start_ = std::chrono::steady_clock::now(); });
+  work(std::forward<Args>(args)...);
+  coordinator_.barrier_.wait([this, &name] {
+    auto now = std::chrono::steady_clock::now();
+    coordinator_.durations_[std::move(name)] = now - coordinator_.start_;
+  });
+}
+
+template <typename Iter, typename Work, typename... Args>
 inline void Context::execute_synchronized_blockwise(Iter begin, Iter end,
-                                                    std::atomic<Iter>& counter,
-                                                    Work work) {
-  static constexpr std::ptrdiff_t block_size = 4096;
+                                                    Work work,
+                                                    Args const&... args) {
   coordinator_.barrier_.wait([begin, &counter] { counter = begin; });
   coordinator_.barrier_.wait();
   Iter current_begin, current_end;
@@ -121,11 +141,11 @@ inline void Context::execute_synchronized_blockwise(Iter begin, Iter end,
 }
 
 template <typename StartFunc, typename EndFunc, typename Iter, typename Work>
-inline void Context::execute_synchronized_blockwise(StartFunc&& start_func,
-                                                    EndFunc&& end_func,
-                                                    Iter begin, Iter end,
+inline void Context::execute_synchronized_blockwise(Iter begin, Iter end,
                                                     std::atomic<Iter>& counter,
-                                                    Work work) {
+                                                    StartFunc&& start_func,
+                                                    Work work,
+                                                    EndFunc&& end_func) {
   static constexpr std::ptrdiff_t block_size = 4096;
   coordinator_.barrier_.wait([begin, &counter] { counter = begin; });
   coordinator_.barrier_.wait(std::forward<StartFunc>(start_func));

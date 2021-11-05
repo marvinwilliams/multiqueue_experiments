@@ -47,7 +47,7 @@ using value_type = unsigned long;
 using PriorityQueue =
     typename util::PriorityQueueFactory<key_type, value_type>::type;
 
-using namespace std::chrono_literals;
+using steady_clock = std::chrono::steady_clock;
 
 #ifdef QUALITY
 
@@ -167,8 +167,8 @@ struct alignas(L1_CACHE_LINESIZE) ThreadData {
 static Settings settings;
 alignas(L1_CACHE_LINESIZE) static key_type* prefill_keys;
 alignas(L1_CACHE_LINESIZE) static key_type* keys;
-alignas(L1_CACHE_LINESIZE) static std::atomic<key_type*> counter;
 alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
+steady_clock::duration duration;
 
 void generate_prefill_keys(thread_coordination::Context& ctx) {
   ctx.execute_synchronized_blockwise(
@@ -212,21 +212,14 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
 #ifdef QUALITY
 
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
-          PriorityQueue& pq, std::chrono::milliseconds& duration) {
+          PriorityQueue& pq) {
   std::seed_seq seq{thread_data[ctx.get_id()].seed + 2};
   auto gen = std::mt19937(seq);
-  auto dist = std::uniform_int_distribution<long>(
-      0, settings.sleep_between_operations.count());
-  std::chrono::steady_clock::time_point t_start;
   ctx.execute_synchronized_blockwise(
-      [&t_start] { t_start = std::chrono::steady_clock::now(); },
-      [&duration, &t_start] {
-        auto t_end = std::chrono::steady_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            t_end - t_start);
-      },
       keys, keys + settings.num_operations, counter,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
+        auto dist = std::uniform_int_distribution<long>(
+            0, settings.sleep_between_operations.count());
         std::for_each(begin, end, [&, id](key_type k) {
           if (k == std::numeric_limits<std::uint32_t>::max()) {
             PriorityQueue::value_type retval;
@@ -253,23 +246,15 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
             std::this_thread::sleep_for(std::chrono::microseconds{dist(gen)});
           }
         });
-      });
-  return;
+      },
+      duration);
 }
 
 #else
 
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
           PriorityQueue& pq) {
-  std::chrono::steady_clock::time_point t_start;
   ctx.execute_synchronized_blockwise(
-      [&t_start] { t_start = std::chrono::steady_clock::now(); },
-      [&duration, &t_start] {
-        auto t_end = std::chrono::steady_clock::now();
-        duration = std::chrono::duration_cast<std::chrono::milliseconds>(
-            t_end - t_start);
-      },
-
       keys, keys + settings.num_operations, counter,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         PriorityQueue::value_type retval;
@@ -289,14 +274,14 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
             ++thread_data[id].op_count.num_insertions;
           }
         });
-      });
-  return std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start);
+      },
+      duration);
 }
+
 #endif
 
 struct Task {
-  static void run(thread_coordination::Context ctx, PriorityQueue& pq,
-                  std::chrono::milliseconds& duration) {
+  static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
 #ifdef PQ_SPRAYLIST
     pq.init_thread(ctx.get_num_threads());
 #endif
@@ -321,7 +306,7 @@ struct Task {
     if (ctx.is_main()) {
       std::clog << "done\nStarting the stress test..." << std::flush;
     }
-    work(ctx.get_id(), handle, pq, duration);
+    work(ctx, handle, pq);
     if (ctx.is_main()) {
       std::clog << "done\n";
     }
@@ -516,6 +501,9 @@ int main(int argc, char* argv[]) {
         InsertingStrategy<key_type>(settings.insert_config, seeds[i] + 1);
   }
   delete[] seeds;
+
+  prefill_keys = new key_type[settings.prefill_size];
+  keys = new key_type[settings.num_operations];
   thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
   std::chrono::milliseconds duration;
   coordinator.run_task<Task>(std::ref(pq), std::ref(duration));
@@ -527,6 +515,8 @@ int main(int argc, char* argv[]) {
   std::clog << "Insertions: " << sum_ops.num_insertions << '\n'
             << "Deletions: " << sum_ops.num_deletions << '\n'
             << "Failed deletions: " << sum_ops.num_failed_deletions << '\n';
+  std::clog << "Time (ms): " << std::chrono::milliseconds{duration}.count()
+            << '\n';
 
 #ifdef QUALITY
   std::cout << settings.num_threads << '\n';
@@ -544,16 +534,15 @@ int main(int argc, char* argv[]) {
   }
 
   std::cout << std::flush;
+
 #else
-  std::cout << "Time (ms): " << std::chrono::milliseconds{duration}.count()
-            << '\n'
-            << "Ops/s: " << std::fixed << std::setprecision(1) << '\n'
+  std::cout << "Ops/s: " << std::fixed << std::setprecision(1) << '\n'
             << static_cast<double>(settings.num_operations) /
                    std::chrono::duration<double>(duration).count()
             << std::endl;
 #endif
-  delete[] thread_data;
-  delete[] prefill_keys;
   delete[] keys;
+  delete[] prefill_keys;
+  delete[] thread_data;
   return 0;
 }

@@ -1,7 +1,7 @@
 #ifndef THREADING_HPP_YHEJJOUQ
 #define THREADING_HPP_YHEJJOUQ
 
-#include "utils/barrier.hpp"
+#include "barrier.hpp"
 
 #include <sched.h>
 
