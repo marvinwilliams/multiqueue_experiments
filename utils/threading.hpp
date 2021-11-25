@@ -49,22 +49,22 @@ struct PolicyBase : WithNice<with_nice>, WithPriority<with_priority> {};
 
 struct Normal : detail::PolicyBase<true, false> {
   static constexpr int id = SCHED_OTHER;
-  constexpr Normal(int n = 0) noexcept { nice = n; }
+  constexpr explicit Normal(int n = 0) noexcept { nice = n; }
 };
 
 struct Idle : detail::PolicyBase<true, false> {
   static constexpr int id = SCHED_IDLE;
-  constexpr Idle(int n = 0) noexcept { nice = n; }
+  constexpr explicit Idle(int n = 0) noexcept { nice = n; }
 };
 
 struct Fifo : detail::PolicyBase<false, true> {
   static constexpr int id = SCHED_FIFO;
-  constexpr Fifo(int p = sched_get_priority_min(id)) noexcept { priority = p; }
+  constexpr explicit Fifo(int p = sched_get_priority_min(id)) noexcept { priority = p; }
 };
 
 struct RoundRobin : detail::PolicyBase<false, true> {
   static constexpr int id = SCHED_RR;
-  constexpr RoundRobin(int p = sched_get_priority_min(id)) noexcept {
+  constexpr explicit RoundRobin(int p = sched_get_priority_min(id)) noexcept {
     priority = p;
   }
 };
@@ -116,7 +116,7 @@ struct thread_config {
 };
 
 struct invoker_base {
-  virtual ~invoker_base() {}
+  virtual ~invoker_base() = default;
   virtual void operator()() noexcept = 0;
 };
 
@@ -190,7 +190,7 @@ class pthread {
   template <typename Callable, typename... Args,
             typename = std::enable_if_t<
                 !std::is_same_v<std::decay_t<Callable>, thread_config>>>
-  pthread(Callable &&f, Args &&...args) {
+  explicit pthread(Callable &&f, Args &&...args) {
     static_assert(
         std::is_invocable_v<std::decay_t<Callable>, std::decay_t<Args>...>,
         "pthread arguments must be invocable after conversion to rvalues");

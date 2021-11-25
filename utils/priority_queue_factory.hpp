@@ -18,9 +18,8 @@
 #endif
 
 #if defined PQ_IS_MQ
-#include "multiqueue/configurations.hpp"
+#include "multiqueue/default_configuration.hpp"
 #include "multiqueue/multiqueue.hpp"
-#include "multiqueue/selection_strategy/random.hpp"
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "capq.hpp"
@@ -51,7 +50,13 @@ namespace util {
 
 #if defined PQ_IS_MQ
 
-struct Config : multiqueue::DefaultConfiguration {
+#if defined PQ_MQ_RANDOM
+struct Config : multiqueue::RandomSelectionConfiguration {
+# elif defined PQ_MQ_STICKY
+struct Config : multiqueue::StickySelectionConfiguration {
+#else
+struct Config : multiqueue::detail::BaseConfiguration {
+#endif
 #ifdef MQ_CONFIG_DELETION_BUFFER_SIZE
   static constexpr std::size_t DeletionBufferSize =
       MQ_CONFIG_DELETION_BUFFER_SIZE;
@@ -59,10 +64,6 @@ struct Config : multiqueue::DefaultConfiguration {
 #ifdef MQ_CONFIG_INSERTION_BUFFER_SIZE
   static constexpr std::size_t InsertionBufferSize =
       MQ_CONFIG_INSERTION_BUFFER_SIZE;
-#endif
-#ifdef PQ_MQ_RANDOM
-  template <typename T>
-  using selection_strategy = multiqueue::selection_strategy::random<T>;
 #endif
 #ifdef MQ_CONFIG_HEAP_DEGREE
   static constexpr unsigned int HeapDegree = MQ_HEAP_DEGREE;
@@ -95,7 +96,7 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
   using KeyType = unsigned long;
   using ValueType = unsigned long;
 #if defined PQ_IS_MQ
-  using type = multiqueue::Multiqueue<KeyType, ValueType, Config>;
+  using type = multiqueue::Multiqueue<KeyType, ValueType, std::less<>, std::allocator<KeyType>, Config>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1
   using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_CAPQ2

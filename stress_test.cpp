@@ -1,6 +1,5 @@
 #include "external/cxxopts.hpp"
 
-#include "system_config.hpp"
 #include "utils/operation_generator.hpp"
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
@@ -172,7 +171,7 @@ steady_clock::duration duration;
 
 void generate_prefill_keys(thread_coordination::Context& ctx) {
   ctx.execute_synchronized_blockwise(
-      prefill_keys, prefill_keys + settings.prefill_size, counter,
+      prefill_keys, prefill_keys + settings.prefill_size,
       [id = ctx.get_id()](key_type* begin, key_type* end) {
         std::generate(begin, end,
                       [id]() { return thread_data[id].inserter.get_key(); });
@@ -181,7 +180,7 @@ void generate_prefill_keys(thread_coordination::Context& ctx) {
 
 void generate_keys(thread_coordination::Context& ctx) {
   ctx.execute_synchronized_blockwise(
-      keys, keys + settings.num_operations, counter,
+      keys, keys + settings.num_operations,
       [id = ctx.get_id()](key_type* begin, key_type* end) {
         std::generate(begin, end, [id]() {
           return thread_data[id].inserter.insert()
@@ -191,18 +190,17 @@ void generate_keys(thread_coordination::Context& ctx) {
       });
 }
 
-void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
-             PriorityQueue& pq) {
+void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
   ctx.execute_synchronized_blockwise(
-      prefill_keys, prefill_keys + settings.prefill_size, counter,
+      prefill_keys, prefill_keys + settings.prefill_size,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         std::for_each(begin, end, [&, id](key_type k) {
 #ifdef QUALITY
           auto v = to_value(id, thread_data[id].ins_log.size());
-          pq.push(handle, {k, v});
+          handle.push({k, v});
           thread_data[id].ins_log.push_back({0, k});
 #else
-          pq.push(handle, {k, k});
+          handle.push({k, k});
 #endif
           ++thread_data[id].op_count.num_prefill_insertions;
         });
@@ -211,32 +209,32 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
 
 #ifdef QUALITY
 
-void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
-          PriorityQueue& pq) {
+void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
   std::seed_seq seq{thread_data[ctx.get_id()].seed + 2};
   auto gen = std::mt19937(seq);
   ctx.execute_synchronized_blockwise(
-      keys, keys + settings.num_operations, counter,
+      keys, keys + settings.num_operations,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         auto dist = std::uniform_int_distribution<long>(
             0, settings.sleep_between_operations.count());
         std::for_each(begin, end, [&, id](key_type k) {
           if (k == std::numeric_limits<std::uint32_t>::max()) {
             PriorityQueue::value_type retval;
-            while (!pq.try_delete_min(handle, retval)) {
+            while (!handle.try_delete_min(retval)) {
               // Not expected due to prefill
               auto tick = get_tick();
               thread_data[id].failed_del_log.push_back(tick);
               ++thread_data[id].op_count.num_failed_deletions;
             }
             auto tick = get_tick();
+
             thread_data[id].del_log.push_back({tick, retval.data});
             ++thread_data[id].op_count.num_deletions;
           } else {
             value_type value =
                 to_value(id, thread_data[id].op_count.num_prefill_insertions +
                                  thread_data[id].op_count.num_insertions);
-            pq.push(handle, {k, value});
+            handle.push({k, value});
             auto tick = get_tick();
             thread_data[id].ins_log.push_back({tick, k});
             ++thread_data[id].op_count.num_insertions;
@@ -252,17 +250,16 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
 
 #else
 
-void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
-          PriorityQueue& pq) {
+void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
   ctx.execute_synchronized_blockwise(
-      keys, keys + settings.num_operations, counter,
+      keys, keys + settings.num_operations,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         PriorityQueue::value_type retval;
         // Let retval escape
         asm volatile("" ::"g"(&retval));
         std::for_each(begin, end, [&, id](key_type k) {
           if (k == std::numeric_limits<std::uint32_t>::max()) {
-            while (!pq.try_delete_min(handle, retval)) {
+            while (!handle.try_delete_min(retval)) {
               // Not expected due to prefill
               ++thread_data[id].op_count.num_failed_deletions;
             }
@@ -270,7 +267,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
             asm volatile("" ::: "memory");
             ++thread_data[id].op_count.num_deletions;
           } else {
-            pq.push(handle, {k, k});
+            handle.push({k, k});
             ++thread_data[id].op_count.num_insertions;
           }
         });
@@ -287,10 +284,6 @@ struct Task {
 #endif
 
     auto handle = pq.get_handle();
-
-#ifdef PQ_IS_MQ
-    handle.data.seed(thread_data[ctx.get_id()].seed);
-#endif
 
     if (ctx.is_main()) {
       std::clog << "Generating operations..." << std::flush;

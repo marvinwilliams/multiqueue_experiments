@@ -5,10 +5,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
-#include <list>
 #include <numeric>
-#include <set>
-#include <unordered_map>
 #include <vector>
 
 struct InsertionLogEntry {

@@ -101,7 +101,7 @@ int main(int argc, char* argv[]) {
     std::clog << "done\n";
     std::clog << "Calculating shortest paths..." << std::flush;
     std::priority_queue<std::pair<std::uint32_t, std::size_t>, std::vector<std::pair<std::uint32_t, std::size_t>>,
-                        std::greater<std::pair<std::uint32_t, std::size_t>>>
+                        std::greater<>>
         pq;
     distances[starting_node] = 0;
     pq.push({0, starting_node});
