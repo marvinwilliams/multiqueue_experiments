@@ -37,7 +37,11 @@
 #endif
 
 #ifndef L1_CACHE_LINESIZE
-#error Need to define L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
+#endif
+
+#ifndef PAGESIZE
+#define PAGESIZE 4096
 #endif
 
 using key_type = unsigned long;
@@ -167,11 +171,11 @@ static Settings settings;
 alignas(L1_CACHE_LINESIZE) static key_type* prefill_keys;
 alignas(L1_CACHE_LINESIZE) static key_type* keys;
 alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
-steady_clock::duration duration;
 
 void generate_prefill_keys(thread_coordination::Context& ctx) {
-  ctx.execute_synchronized_blockwise(
-      prefill_keys, prefill_keys + settings.prefill_size,
+  ctx.execute_synchronized_blockwise_timed(
+      "generate_prefill_keys", prefill_keys,
+      prefill_keys + settings.prefill_size,
       [id = ctx.get_id()](key_type* begin, key_type* end) {
         std::generate(begin, end,
                       [id]() { return thread_data[id].inserter.get_key(); });
@@ -179,8 +183,8 @@ void generate_prefill_keys(thread_coordination::Context& ctx) {
 }
 
 void generate_keys(thread_coordination::Context& ctx) {
-  ctx.execute_synchronized_blockwise(
-      keys, keys + settings.num_operations,
+  ctx.execute_synchronized_blockwise_timed(
+      "generate_keys", keys, keys + settings.num_operations,
       [id = ctx.get_id()](key_type* begin, key_type* end) {
         std::generate(begin, end, [id]() {
           return thread_data[id].inserter.insert()
@@ -191,8 +195,8 @@ void generate_keys(thread_coordination::Context& ctx) {
 }
 
 void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
-  ctx.execute_synchronized_blockwise(
-      prefill_keys, prefill_keys + settings.prefill_size,
+  ctx.execute_synchronized_blockwise_timed(
+      "prefill", prefill_keys, prefill_keys + settings.prefill_size,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         std::for_each(begin, end, [&, id](key_type k) {
 #ifdef QUALITY
@@ -212,15 +216,15 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
   std::seed_seq seq{thread_data[ctx.get_id()].seed + 2};
   auto gen = std::mt19937(seq);
-  ctx.execute_synchronized_blockwise(
-      keys, keys + settings.num_operations,
+  ctx.execute_synchronized_blockwise_timed(
+      "work", keys, keys + settings.num_operations,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         auto dist = std::uniform_int_distribution<long>(
             0, settings.sleep_between_operations.count());
         std::for_each(begin, end, [&, id](key_type k) {
           if (k == std::numeric_limits<std::uint32_t>::max()) {
             PriorityQueue::value_type retval;
-            while (!handle.try_delete_min(retval)) {
+            while (!handle.try_extract_top(retval)) {
               // Not expected due to prefill
               auto tick = get_tick();
               thread_data[id].failed_del_log.push_back(tick);
@@ -228,7 +232,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             }
             auto tick = get_tick();
 
-            thread_data[id].del_log.push_back({tick, retval.data});
+            thread_data[id].del_log.push_back({tick, retval.second});
             ++thread_data[id].op_count.num_deletions;
           } else {
             value_type value =
@@ -244,22 +248,21 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             std::this_thread::sleep_for(std::chrono::microseconds{dist(gen)});
           }
         });
-      },
-      duration);
+      });
 }
 
 #else
 
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
-  ctx.execute_synchronized_blockwise(
-      keys, keys + settings.num_operations,
+  ctx.execute_synchronized_blockwise_timed(
+      "work", keys, keys + settings.num_operations,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         PriorityQueue::value_type retval;
         // Let retval escape
         asm volatile("" ::"g"(&retval));
         std::for_each(begin, end, [&, id](key_type k) {
           if (k == std::numeric_limits<std::uint32_t>::max()) {
-            while (!handle.try_delete_min(retval)) {
+            while (!handle.try_extract_top(retval)) {
               // Not expected due to prefill
               ++thread_data[id].op_count.num_failed_deletions;
             }
@@ -271,8 +274,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             ++thread_data[id].op_count.num_insertions;
           }
         });
-      },
-      duration);
+      });
 }
 
 #endif
@@ -283,10 +285,8 @@ struct Task {
     pq.init_thread(ctx.get_num_threads());
 #endif
 
-    auto handle = pq.get_handle();
-
     if (ctx.is_main()) {
-      std::clog << "Generating operations..." << std::flush;
+      std::clog << "Generating keys..." << std::flush;
     }
     generate_prefill_keys(ctx);
     generate_keys(ctx);
@@ -294,12 +294,15 @@ struct Task {
     if (ctx.is_main()) {
       std::clog << "done\nPrefilling..." << std::flush;
     }
-    prefill(ctx, handle, pq);
+
+    auto handle = pq.get_handle();
+
+    prefill(ctx, handle);
 
     if (ctx.is_main()) {
       std::clog << "done\nStarting the stress test..." << std::flush;
     }
-    work(ctx, handle, pq);
+    work(ctx, handle);
     if (ctx.is_main()) {
       std::clog << "done\n";
     }
@@ -325,10 +328,11 @@ int main(int argc, char* argv[]) {
 #elif defined QUALITY
   std::clog << "Mode: Quality\n\t";
 #ifdef USE_TSC
-  std::clog << "Use the TSC for ticks\n\t";
+  std::clog << "Use TSC for ticks\n\t";
 #endif
 #endif
   std::clog << "L1 cache linesize (byte): " << L1_CACHE_LINESIZE << "\n\t";
+  std::clog << "Pagesize (byte): " << PAGESIZE << "\n\t";
   std::clog << '\n';
 
   std::clog << "Command line: ";
@@ -474,10 +478,13 @@ int main(int argc, char* argv[]) {
   }
 #endif
 
-#if defined PQ_MQ_RANDOM
-  PriorityQueue pq{settings.num_threads, settings.c};
-#elif defined PQ_MQ_STICKY
-  PriorityQueue pq{settings.num_threads, settings.c, settings.stickiness};
+#if defined PQ_IS_MQ
+  auto config = PriorityQueue::configuration{};
+  config.c = settings.c;
+#if defined PQ_MQ_STICKY
+  config.stickiness = settings.stickiness;
+#endif
+  PriorityQueue pq{settings.num_threads, config};
 #else
   PriorityQueue pq;
 #endif
@@ -498,9 +505,14 @@ int main(int argc, char* argv[]) {
   prefill_keys = new key_type[settings.prefill_size];
   keys = new key_type[settings.num_operations];
   thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-  std::chrono::milliseconds duration;
-  coordinator.run_task<Task>(std::ref(pq), std::ref(duration));
+  coordinator.run_task<Task>(std::ref(pq));
   coordinator.join();
+
+  auto generate_prefill_duration =
+      *coordinator.get_duration("generate_prefill_keys");
+  auto generate_duration = *coordinator.get_duration("generate_keys");
+  auto prefill_duration = *coordinator.get_duration("prefill");
+  auto work_duration = *coordinator.get_duration("work");
 
   OperationCount sum_ops = std::transform_reduce(
       thread_data, thread_data + settings.num_threads, OperationCount{},
@@ -508,8 +520,15 @@ int main(int argc, char* argv[]) {
   std::clog << "Insertions: " << sum_ops.num_insertions << '\n'
             << "Deletions: " << sum_ops.num_deletions << '\n'
             << "Failed deletions: " << sum_ops.num_failed_deletions << '\n';
-  std::clog << "Time (ms): " << std::chrono::milliseconds{duration}.count()
+  std::clog << "Generation time (s): " << std::setprecision(3)
+            << std::chrono::duration<double>(generate_prefill_duration +
+                                             generate_duration)
+                   .count()
             << '\n';
+  std::clog << "Prefill time (s): " << std::setprecision(3)
+            << std::chrono::duration<double>(prefill_duration).count() << '\n';
+  std::clog << "Work time (s): " << std::setprecision(3)
+            << std::chrono::duration<double>(work_duration).count() << '\n';
 
 #ifdef QUALITY
   std::cout << settings.num_threads << '\n';
@@ -529,9 +548,9 @@ int main(int argc, char* argv[]) {
   std::cout << std::flush;
 
 #else
-  std::cout << "Ops/s: " << std::fixed << std::setprecision(1) << '\n'
+  std::cout << "Ops/s: " << std::fixed << std::setprecision(2) << '\n'
             << static_cast<double>(settings.num_operations) /
-                   std::chrono::duration<double>(duration).count()
+                   std::chrono::duration<double>(work_duration).count()
             << std::endl;
 #endif
   delete[] keys;

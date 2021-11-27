@@ -96,7 +96,7 @@ class ThreadCoordinator {
     }
   }
 
-  std::optional<std::chrono ::steady_clock::duration> get_duration(
+  std::optional<std::chrono::steady_clock::duration> get_duration(
       std::string const& s) {
     if (auto it = durations_.find(s); it != durations_.end()) {
       return it->second;
@@ -147,7 +147,7 @@ inline void Context::execute_synchronized_blockwise(Iter begin, Iter end,
                          ? block_begin + coordinator_.block_size
                          : end;
     work(block_begin, block_end);
-    block_begin = coordinator_.get_next_index();
+    block_begin = begin + coordinator_.get_next_index();
   }
   coordinator_.barrier_.wait();
 }
@@ -166,7 +166,7 @@ inline void Context::execute_synchronized_blockwise_timed(std::string name,
                          ? block_begin + coordinator_.block_size
                          : end;
     work(block_begin, block_end);
-    block_begin = coordinator_.get_next_index();
+    block_begin = begin + coordinator_.get_next_index();
   }
   coordinator_.barrier_.wait([this, &name] {
     auto now = std::chrono::steady_clock::now();
