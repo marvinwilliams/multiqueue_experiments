@@ -15,6 +15,7 @@
 #include <bitset>
 #include <cassert>
 #include <cstdint>
+#include <limits>
 #include <random>
 
 enum class InsertPolicy : std::size_t { Uniform, Alternating };
@@ -73,7 +74,6 @@ struct InsertingStrategy {
   std::bitset<num_bits> random_bits;
   std::uint8_t bit_pos : log_bits;
 
-  std::mt19937_64 gen;
   std::uniform_int_distribution<unsigned long long> insert_dist;
   std::uniform_int_distribution<Key> key_dist;
 
@@ -82,16 +82,13 @@ struct InsertingStrategy {
 
   InsertingStrategy() {}
 
-  explicit InsertingStrategy(OperationGenerator<Key> const& config,
-                             std::uint32_t seed)
+  explicit InsertingStrategy(OperationGenerator<Key> const& config)
       : policy{config.insert_policy},
         distribution{config.key_distribution},
         random_bits{0},
         bit_pos{0},
         current{0},
         limit{config.max_key} {
-    std::seed_seq seq{seed};
-    gen.seed(seq);
     switch (policy) {
       case InsertPolicy::Alternating:
         random_bits.set(0, true);
@@ -118,11 +115,12 @@ struct InsertingStrategy {
     }
   }
 
-  bool insert() {
+  template <typename Generator>
+  bool insert(Generator& rng) {
     switch (policy) {
       case InsertPolicy::Uniform: {
         if (bit_pos == 0) {
-          random_bits = insert_dist(gen);
+          random_bits = insert_dist(rng);
         }
         return random_bits[bit_pos++];
       }
@@ -134,12 +132,13 @@ struct InsertingStrategy {
     }
   }
 
-  Key get_key() {
+  template <typename Generator>
+  Key get_key(Generator& rng) {
     switch (distribution) {
       case KeyDistribution::Uniform:
-        return key_dist(gen);
+        return key_dist(rng);
       case KeyDistribution::Dijkstra:
-        return current + key_dist.b() <= limit ? current++ + key_dist(gen)
+        return current + key_dist.b() <= limit ? current++ + key_dist(rng)
                                                : limit;
       case KeyDistribution::Ascending:
         return current < limit ? current++ : limit;

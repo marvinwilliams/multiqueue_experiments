@@ -46,14 +46,12 @@ class alignas(L1_CACHE_LINESIZE) Context {
   template <typename Work, typename... Args>
   void execute_synchronized_timed(std::string name, Work work, Args&&... args);
 
-  template <typename Iter, typename Work, typename... Args>
-  void execute_synchronized_blockwise(Iter begin, Iter end, Work work,
-                                      Args const&... args);
+  template <typename Iter, typename Work>
+  void execute_synchronized_blockwise(Iter begin, Iter end, Work work);
 
-  template <typename Iter, typename Work, typename... Args>
+  template <typename Iter, typename Work>
   void execute_synchronized_blockwise_timed(std::string name, Iter begin,
-                                            Iter end, Work work,
-                                            Args const&... args);
+                                            Iter end, Work work);
 };
 
 class ThreadCoordinator {
@@ -135,10 +133,9 @@ inline void Context::execute_synchronized_timed(std::string name, Work work,
   });
 }
 
-template <typename Iter, typename Work, typename... Args>
+template <typename Iter, typename Work>
 inline void Context::execute_synchronized_blockwise(Iter begin, Iter end,
-                                                    Work work,
-                                                    Args const&... args) {
+                                                    Work work) {
   coordinator_.barrier_.wait([this] { coordinator_.reset_index(); });
   coordinator_.barrier_.wait();
   Iter block_begin = begin + coordinator_.get_next_index();
@@ -152,11 +149,10 @@ inline void Context::execute_synchronized_blockwise(Iter begin, Iter end,
   coordinator_.barrier_.wait();
 }
 
-template <typename Iter, typename Work, typename... Args>
+template <typename Iter, typename Work>
 inline void Context::execute_synchronized_blockwise_timed(std::string name,
                                                           Iter begin, Iter end,
-                                                          Work work,
-                                                          Args const&... args) {
+                                                          Work work) {
   coordinator_.barrier_.wait([this] { coordinator_.reset_index(); });
   coordinator_.barrier_.wait(
       [this] { coordinator_.start_ = std::chrono::steady_clock::now(); });

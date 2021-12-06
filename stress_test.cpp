@@ -4,10 +4,10 @@
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
 #include "utils/threading.hpp"
+#include "utils/xoroshiro256starstar.hpp"
 
 #include <time.h>
 #include <x86intrin.h>
-#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -19,7 +19,6 @@
 #include <memory>
 #include <new>
 #include <numeric>
-#include <random>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -81,7 +80,7 @@ struct Settings {
   unsigned int iterations = 5;
 #endif
   unsigned int num_threads = 4;
-  std::uint32_t seed = 1;
+  std::uint64_t seed = 1;
 #if defined PQ_IS_MQ
   std::size_t c = 4;
 #ifdef PQ_MQ_STICKY
@@ -91,9 +90,9 @@ struct Settings {
   OperationGenerator<key_type> insert_config{
       InsertPolicy::Uniform,
       KeyDistribution::Uniform,
-      std::numeric_limits<value_type>::min(),
-      static_cast<value_type>(std::numeric_limits<std::uint32_t>::max() -
-                              1),  // Some pqs use sentinels
+      1,
+      static_cast<value_type>(std::numeric_limits<std::uint32_t>::max() >>
+                              2),  // Some safety for sentinels
       1,
       100,
   };
@@ -157,8 +156,8 @@ struct DeletionLogEntry {
 #endif
 
 struct alignas(L1_CACHE_LINESIZE) ThreadData {
+  xoroshiro256starstar rng;
   OperationCount op_count;
-  std::uint32_t seed;
   InsertingStrategy<key_type> inserter;
 #ifdef QUALITY
   std::vector<InsertionLogEntry> ins_log;
@@ -168,6 +167,7 @@ struct alignas(L1_CACHE_LINESIZE) ThreadData {
 };
 
 static Settings settings;
+static xoroshiro256starstar rng;
 alignas(L1_CACHE_LINESIZE) static key_type* prefill_keys;
 alignas(L1_CACHE_LINESIZE) static key_type* keys;
 alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
@@ -177,8 +177,9 @@ void generate_prefill_keys(thread_coordination::Context& ctx) {
       "generate_prefill_keys", prefill_keys,
       prefill_keys + settings.prefill_size,
       [id = ctx.get_id()](key_type* begin, key_type* end) {
-        std::generate(begin, end,
-                      [id]() { return thread_data[id].inserter.get_key(); });
+        std::generate(begin, end, [id]() {
+          return thread_data[id].inserter.get_key(thread_data[id].rng);
+        });
       });
 }
 
@@ -187,8 +188,8 @@ void generate_keys(thread_coordination::Context& ctx) {
       "generate_keys", keys, keys + settings.num_operations,
       [id = ctx.get_id()](key_type* begin, key_type* end) {
         std::generate(begin, end, [id]() {
-          return thread_data[id].inserter.insert()
-                     ? thread_data[id].inserter.get_key()
+          return thread_data[id].inserter.insert(thread_data[id].rng)
+                     ? thread_data[id].inserter.get_key(thread_data[id].rng)
                      : std::numeric_limits<std::uint32_t>::max();
         });
       });
@@ -214,13 +215,9 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
 #ifdef QUALITY
 
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
-  std::seed_seq seq{thread_data[ctx.get_id()].seed + 2};
-  auto gen = std::mt19937(seq);
   ctx.execute_synchronized_blockwise_timed(
       "work", keys, keys + settings.num_operations,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
-        auto dist = std::uniform_int_distribution<long>(
-            0, settings.sleep_between_operations.count());
         std::for_each(begin, end, [&, id](key_type k) {
           if (k == std::numeric_limits<std::uint32_t>::max()) {
             PriorityQueue::value_type retval;
@@ -245,7 +242,10 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
           }
           if (settings.sleep_between_operations !=
               std::chrono::microseconds::zero()) {
-            std::this_thread::sleep_for(std::chrono::microseconds{dist(gen)});
+            auto dist = std::uniform_int_distribution<std::uint64_t>(
+                1, settings.sleep_between_operations.count());
+            std::this_thread::sleep_for(
+                std::chrono::microseconds{dist(thread_data[id].rng)});
           }
         });
       });
@@ -477,33 +477,36 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 #endif
+  rng.seed(settings.seed);
 
 #if defined PQ_IS_MQ
-  auto config = PriorityQueue::configuration{};
-  config.c = settings.c;
+
+  auto params = PriorityQueue::param_type{};
+  params.c = settings.c;
+  params.seed = rng();
 #if defined PQ_MQ_STICKY
-  config.stickiness = settings.stickiness;
+  params.stickiness = settings.stickiness;
 #endif
-  PriorityQueue pq{settings.num_threads, config};
+
+  PriorityQueue pq{settings.num_threads, params};
 #else
   PriorityQueue pq;
 #endif
 
-  std::clog << "Using priority queue: " << pq.description() << '\n';
+  std::clog << "Using priority queue: " << pq.description() << "\n\n";
 
   thread_data = new ThreadData[settings.num_threads];
-  std::seed_seq seq{settings.seed};
-  auto seeds = new std::uint32_t[settings.num_threads];
-  seq.generate(seeds, seeds + settings.num_threads);
   for (std::size_t i = 0; i < settings.num_threads; ++i) {
-    thread_data[i].seed = seeds[i];
+    thread_data[i].rng.seed(rng());
     thread_data[i].inserter =
-        InsertingStrategy<key_type>(settings.insert_config, seeds[i] + 1);
+        InsertingStrategy<key_type>(settings.insert_config);
   }
-  delete[] seeds;
 
-  prefill_keys = new key_type[settings.prefill_size];
-  keys = new key_type[settings.num_operations];
+  prefill_keys =
+      new (std::align_val_t{L1_CACHE_LINESIZE}) key_type[settings.prefill_size];
+
+  keys = new (std::align_val_t{L1_CACHE_LINESIZE})
+      key_type[settings.num_operations];
   thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
   coordinator.run_task<Task>(std::ref(pq));
   coordinator.join();
@@ -548,7 +551,7 @@ int main(int argc, char* argv[]) {
   std::cout << std::flush;
 
 #else
-  std::cout << "Ops/s: " << std::fixed << std::setprecision(2) << '\n'
+  std::cout << "Ops/s: " << std::fixed << std::setprecision(2)
             << static_cast<double>(settings.num_operations) /
                    std::chrono::duration<double>(work_duration).count()
             << std::endl;
