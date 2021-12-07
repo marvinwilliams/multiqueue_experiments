@@ -182,9 +182,13 @@ endfunction()
 
 generate_mq_target(mq_random PQ_MQ_RANDOM)
 generate_mq_target(mq_sticky PQ_MQ_STICKY)
+generate_mq_target(mq_swapping PQ_MQ_SWAPPING)
+generate_mq_target(mq_perm PQ_MQ_PERM)
 
 add_benchmarks_for(mq_random)
 add_benchmarks_for(mq_sticky)
+add_benchmarks_for(mq_swapping)
+add_benchmarks_for(mq_perm)
 add_benchmarks_for(capq_wrapper)
 add_benchmarks_for(klsm256_wrapper)
 add_benchmarks_for(klsm1024_wrapper)

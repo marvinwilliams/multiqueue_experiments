@@ -154,7 +154,8 @@ int main(int argc, char* argv[]) {
       }
       if (entry.tick <= insertions[entry.insert_thread_id][entry.value].tick) {
         ++num_corrections;
-        insertions[entry.insert_thread_id][entry.value].tick = entry.tick - 1;
+        /* insertions[entry.insert_thread_id][entry.value].tick = entry.tick - 1; */
+        entry.tick = insertions[entry.insert_thread_id][entry.value].tick + 1;
       }
 
       if (insertions[entry.insert_thread_id][entry.value].deleted) {
@@ -191,12 +192,12 @@ int main(int argc, char* argv[]) {
     return 0;
   }
 
-  std::clog << "Sorting deletions..." << std::flush;
-  std::for_each(insertions.begin(), insertions.end(), [](auto& list) {
-    std::sort(list.begin(), list.end(), [](auto const& lhs, auto const& rhs) {
-      return lhs.tick < rhs.tick;
-    });
-  });
+  std::clog << "Sorting operations..." << std::flush;
+  /* std::for_each(insertions.begin(), insertions.end(), [](auto& list) { */
+  /*   std::stable_sort(list.begin(), list.end(), [](auto const& lhs, auto const& rhs) { */
+  /*     return lhs.tick < rhs.tick; */
+  /*   }); */
+  /* }); */
   std::sort(
       deletions.begin(), deletions.end(),
       [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });

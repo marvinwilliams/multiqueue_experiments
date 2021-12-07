@@ -11,7 +11,8 @@
 #ifndef UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 #define UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 
-#if defined PQ_MQ_RANDOM || defined PQ_MQ_STICKY
+#if defined PQ_MQ_RANDOM || defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || \
+    defined PQ_MQ_PERM
 #define PQ_IS_MQ
 #else
 #define PQ_IS_WRAPPER
@@ -20,8 +21,10 @@
 #if defined PQ_IS_MQ
 #include "multiqueue/default_configuration.hpp"
 #include "multiqueue/multiqueue.hpp"
+#include "multiqueue/selection_strategy/perm.hpp"
 #include "multiqueue/selection_strategy/random.hpp"
 #include "multiqueue/selection_strategy/sticky.hpp"
+#include "multiqueue/selection_strategy/swapping.hpp"
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "capq.hpp"
@@ -53,10 +56,14 @@ namespace util {
 #if defined PQ_IS_MQ
 
 struct Config : multiqueue::DefaultConfiguration {
-#ifdef PQ_MQ_RANDOM
+#if defined PQ_MQ_RANDOM
   using selection_strategy_t = multiqueue::selection_strategy::random;
-#elif PQ_MQ_STICKY
+#elif defined PQ_MQ_STICKY
   using selection_strategy_t = multiqueue::selection_strategy::sticky;
+#elif defined PQ_MQ_SWAPPING
+  using selection_strategy_t = multiqueue::selection_strategy::swapping;
+#elif defined PQ_MQ_PERM
+  using selection_strategy_t = multiqueue::selection_strategy::perm;
 #endif
 #ifdef MQ_NO_BUFFERING
   static constexpr bool UseBuffers = false;

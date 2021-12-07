@@ -83,7 +83,7 @@ struct Settings {
   std::uint64_t seed = 1;
 #if defined PQ_IS_MQ
   std::size_t c = 4;
-#ifdef PQ_MQ_STICKY
+#if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
   unsigned int stickiness = 8;
 #endif
 #endif
@@ -235,6 +235,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             value_type value =
                 to_value(id, thread_data[id].op_count.num_prefill_insertions +
                                  thread_data[id].op_count.num_insertions);
+            /* auto tick = get_tick(); */
             handle.push({k, value});
             auto tick = get_tick();
             thread_data[id].ins_log.push_back({tick, k});
@@ -243,7 +244,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
           if (settings.sleep_between_operations !=
               std::chrono::microseconds::zero()) {
             auto dist = std::uniform_int_distribution<std::uint64_t>(
-                1, settings.sleep_between_operations.count());
+                1, static_cast<std::uint64_t>(settings.sleep_between_operations.count()));
             std::this_thread::sleep_for(
                 std::chrono::microseconds{dist(thread_data[id].rng)});
           }
@@ -367,7 +368,7 @@ int main(int argc, char* argv[]) {
       ("c,factor", "The number of queues per thread"
        "(default: 4)", cxxopts::value<std::size_t>(), "NUMBER")
   #endif
-  #ifdef PQ_MQ_STICKY
+#if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
       ("k,stickiness", "The stickiness"
        "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
   #endif
@@ -430,12 +431,12 @@ int main(int argc, char* argv[]) {
     if (result.count("seed") > 0) {
       settings.seed = result["seed"].as<std::uint32_t>();
     }
-#if defined PQ_MQ_RANDOM || defined PQ_MQ_STICKY
+#if defined PQ_MQ_RANDOM || defined PQ_MQ_STICKY || defined PQ_MQ_PERM
     if (result.count("factor") > 0) {
       settings.c = result["factor"].as<std::size_t>();
     }
 #endif
-#ifdef PQ_MQ_STICKY
+#if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
     if (result.count("stickiness") > 0) {
       settings.stickiness = result["stickiness"].as<unsigned int>();
     }
@@ -480,11 +481,12 @@ int main(int argc, char* argv[]) {
   rng.seed(settings.seed);
 
 #if defined PQ_IS_MQ
-
   auto params = PriorityQueue::param_type{};
-  params.c = settings.c;
   params.seed = rng();
-#if defined PQ_MQ_STICKY
+#ifndef PQ_MQ_SWAPPING
+  params.c = settings.c;
+#endif
+#if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
   params.stickiness = settings.stickiness;
 #endif
 
@@ -545,6 +547,12 @@ int main(int argc, char* argv[]) {
     for (auto const& [tick, value] : thread_data[t].del_log) {
       std::cout << "d " << t << ' ' << tick << ' ' << get_thread_id(value)
                 << ' ' << get_elem_id(value) << '\n';
+    }
+  }
+
+  for (unsigned int t = 0; t < settings.num_threads; ++t) {
+    for (auto const& tick : thread_data[t].failed_del_log) {
+      std::cout << "f " << t << ' ' << tick  << '\n';
     }
   }
 
