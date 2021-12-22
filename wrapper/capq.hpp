@@ -27,7 +27,7 @@ class Capq {
     mapped_type data;
   };
 
-  struct Handle {};
+  using Handle = Capq&;
 
   static constexpr key_type min_valid_key =
       std::numeric_limits<key_type>::min();
@@ -45,10 +45,10 @@ class Capq {
   Capq();
   ~Capq();
 
-  Handle get_handle() const { return Handle{}; }
+  Handle get_handle() { return *this; }
 
-  void push(Handle&, value_type value);
-  bool try_delete_min(Handle&, value_type& retval);
+  void push(value_type const& value);
+  bool try_extract_top(value_type& retval);
 
   std::string description() const {
     std::stringstream ss;

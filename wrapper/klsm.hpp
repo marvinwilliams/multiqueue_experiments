@@ -26,7 +26,7 @@ class Klsm {
     mapped_type data;
   };
 
-  struct Handle {};
+  using Handle = Klsm&;
 
   static constexpr key_type min_valid_key =
       std::numeric_limits<key_type>::min();
@@ -39,13 +39,11 @@ class Klsm {
  public:
   Klsm() = default;
 
-  Handle get_handle() const { return Handle{}; }
+  Handle get_handle() { return *this; }
 
-  void push(Handle&, value_type value) {
-    pq_.insert(value.key, value.data);
-  }
+  void push(value_type const& value) { pq_.insert(value.key, value.data); }
 
-  bool try_delete_min(Handle&, value_type& retval) {
+  bool try_extract_top(value_type & retval) {
     return pq_.delete_min(retval.key, retval.data);
   }
 

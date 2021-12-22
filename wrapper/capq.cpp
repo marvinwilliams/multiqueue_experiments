@@ -34,15 +34,15 @@ Capq<A, B, C>::~Capq() {
 }
 
 template <bool A, bool B, bool catree_adapt>
-void Capq<A, B, catree_adapt>::push(Handle&, value_type value) {
+void Capq<A, B, catree_adapt>::push(value_type const& value) {
   capq_put_param(pq_->pq, value.key, value.data, catree_adapt);
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-bool Capq<remove_min_relax, put_relax, catree_adapt>::try_delete_min(
-    Handle&, value_type& retval) {
-  retval.data = capq_remove_min_param(
-      pq_->pq, &retval.key, remove_min_relax, put_relax, catree_adapt);
+bool Capq<remove_min_relax, put_relax, catree_adapt>::try_extract_top(
+    value_type& retval) {
+  retval.data = capq_remove_min_param(pq_->pq, &retval.key, remove_min_relax,
+                                      put_relax, catree_adapt);
   return retval.key != empty_key;
 }
 
