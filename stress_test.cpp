@@ -1,10 +1,10 @@
-#include "external/cxxopts.hpp"
-
 #include "utils/operation_generator.hpp"
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
 #include "utils/threading.hpp"
 #include "utils/xoroshiro256starstar.hpp"
+
+#include "external/cxxopts.hpp"
 
 #include <time.h>
 #include <x86intrin.h>
@@ -185,7 +185,8 @@ void generate_prefill_keys(thread_coordination::Context& ctx) {
 
 void generate_keys(thread_coordination::Context& ctx) {
   ctx.execute_synchronized_blockwise_timed(
-      "generate_keys", keys, keys + settings.num_operations,
+      "generate_keys", keys,
+      keys + settings.num_threads * settings.num_operations,
       [id = ctx.get_id()](key_type* begin, key_type* end) {
         std::generate(begin, end, [id]() {
           return thread_data[id].inserter.insert(thread_data[id].rng)
@@ -216,7 +217,7 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
 
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
   ctx.execute_synchronized_blockwise_timed(
-      "work", keys, keys + settings.num_operations,
+      "work", keys, keys + settings.num_threads * settings.num_operations,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         std::for_each(begin, end, [&, id](key_type k) {
           if (k == std::numeric_limits<std::uint32_t>::max()) {
@@ -257,7 +258,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
 
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
   ctx.execute_synchronized_blockwise_timed(
-      "work", keys, keys + settings.num_operations,
+      "work", keys, keys + settings.num_threads * settings.num_operations,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         PriorityQueue::value_type retval;
         // Let retval escape
@@ -347,7 +348,7 @@ int main(int argc, char* argv[]) {
     options.add_options()
       ("p,prefill", "Specify the number of elements to prefill the queue with "
        "(default: 1'000'000)", cxxopts::value<size_t>(), "NUMBER")
-      ("n,ops", "Specify the number of operations "
+      ("n,ops", "Specify the number of operations per thread"
        "(default: 10'000'000)", cxxopts::value<std::size_t>(), "NUMBER")
       ("i,insert", "Specify the insert policy as one of \"uniform\", \"split\", \"producer\", \"alternating\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
@@ -450,7 +451,7 @@ int main(int argc, char* argv[]) {
 
   std::clog << "Settings: \n\t"
             << "Prefill: " << settings.prefill_size << "\n\t"
-            << "Operations: " << settings.num_operations << "\n\t"
+            << "Operations per thread: " << settings.num_operations << "\n\t"
             << "Threads: " << settings.num_threads << "\n\t"
             << "Insert policy: "
             << get_insert_policy_name(settings.insert_config.insert_policy)
@@ -507,7 +508,7 @@ int main(int argc, char* argv[]) {
       new (std::align_val_t{L1_CACHE_LINESIZE}) key_type[settings.prefill_size];
 
   keys = new (std::align_val_t{L1_CACHE_LINESIZE})
-      key_type[settings.num_operations];
+      key_type[settings.num_threads * settings.num_operations];
   thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
   coordinator.run_task<Task>(std::ref(pq));
   coordinator.join();
@@ -559,7 +560,8 @@ int main(int argc, char* argv[]) {
 
 #else
   std::cout << "Ops/s: " << std::fixed << std::setprecision(2)
-            << static_cast<double>(settings.num_operations) /
+            << static_cast<double>(settings.num_threads *
+                                   settings.num_operations) /
                    std::chrono::duration<double>(work_duration).count()
             << std::endl;
 #endif

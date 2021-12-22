@@ -21,10 +21,7 @@ class Klsm {
   using key_type = KeyType;
   using mapped_type = T;
 
-  struct value_type {
-    key_type key;
-    mapped_type data;
-  };
+  using value_type = std::pair<key_type, mapped_type>;
 
   using Handle = Klsm&;
 
@@ -41,10 +38,10 @@ class Klsm {
 
   Handle get_handle() { return *this; }
 
-  void push(value_type const& value) { pq_.insert(value.key, value.data); }
+  void push(value_type const& value) { pq_.insert(value.first, value.second); }
 
   bool try_extract_top(value_type & retval) {
-    return pq_.delete_min(retval.key, retval.data);
+    return pq_.delete_min(retval.first, retval.second);
   }
 
   std::string description() const {

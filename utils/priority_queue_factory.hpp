@@ -27,14 +27,14 @@
 #include "multiqueue/selection_strategy/swapping.hpp"
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
-#include "capq.hpp"
+#include "wrapper/capq.hpp"
 #elif defined PQ_KLSM || defined PQ_KLSM256 || defined PQ_KLSM1024 || \
     defined PQ_KLSM4096
-#include "klsm.hpp"
+#include "wrapper/klsm.hpp"
 #elif defined PQ_LINDEN
-#include "linden.hpp"
+#include "wrapper/linden.hpp"
 #elif defined PQ_SPRAYLIST
-#include "spraylist.hpp"
+#include "wrapper/spraylist.hpp"
 #elif defined PQ_FIFO
 
 #elif defined PQ_LOCKING

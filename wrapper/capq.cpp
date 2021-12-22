@@ -35,15 +35,15 @@ Capq<A, B, C>::~Capq() {
 
 template <bool A, bool B, bool catree_adapt>
 void Capq<A, B, catree_adapt>::push(value_type const& value) {
-  capq_put_param(pq_->pq, value.key, value.data, catree_adapt);
+  capq_put_param(pq_->pq, value.first, value.second, catree_adapt);
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 bool Capq<remove_min_relax, put_relax, catree_adapt>::try_extract_top(
     value_type& retval) {
-  retval.data = capq_remove_min_param(pq_->pq, &retval.key, remove_min_relax,
+  retval.second = capq_remove_min_param(pq_->pq, &retval.first, remove_min_relax,
                                       put_relax, catree_adapt);
-  return retval.key != empty_key;
+  return retval.first != empty_key;
 }
 
 template class Capq<true, true, true>;

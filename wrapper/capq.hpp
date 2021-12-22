@@ -22,11 +22,7 @@ class Capq {
  public:
   using key_type = unsigned long;
   using mapped_type = unsigned long;
-  struct value_type {
-    key_type key;
-    mapped_type data;
-  };
-
+  using value_type = std::pair<key_type, mapped_type>;
   using Handle = Capq&;
 
   static constexpr key_type min_valid_key =
