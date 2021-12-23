@@ -76,8 +76,6 @@ struct Settings {
 #ifdef QUALITY
   std::chrono::microseconds sleep_between_operations =
       std::chrono::microseconds::zero();
-#else
-  unsigned int iterations = 5;
 #endif
   unsigned int num_threads = 4;
   std::uint64_t seed = 1;

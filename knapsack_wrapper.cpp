@@ -306,7 +306,7 @@ struct Task {
 #endif
     unsigned int stage = 0;
 
-    auto handle = pq.get_handle(ctx.get_id());
+    PriorityQueue::Handle handle = pq.get_handle(ctx.get_id());
 
     Alloc alloc;
 
