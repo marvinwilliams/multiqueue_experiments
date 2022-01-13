@@ -14,13 +14,11 @@
 #if defined PQ_MQ_RANDOM || defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || \
     defined PQ_MQ_PERM
 #define PQ_IS_MQ
-#else
-#define PQ_IS_WRAPPER
 #endif
 
 #if defined PQ_IS_MQ
 #include "multiqueue/default_configuration.hpp"
-#include "multiqueue/multiqueue.hpp"
+#include "multiqueue/factory.hpp"
 #include "multiqueue/selection_strategy/perm.hpp"
 #include "multiqueue/selection_strategy/random.hpp"
 #include "multiqueue/selection_strategy/sticky.hpp"
@@ -57,13 +55,13 @@ namespace util {
 
 struct Config : multiqueue::DefaultConfiguration {
 #if defined PQ_MQ_RANDOM
-  using selection_strategy_t = multiqueue::selection_strategy::random;
+  using SelectionStrategy = multiqueue::selection_strategy::Random;
 #elif defined PQ_MQ_STICKY
-  using selection_strategy_t = multiqueue::selection_strategy::sticky;
+  using SelectionStrategy = multiqueue::selection_strategy::Sticky;
 #elif defined PQ_MQ_SWAPPING
-  using selection_strategy_t = multiqueue::selection_strategy::swapping;
+  using SelectionStrategy = multiqueue::selection_strategy::Swapping;
 #elif defined PQ_MQ_PERM
-  using selection_strategy_t = multiqueue::selection_strategy::perm;
+  using SelectionStrategy = multiqueue::selection_strategy::Permuting;
 #endif
 #ifdef MQ_NO_BUFFERING
   static constexpr bool UseBuffers = false;
@@ -87,7 +85,7 @@ template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
 #if defined PQ_IS_MQ
   using type = typename multiqueue::MultiqueueFactory<
-      KeyType, ValueType, std::less<>, Config, std::allocator<KeyType>>::type;
+      KeyType, ValueType>::template multiqueue_type<Config>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
   // not available with generic types
@@ -110,7 +108,7 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
   using ValueType = unsigned long;
 #if defined PQ_IS_MQ
   using type = typename multiqueue::MultiqueueFactory<
-      KeyType, ValueType, std::less<>, Config, std::allocator<KeyType>>::type;
+      KeyType, ValueType>::template multiqueue_type<Config>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1
   using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_CAPQ2
