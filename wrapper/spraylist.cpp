@@ -7,55 +7,44 @@ extern "C" {
 #include "spraylist_linden/intset.h"
 #include "ssalloc.h"
 }
-#undef min
-#undef max
 
 #include <cstddef>
 #include <iostream>
 #include <memory>
 
-__thread unsigned long *seeds;
+__thread unsigned long* seeds;
 
 namespace wrapper {
 
-struct Spraylist::wrapper_type {
-  sl_intset_t *pq;
-  ~wrapper_type() { sl_set_delete(pq); }
-};
+Spraylist::Spraylist(unsigned int num_threads)
+    : pq_((*levelmax = floor_log_2(1'000'000), sl_set_new()),
+          [](sl_intset_t* pq) { sl_set_delete(pq); }),
+      num_threads_(num_threads) {}
 
-static thread_local std::unique_ptr<thread_data_t> d;
-
-Spraylist::Spraylist() : pq_(new wrapper_type) {
-  static constexpr unsigned int INITIAL_SIZE = 1000000;
-  *levelmax = floor_log_2(INITIAL_SIZE);
-  init_thread(1);
-  pq_->pq = sl_set_new();
+Spraylist::Handle Spraylist::get_handle() {
+  ssalloc_init(num_threads_);
+  seeds = seed_rand();
+  Handle handle{};
+  handle.data_ = std::make_unique<thread_data_t>();
+  handle.data_->seed = rand();
+  handle.data_->seed2 = rand();
+  handle.data_->nb_threads = num_threads_;
+  handle.pq_ = pq_.get();
+  return handle;
 }
 
-Spraylist::~Spraylist() {}
+void Spraylist::Handle::push(value_type const& value) {
+  sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
+}
 
-void Spraylist::init_thread(size_t num_threads) {
-  if (!d) {
-    ssalloc_init(num_threads);
-    seeds = seed_rand();
-
-    d.reset(new thread_data_t);
-    d->seed = rand();
-    d->seed2 = rand();
+bool Spraylist::Handle::try_extract_top(value_type& retval) {
+  retval.first = 0;
+  while (true) {
+    bool success = spray_delete_min_key(pq_, &retval.first, &retval.second,
+                                        data_.get()) != 0;
+    if (success || retval.first == std::numeric_limits<key_type>::max())
+      return success;
   }
-  d->nb_threads = num_threads;
-}
-
-void Spraylist::push(Handle &, value_type value) {
-  sl_add_val(pq_->pq, value.key, value.data, TRANSACTIONAL);
-}
-
-bool Spraylist::try_delete_min(Handle &, value_type &retval) {
-  do {
-  } while (spray_delete_min_key(pq_->pq, &retval.key, &retval.data,
-                                d.get()) == 0 &&
-           retval.key != empty_key);
-  return retval.key != empty_key;
 }
 
 }  // namespace wrapper

@@ -51,41 +51,11 @@
 
 namespace util {
 
-#if defined PQ_IS_MQ
-
-struct Config : multiqueue::DefaultConfiguration {
-#if defined PQ_MQ_RANDOM
-  using SelectionStrategy = multiqueue::selection_strategy::Random;
-#elif defined PQ_MQ_STICKY
-  using SelectionStrategy = multiqueue::selection_strategy::Sticky;
-#elif defined PQ_MQ_SWAPPING
-  using SelectionStrategy = multiqueue::selection_strategy::Swapping;
-#elif defined PQ_MQ_PERM
-  using SelectionStrategy = multiqueue::selection_strategy::Permuting;
-#endif
-#ifdef MQ_NO_BUFFERING
-  static constexpr bool UseBuffers = false;
-#endif
-#ifdef MQ_DBUF_SIZE
-  static constexpr std::size_t DeletionBufferSize = MQ_DBUF_SIZE;
-#endif
-#ifdef MQ_IBUF_SIZE
-  static constexpr std::size_t InsertionBufferSize = MQ_IBUF_SIZE;
-#endif
-#ifdef MQ_HEAP_DEGREE
-  static constexpr unsigned int HeapDegree = MQ_HEAP_DEGREE;
-#endif
-#ifdef MQ_IMPLICIT_LOCK
-  static constexpr bool ImplicitLock = true;
-#endif
-};
-#endif
-
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
 #if defined PQ_IS_MQ
   using type = typename multiqueue::MultiqueueFactory<
-      KeyType, ValueType>::template multiqueue_type<Config>;
+      KeyType, ValueType>::template multiqueue_type<>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
   // not available with generic types
@@ -108,7 +78,7 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
   using ValueType = unsigned long;
 #if defined PQ_IS_MQ
   using type = typename multiqueue::MultiqueueFactory<
-      KeyType, ValueType>::template multiqueue_type<Config>;
+      KeyType, ValueType>::template multiqueue_type<>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1
   using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_CAPQ2

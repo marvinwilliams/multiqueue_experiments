@@ -1,10 +1,16 @@
 #pragma once
-#include <cstdint>
 #ifndef WRAPPER_SPRAYLIST_HPP_INCLUDED
 #define WRAPPER_SPRAYLIST_HPP_INCLUDED
 
 // Adapted from klsm
 
+extern "C" {
+#include "spraylist_linden/intset.h"
+}
+
+#undef min
+#undef max
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <string>
@@ -16,34 +22,34 @@ class Spraylist {
  public:
   using key_type = unsigned long;
   using mapped_type = unsigned long;
-  struct value_type {
-    key_type key;
-    mapped_type data;
+  using value_type = std::pair<key_type, mapped_type>;
+
+  class Handle {
+    friend Spraylist;
+    std::unique_ptr<thread_data_t> data_;
+    sl_intset_t* pq_;
+
+   public:
+    void push(value_type const& value);
+    bool try_extract_top(value_type& retval);
   };
 
-  struct Handle {};
-
-  static constexpr key_type min_valid_key =
-      std::numeric_limits<key_type>::min();
-  static constexpr key_type max_valid_key = std::numeric_limits<std::uint32_t>::max() - 1;
+  static constexpr key_type min_key = std::numeric_limits<key_type>::min();
+  // Use INT_MAX_32
+  static constexpr key_type max_key =
+      std::numeric_limits<std::uint32_t>::max() - 1;
+  static_assert(std::numeric_limits<unsigned long>::max() == -1, "");
 
  private:
-  static constexpr key_type empty_key = std::numeric_limits<key_type>::max();
+  static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
-  struct wrapper_type;
-
-  alignas(64) std::unique_ptr<wrapper_type> pq_;
+  alignas(64) std::unique_ptr<sl_intset_t, void (*)(sl_intset_t*)> pq_;
+  unsigned int num_threads_;
 
  public:
-  Spraylist();
-  ~Spraylist();
+  explicit Spraylist(unsigned int num_threads);
 
-  Handle get_handle() { return Handle{}; }
-
-  void init_thread(size_t const num_threads);
-
-  void push(Handle&, value_type value);
-  bool try_delete_min(Handle&, value_type& retval);
+  Handle get_handle();
 
   std::string description() const { return "spraylist"; }
 };

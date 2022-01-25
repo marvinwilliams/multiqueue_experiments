@@ -4,6 +4,10 @@
 
 // Adapted from klsm
 
+extern "C" {
+#include "capq/capq.h"
+}
+
 #include <ios>
 #include <limits>
 #include <memory>
@@ -23,7 +27,15 @@ class Capq {
   using key_type = unsigned long;
   using mapped_type = unsigned long;
   using value_type = std::pair<key_type, mapped_type>;
-  using Handle = Capq&;
+
+  class Handle {
+    friend Capq;
+    CAPQ* pq_;
+
+   public:
+    void push(value_type const& value);
+    bool try_extract_top(value_type& retval);
+  };
 
   static constexpr key_type min_valid_key =
       std::numeric_limits<key_type>::min();
@@ -31,20 +43,14 @@ class Capq {
       std::numeric_limits<key_type>::max() - 1;
 
  private:
-  static constexpr key_type empty_key = std::numeric_limits<key_type>::max();
+  static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
-  struct wrapper_type;
-
-  std::unique_ptr<wrapper_type> pq_;
+  alignas(64) std::unique_ptr<CAPQ, void (*)(CAPQ*)> pq_;
 
  public:
-  Capq();
-  ~Capq();
+  Capq(unsigned int /* num_threads */);
 
-  Handle get_handle() { return *this; }
-
-  void push(value_type const& value);
-  bool try_extract_top(value_type& retval);
+  Handle get_handle();
 
   std::string description() const {
     std::stringstream ss;

@@ -4,7 +4,7 @@ add_library(wrapper INTERFACE)
 target_include_directories(wrapper INTERFACE "..")
 
 add_library(
-  capq_wrapper STATIC
+  capq STATIC
   ${EXTERNAL_DIR}/klsm/lib/capq/capq.c
   ${EXTERNAL_DIR}/klsm/lib/capq/fat_skiplist.c
   ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc/locks/qd_lock.c
@@ -13,63 +13,63 @@ add_library(
   ${EXTERNAL_DIR}/klsm/lib/capq/gc/ptst.c
   capq.cpp
 )
-target_link_libraries(capq_wrapper PUBLIC wrapper)
+target_link_libraries(capq PUBLIC wrapper)
 target_include_directories(
-  capq_wrapper PRIVATE
+  capq PRIVATE
   ${EXTERNAL_DIR}/klsm/lib
   ${EXTERNAL_DIR}/klsm/lib/capq
   ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc
 )
-target_compile_options(capq_wrapper PRIVATE -w -std=gnu++11)
-target_compile_definitions(capq_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
-set_property(TARGET capq_wrapper PROPERTY pq_name wrapper_capq)
-target_compile_definitions(capq_wrapper INTERFACE PQ_CAPQ)
+target_compile_options(capq PRIVATE -w -std=gnu++11)
+target_compile_definitions(capq PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+set_property(TARGET capq PROPERTY pq_name capq)
+target_compile_definitions(capq INTERFACE PQ_CAPQ)
 
 add_library(
-  klsm_wrapper STATIC
+  klsm STATIC
   ${EXTERNAL_DIR}/klsm/src/util/thread_local_ptr.cpp
 )
-target_link_libraries(klsm_wrapper INTERFACE wrapper)
+target_link_libraries(klsm INTERFACE wrapper)
 target_include_directories(
-  klsm_wrapper SYSTEM INTERFACE
+  klsm SYSTEM INTERFACE
   ${EXTERNAL_DIR}/klsm/src
   ${EXTERNAL_DIR}/klsm/src/util
 )
-add_library(klsm256_wrapper INTERFACE)
-target_link_libraries(klsm256_wrapper INTERFACE klsm_wrapper)
-set_property(TARGET klsm256_wrapper PROPERTY pq_name wrapper_klsm256)
-target_compile_definitions(klsm256_wrapper INTERFACE PQ_KLSM256)
-add_library(klsm1024_wrapper INTERFACE)
-target_link_libraries(klsm1024_wrapper INTERFACE klsm_wrapper)
-set_property(TARGET klsm1024_wrapper PROPERTY pq_name wrapper_klsm1024)
-target_compile_definitions(klsm1024_wrapper INTERFACE PQ_KLSM1024)
-add_library(klsm4096_wrapper INTERFACE)
-target_link_libraries(klsm4096_wrapper INTERFACE klsm_wrapper)
-set_property(TARGET klsm4096_wrapper PROPERTY pq_name wrapper_klsm4096)
-target_compile_definitions(klsm4096_wrapper INTERFACE PQ_KLSM4096)
+add_library(klsm256 INTERFACE)
+target_link_libraries(klsm256 INTERFACE klsm)
+set_property(TARGET klsm256 PROPERTY pq_name klsm256)
+target_compile_definitions(klsm256 INTERFACE PQ_KLSM256)
+add_library(klsm1024 INTERFACE)
+target_link_libraries(klsm1024 INTERFACE klsm)
+set_property(TARGET klsm1024 PROPERTY pq_name klsm1024)
+target_compile_definitions(klsm1024 INTERFACE PQ_KLSM1024)
+add_library(klsm4096 INTERFACE)
+target_link_libraries(klsm4096 INTERFACE klsm)
+set_property(TARGET klsm4096 PROPERTY pq_name klsm4096)
+target_compile_definitions(klsm4096 INTERFACE PQ_KLSM4096)
 
 add_library(
-  linden_wrapper STATIC
+  linden STATIC
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/linden_common.c
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/linden.c
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/gc/gc.c
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/gc/ptst.c
   linden.cpp
 )
-target_link_libraries(linden_wrapper PUBLIC wrapper)
-target_compile_options(linden_wrapper PRIVATE -w -std=gnu++11)
-target_compile_definitions(linden_wrapper PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+target_link_libraries(linden PUBLIC wrapper)
+target_compile_options(linden PRIVATE -w -std=gnu++11)
+target_compile_definitions(linden PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
-  linden_wrapper PRIVATE
+  linden PRIVATE
   ${EXTERNAL_DIR}/klsm/lib
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/atomic_ops
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/include
 )
-set_property(TARGET linden_wrapper PROPERTY pq_name wrapper_linden)
-target_compile_definitions(linden_wrapper INTERFACE PQ_LINDEN)
+set_property(TARGET linden PROPERTY pq_name linden)
+target_compile_definitions(linden INTERFACE PQ_LINDEN)
 
 add_library(
-  spraylist_wrapper STATIC
+  spraylist STATIC
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/fraser.c
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/intset.c
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/linden_common.c
@@ -80,14 +80,14 @@ add_library(
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/ssalloc.c
   spraylist.cpp
 )
-target_link_libraries(spraylist_wrapper PUBLIC wrapper)
-target_compile_options(spraylist_wrapper PRIVATE -w -std=gnu++11)
-target_compile_definitions(spraylist_wrapper PRIVATE INTEL PRIVATE LOCKFREE PRIVATE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+target_link_libraries(spraylist PUBLIC wrapper)
+target_compile_options(spraylist PRIVATE -w -std=gnu++11)
+target_compile_definitions(spraylist PRIVATE INTEL PRIVATE LOCKFREE PRIVATE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
-  spraylist_wrapper PRIVATE
+  spraylist PRIVATE
   ${EXTERNAL_DIR}/klsm/lib
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/atomic_ops
   ${EXTERNAL_DIR}/klsm/lib/spraylist_linden/include
 )
-set_property(TARGET spraylist_wrapper PROPERTY pq_name wrapper_spraylist)
-target_compile_definitions(spraylist_wrapper INTERFACE PQ_SPRAYLIST)
+set_property(TARGET spraylist PROPERTY pq_name spraylist)
+target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)

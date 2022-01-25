@@ -165,7 +165,6 @@ struct alignas(L1_CACHE_LINESIZE) ThreadData {
 };
 
 static Settings settings;
-static xoroshiro256starstar rng;
 alignas(L1_CACHE_LINESIZE) static key_type* prefill_keys;
 alignas(L1_CACHE_LINESIZE) static key_type* keys;
 alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
@@ -282,10 +281,6 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
 
 struct Task {
   static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
-#ifdef PQ_SPRAYLIST
-    pq.init_thread(ctx.get_num_threads());
-#endif
-
     if (ctx.is_main()) {
       std::clog << "Generating keys..." << std::flush;
     }
@@ -319,17 +314,16 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
+  std::clog << "Build configuration\n";
 #ifndef NDEBUG
-  std::clog << "DEBUG build!\n\n";
+  std::clog << "DEBUG build\n";
 #endif
-
-  std::clog << "Build configuration:\n\t";
 #if defined THROUGHPUT
-  std::clog << "Mode: Throughput\n\t";
+  std::clog << "Mode: Throughput\n";
 #elif defined QUALITY
-  std::clog << "Mode: Quality\n\t";
+  std::clog << "Mode: Quality\n";
 #ifdef USE_TSC
-  std::clog << "Use TSC for ticks\n\t";
+  std::clog << "Use TSC\n";
 #endif
 #endif
   std::clog << "L1 cache linesize (byte): " << L1_CACHE_LINESIZE << "\n\t";
@@ -364,13 +358,13 @@ int main(int argc, char* argv[]) {
        "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
       ("s,seed", "Specify the initial seed"
        "(default: 0)", cxxopts::value<std::uint32_t>(), "NUMBER")
-  #if defined PQ_IS_MQ
+#if defined PQ_IS_MQ
       ("c,factor", "The number of queues per thread"
        "(default: 4)", cxxopts::value<std::size_t>(), "NUMBER")
-  #endif
 #if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
       ("k,stickiness", "The stickiness"
        "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
+  #endif
   #endif
       ("h,help", "Print this help");
   // clang-format on
@@ -431,15 +425,15 @@ int main(int argc, char* argv[]) {
     if (result.count("seed") > 0) {
       settings.seed = result["seed"].as<std::uint32_t>();
     }
-#if defined PQ_MQ_RANDOM || defined PQ_MQ_STICKY || defined PQ_MQ_PERM
+#if defined PQ_IS_MQ
     if (result.count("factor") > 0) {
       settings.c = result["factor"].as<std::size_t>();
     }
-#endif
 #if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
     if (result.count("stickiness") > 0) {
       settings.stickiness = result["stickiness"].as<unsigned int>();
     }
+#endif
 #endif
   } catch (cxxopts::OptionParseException const& e) {
     std::cerr << "Error parsing arguments: " << e.what() << '\n';
@@ -478,6 +472,7 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 #endif
+  xoroshiro256starstar rng;
   rng.seed(settings.seed);
 
 #if defined PQ_IS_MQ
@@ -490,7 +485,7 @@ int main(int argc, char* argv[]) {
 
   PriorityQueue pq{settings.num_threads, params};
 #else
-  PriorityQueue pq;
+  PriorityQueue pq{settings.num_threads};
 #endif
 
   std::clog << "Using priority queue: " << pq.description() << "\n\n";

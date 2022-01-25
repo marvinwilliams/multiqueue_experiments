@@ -7,6 +7,7 @@
 #include "k_lsm/k_lsm.h"
 
 #include <limits>
+#include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
@@ -17,31 +18,37 @@ namespace wrapper {
 
 template <typename KeyType, typename T, int Relaxation>
 class Klsm {
+  using pq_type = kpq::k_lsm<key_type, mapped_type, Relaxation>;
+
  public:
   using key_type = KeyType;
   using mapped_type = T;
 
   using value_type = std::pair<key_type, mapped_type>;
 
-  using Handle = Klsm&;
+  class Handle {
+    friend Klsm;
+    pq_type* pq_;
 
-  static constexpr key_type min_valid_key =
-      std::numeric_limits<key_type>::min();
-  static constexpr key_type max_valid_key =
-      std::numeric_limits<key_type>::max();
+   public:
+    void push(value_type const& value) {
+      pq_->insert(value.first, value.second);
+    }
+    bool try_extract_top(value_type& retval) {
+      return pq_->delete_min(retval.first, retval.second);
+    }
+  };
 
  private:
-  kpq::k_lsm<key_type, mapped_type, Relaxation> pq_;
+  alignas(64) std::unique_ptr<pq_type> pq_;
 
  public:
-  Klsm() = default;
+  Klsm(unsigned int /* num_threads */) {}
 
-  Handle get_handle() { return *this; }
-
-  void push(value_type const& value) { pq_.insert(value.first, value.second); }
-
-  bool try_extract_top(value_type & retval) {
-    return pq_.delete_min(retval.first, retval.second);
+  Handle get_handle() {
+    auto h = Handle{};
+    h.pq_ = pq_.get();
+    return h;
   }
 
   std::string description() const {

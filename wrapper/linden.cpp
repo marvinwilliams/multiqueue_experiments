@@ -10,32 +10,29 @@ extern "C" {
 
 namespace wrapper {
 
-struct Linden::wrapper_type {
-  pq_t* pq;
-  ~wrapper_type() { pq_destroy(pq); }
-};
+Linden::Linden(unsigned int /* num_threads */)
+    : pq_((_init_gc_subsystem(), pq_init(32)), [](pq_t* pq) {
+        // Avoid segfault
+        ::insert(pq, 1, 1);
+        pq_destroy(pq);
+        _destroy_gc_subsystem();
+      }) {}
 
-Linden::Linden() : pq_(new wrapper_type) {
-  _init_gc_subsystem();
-  pq_->pq = pq_init(32);
+Linden::Handle Linden::get_handle() {
+  auto h = Handle{};
+  h.pq_ = pq_.get();
+  return h;
 }
 
-Linden::~Linden() {
-  // Avoid segfault
-  ::insert(pq_->pq, 1, 1);
-  pq_.reset();
-  _destroy_gc_subsystem();
+void Linden::Handle::push(value_type const& value) {
+  ::insert(pq_, value.first + 1, value.second);
 }
 
-void Linden::push(Handle&, value_type value) {
-  ::insert(pq_->pq, value.key + 1, value.data);
-}
-
-bool Linden::try_delete_min(Handle&, value_type& retval) {
+bool Linden::Handle::try_extract_top(value_type& retval) {
   unsigned long k_ret;
-  retval.data = deletemin_key(pq_->pq, &retval.key);
-  --retval.key;
-  return retval.key != empty_key;
+  retval.second = deletemin_key(pq_, &retval.first);
+  --retval.first;
+  return retval.first != sentinel_;
 }
 
 }  // namespace wrapper
