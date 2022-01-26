@@ -4,16 +4,14 @@
 
 // Adapted from klsm
 
-extern "C" {
-#include "capq/capq.h"
-}
-
 #include <ios>
 #include <limits>
 #include <memory>
 #include <sstream>
 #include <string>
 #include <utility>
+
+typedef struct fpasl_catree_set CAPQ;
 
 namespace wrapper {
 

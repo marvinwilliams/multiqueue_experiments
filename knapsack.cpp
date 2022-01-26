@@ -1,4 +1,4 @@
-#if !(defined PACKED_VALUE || defined POINTER_VALUE || defined EXPLICIT_VALUE)
+#if !(defined PACKED_VALUE || defined HEAP_VALUE || defined EXPLICIT_VALUE)
 #define PACKED_VALUE
 #endif
 
@@ -10,7 +10,7 @@
 
 #include "cxxopts.hpp"
 
-#ifdef POINTER_VALUE
+#ifdef HEAP_VALUE
 #include <tbb/scalable_allocator.h>
 #endif
 #include <x86intrin.h>
@@ -35,7 +35,7 @@
 
 using weight_type = unsigned long;
 using value_type = unsigned long;
-static constexpr unsigned int retries = 400;
+static constexpr unsigned int retries = 100;
 
 // Some pqs need higher values as sentinels
 static constexpr value_type value_max =
@@ -51,8 +51,18 @@ struct KnapsackInstance {
   std::vector<KnapsackInstance::Item> prefix_sum;
 };
 
+struct Node {
+  Node() {}
+  explicit Node(unsigned int i, unsigned int h, weight_type uc, value_type v)
+      : index{i}, hint{h}, used_capacity{uc}, value{v} {}
+  unsigned int index;
+  unsigned int hint;
+  weight_type used_capacity;
+  value_type value;
+};
+
 #if defined PACKED_VALUE
-using payload = unsigned long;
+using payload_type = unsigned long;
 static_assert(sizeof(unsigned long) == sizeof(std::uint64_t),
               "64bit unsigned long required");
 
@@ -64,111 +74,66 @@ static_assert(bits_for_index + bits_for_hint + bits_for_used_capacity +
                       bits_for_value <=
                   64,
               "Can't use more than 64 bits to encode Node");
-constexpr unsigned int get_index(payload p) noexcept {
+constexpr unsigned int get_index(payload_type p) noexcept {
   return static_cast<unsigned int>(
-      p & ((static_cast<payload>(1) << bits_for_index) - 1));
+      p & ((static_cast<payload_type>(1) << bits_for_index) - 1));
 }
 
-constexpr unsigned int get_hint(payload p) noexcept {
+constexpr unsigned int get_hint(payload_type p) noexcept {
   return static_cast<unsigned int>(
-      (p >> bits_for_index) & ((static_cast<payload>(1) << bits_for_hint) - 1));
+      (p >> bits_for_index) &
+      ((static_cast<payload_type>(1) << bits_for_hint) - 1));
 }
 
-constexpr weight_type get_used_capacity(payload p) noexcept {
+constexpr weight_type get_used_capacity(payload_type p) noexcept {
   return static_cast<weight_type>(
       (p >> (bits_for_index + bits_for_hint)) &
-      ((static_cast<payload>(1) << bits_for_used_capacity) - 1));
+      ((static_cast<payload_type>(1) << bits_for_used_capacity) - 1));
 }
 
-constexpr value_type get_value(payload p) noexcept {
+constexpr value_type get_value(payload_type p) noexcept {
   return static_cast<weight_type>(
       (p >> (bits_for_index + bits_for_hint + bits_for_used_capacity)) &
-      ((static_cast<payload>(1) << bits_for_value) - 1));
+      ((static_cast<payload_type>(1) << bits_for_value) - 1));
 }
 
-constexpr payload to_payload(unsigned int index, unsigned int hint,
-                             weight_type used_capacity,
-                             value_type value) noexcept {
-  return (static_cast<payload>(index) &
-          ((static_cast<payload>(1) << bits_for_index) - 1)) |
-         ((static_cast<payload>(hint) &
-           ((static_cast<payload>(1) << bits_for_hint) - 1))
+constexpr payload_type to_payload(unsigned int index, unsigned int hint,
+                                  weight_type used_capacity,
+                                  value_type value) noexcept {
+  return (static_cast<payload_type>(index) &
+          ((static_cast<payload_type>(1) << bits_for_index) - 1)) |
+         ((static_cast<payload_type>(hint) &
+           ((static_cast<payload_type>(1) << bits_for_hint) - 1))
           << bits_for_index) |
-         ((static_cast<payload>(used_capacity) &
-           ((static_cast<payload>(1) << bits_for_used_capacity) - 1))
+         ((static_cast<payload_type>(used_capacity) &
+           ((static_cast<payload_type>(1) << bits_for_used_capacity) - 1))
           << (bits_for_index + bits_for_hint)) |
-         ((static_cast<payload>(value) &
-           ((static_cast<payload>(1) << bits_for_value) - 1))
+         ((static_cast<payload_type>(value) &
+           ((static_cast<payload_type>(1) << bits_for_value) - 1))
           << (bits_for_index + bits_for_hint + bits_for_used_capacity));
 }
 
-#elif defined POINTER_VALUE
-struct Node {
-  unsigned int index;
-  unsigned int hint;
-  weight_type used_capacity;
-  value_type value;
-};
+#elif defined HEAP_VALUE
 
-using payload = unsigned long;
-static_assert(sizeof(payload) >= sizeof(std::uintptr_t),
+using payload_type = unsigned long;
+static_assert(sizeof(payload_type) >= sizeof(std::uintptr_t),
               "Pointer must fit into value type of pq");
-
-constexpr unsigned int get_index(payload p) noexcept {
-  return reinterpret_cast<Node*>(p)->index;
-}
-
-constexpr unsigned int get_hint(payload p) noexcept {
-  return reinterpret_cast<Node*>(p)->hint;
-}
-
-constexpr weight_type get_used_capacity(payload p) noexcept {
-  return reinterpret_cast<Node*>(p)->used_capacity;
-}
-
-constexpr value_type get_value(payload p) noexcept {
-  return reinterpret_cast<Node*>(p)->value;
-}
-
-constexpr payload to_payload(Node const& node) noexcept {
-  return reinterpret_cast<payload>(&node);
-}
 
 using Alloc = tbb::scalable_allocator<Node>;
 using AllocTraits = std::allocator_traits<Alloc>;
 
-Alloc alloc;
+Alloc global_alloc;
 
 #elif defined EXPLICIT_VALUE
-struct Node {
-  unsigned int index;
-  unsigned int hint;
-  weight_type used_capacity;
-  value_type value;
-};
-
-using payload = Node;
-
-constexpr unsigned int get_index(payload const& p) noexcept { return p.index; }
-
-constexpr unsigned int get_hint(payload const& p) noexcept { return p.hint; }
-
-constexpr weight_type get_used_capacity(payload const& p) noexcept {
-  return p.used_capacity;
-}
-
-constexpr value_type get_value(payload const& p) noexcept { return p.value; }
-
-constexpr payload const& to_payload(Node const& node) noexcept { return node; }
-
+using payload_type = Node;
 #endif
 
 #ifdef PQ_IS_MQ
 using PriorityQueue = typename multiqueue::MultiqueueFactory<
-    value_type, payload, std::greater<>>::template multiqueue_type<>;
+    value_type, payload_type, std::greater<>>::template multiqueue_type<>;
 #else
 using PriorityQueue =
-    typename util::PriorityQueueFactory<value_type, payload>::type;
+    typename util::PriorityQueueFactory<value_type, payload_type>::type;
 #endif
 
 using steady_type = std::chrono::steady_clock;
@@ -190,7 +155,7 @@ struct alignas(2 * L1_CACHE_LINESIZE) StatCounters {
   std::size_t pushed_nodes = 0;
   std::size_t ignored_nodes = 0;
   std::size_t extracted_nodes = 0;
-  std::size_t failed_extractions = 0;
+  std::size_t failed_extracts = 0;
   std::size_t allocated_nodes = 0;
   std::size_t freed_nodes = 0;
   std::size_t processed_nodes = 0;
@@ -198,20 +163,47 @@ struct alignas(2 * L1_CACHE_LINESIZE) StatCounters {
 };
 
 static std::unique_ptr<StatCounters[]> stats;
+
+inline void pushed_node(unsigned int id) { ++stats[id].pushed_nodes; }
+inline void ignored_node(unsigned int id) { ++stats[id].ignored_nodes; }
+inline void extracted_node(unsigned int id) { ++stats[id].extracted_nodes; }
+inline void extract_failed(unsigned int id) { ++stats[id].failed_extracts; }
+inline void allocated_node(unsigned int id) { ++stats[id].allocated_nodes; }
+inline void freed_node(unsigned int id) { ++stats[id].freed_nodes; }
+inline void processed_node(unsigned int id) { ++stats[id].processed_nodes; }
+inline void started_idling(unsigned int id) { ++stats[id].idle; }
+#else
+inline void pushed_node(unsigned int) {}
+inline void ignored_node(unsigned int) {}
+inline void extracted_node(unsigned int) {}
+inline void extract_failed(unsigned int) {}
+inline void allocated_node(unsigned int) {}
+inline void freed_node(unsigned int) {}
+inline void processed_node(unsigned int) {}
+inline void started_idling(unsigned int) {}
 #endif
 
 static Settings settings;
 static KnapsackInstance instance;
 
-unsigned int get_upper_bound(weight_type used_capacity, unsigned int index,
-                             unsigned int hint) noexcept {
-  auto const weight_diff = instance.prefix_sum[index].weight - used_capacity;
-  assert(hint < instance.prefix_sum.size());
-  while (hint < instance.prefix_sum.size() &&
-         instance.prefix_sum[hint].weight - weight_diff < instance.capacity) {
+value_type get_upper_bound(weight_type weight_unused, unsigned int index,
+                           unsigned int& hint) noexcept {
+  auto target_weight = instance.capacity + weight_unused;
+  assert(hint <= instance.prefix_sum.size());
+  while (hint != instance.prefix_sum.size() &&
+         instance.prefix_sum[hint].weight <= target_weight) {
     ++hint;
   }
-  return hint;
+  value_type result =
+      instance.prefix_sum[hint - 1].value - instance.prefix_sum[index].value;
+  if (hint != instance.prefix_sum.size()) {
+    weight_type free_capacity =
+        target_weight - instance.prefix_sum[hint - 1].weight;
+    result += (instance.items[hint - 1].value * free_capacity +
+               instance.items[hint - 1].weight - 1) /
+              instance.items[hint - 1].weight;
+  }
+  return result;
 }
 
 #ifdef EXACT_TERMINATION
@@ -227,12 +219,14 @@ alignas(2 * L1_CACHE_LINESIZE) std::atomic_size_t idle_counter = 0;
 static inline bool idle(unsigned int id) {
   idle_state[id].state.store(2, std::memory_order_relaxed);
   idle_counter.fetch_add(1, std::memory_order_release);
+  started_idling(id);
   while (true) {
     if (idle_state[id].state.load(std::memory_order_relaxed) == 0) {
       // Someone woke this thread up
       return false;
     }
-    if (idle_counter.load(std::memory_order_relaxed) == 2 * num_threads) {
+    if (idle_counter.load(std::memory_order_relaxed) ==
+        2 * settings.num_threads) {
       // Everyone idles
       return true;
     }
@@ -255,68 +249,74 @@ bool process_node(PriorityQueue::Handle& handle,
 #endif
   if (upper_bound <= current_best_value) {
     // The upper bound of this node is worse than the currently best value
-#ifdef COUNT_STATS
-    ++stats[id].ignored_nodes;
-    ++stats[id].freed_nodes;
-#endif
-#ifdef POINTER_VALUE
-    AllocTraits::destroy(alloc, reinterpret_cast<Node*>(value.second));
-    AllocTraits::deallocate(alloc, reinterpret_cast<Node*>(value.second), 1);
+    ignored_node(id);
+#ifdef HEAP_VALUE
+    AllocTraits::destroy(global_alloc, reinterpret_cast<Node*>(value.second));
+    AllocTraits::deallocate(global_alloc, reinterpret_cast<Node*>(value.second),
+                            1);
+    freed_node(id);
 #endif
     return true;
   }
-#ifdef COUNT_STATS
-  ++stats[id].processed_nodes;
-#endif
+  processed_node(id);
 
   bool terminal = true;
-#ifdef POINTER_VALUE
+#ifdef PACKED_VALUE
+  Node node{get_index(value.second), get_hint(value.second),
+            get_used_capacity(value.second), get_value(value.second)};
+#elif defined HEAP_VALUE
   Node* node_ptr = reinterpret_cast<Node*>(value.second);
   Node node = *node_ptr;
+#elif defined EXPLICIT_VALUE
+  Node const& node = value.second;
 #endif
+  while (node.value > current_best_value &&
+         !best_value.compare_exchange_weak(current_best_value, node.value,
+                                           std::memory_order_relaxed)) {
+    _mm_pause();
+  }
   // Check if there is enough capacity for the next item
-  if (get_index(value.second) != get_hint(value.second)) {
+  assert(node.index < node.hint);
+  if (node.index + 1 != node.hint) {
 #ifdef PACKED_VALUE
-    handle.push(
-        {value.first,
-         to_payload(get_index(value.second) + 1, get_hint(value.second),
-                    get_used_capacity(value.second) +
-                        instance.items[get_index(value.second)].weight,
-                    get_value(value.second) +
-                        instance.items[get_index(value.second)].value)});
-#elif defined POINTER_VALUE
-    ++node_ptr->index;
-    node_ptr->used_capacity += instance.items[get_index(value.second)].weight;
-    node_ptr->value += instance.items[get_index(value.second)].value;
+    auto payload =
+        to_payload(node.index + 1, node.hint,
+                   node.used_capacity + instance.items[node.index].weight,
+                   node.value + instance.items[node.index].value);
+    handle.push({value.first, payload});
+#elif defined HEAP_VALUE
+    node_ptr->index = node.index + 1;
+    node_ptr->used_capacity = node.used_capacity + instance.items[node.index].weight;
+    node_ptr->value = node.value + instance.items[node.index].value;
     handle.push(value);
 #elif defined EXPLICIT_VALUE
     handle.push({value.first,
-                 {get_index(value.second) + 1, get_hint(value.second),
-                  get_used_capacity(value.second) +
-                      instance.items[get_index(value.second)].weight,
-                  get_value(value.second) +
-                      instance.items[get_index(value.second)].value}});
+                 Node{node.index + 1, node.hint,
+                      node.used_capacity + instance.items[node.index].weight,
+                      node.value + instance.items[node.index].value}});
 #endif
     terminal = false;
-#ifdef COUNT_STATS
-    ++stats[id].pushed_nodes;
-#endif
+    pushed_node(id);
   }
-  auto const value_diff = instance.prefix_sum[get_index(value.second)].value -
-                          get_value(value.second);
-  auto const hint_without_next =
-      get_upper_bound(get_used_capacity(value.second),
-                      get_index(value.second) + 1, get_hint(value.second));
-  auto const upper_bound_without_next =
-      (hint_without_next != instance.prefix_sum.size()
-           ? instance.prefix_sum[hint_without_next].value
-           : instance.prefix_sum.back().value) -
-      value_diff;
+  weight_type weight_unused =
+      instance.prefix_sum[node.index + 1].weight - node.used_capacity;
+  unsigned int hint_without_next = node.hint;
+  value_type upper_bound_without_next =
+      node.value +
+      get_upper_bound(weight_unused, node.index + 1, hint_without_next);
+  if (upper_bound_without_next <= current_best_value) {
+#ifdef HEAP_VALUE
+    if (terminal) {
+      AllocTraits::destroy(global_alloc, node_ptr);
+      AllocTraits::deallocate(global_alloc, node_ptr, 1);
+      freed_node(id);
+    }
+#endif
+    return terminal;
+  }
   if (hint_without_next == instance.prefix_sum.size() ||
-      instance.prefix_sum[hint_without_next].weight -
-              (instance.prefix_sum[get_index(value.second)].weight -
-               get_used_capacity(value.second)) ==
-          instance.capacity) {
+      instance.prefix_sum[hint_without_next - 1].weight ==
+          instance.capacity + weight_unused) {
     // All remaining items fit or the upper bound matches
     while (upper_bound_without_next > current_best_value &&
            !best_value.compare_exchange_weak(current_best_value,
@@ -324,50 +324,40 @@ bool process_node(PriorityQueue::Handle& handle,
                                              std::memory_order_relaxed)) {
       _mm_pause();
     }
+#ifdef HEAP_VALUE
+    if (terminal) {
+      AllocTraits::destroy(global_alloc, node_ptr);
+      AllocTraits::deallocate(global_alloc, node_ptr, 1);
+      freed_node(id);
+    }
+#endif
     return terminal;
   }
-  if (upper_bound_without_next > current_best_value) {
 #ifndef PQ_IS_MQ
-    upper_bound_without_next = value_max - upper_bound_without_next;
+  upper_bound_without_next = value_max - upper_bound_without_next;
 #endif
 #ifdef PACKED_VALUE
-    handle.push(
-        {upper_bound_without_next,
-         to_payload(get_index(value.second) + 1, hint_without_next,
-                    get_used_capacity(value.second), get_value(value.second))});
-#elif defined POINTER_VALUE
-    if (terminal) {
-      ++node_ptr->index;
-      handle.push({upper_bound_without_next, value.second});
-    } else {
-      node_ptr = AllocTraits::allocate(alloc, 1);
-      AllocTraits::construct(alloc, node_ptr, node.index + 1, hint_without_next,
-                             node.used_capacity, node.value);
-      handle.push(
-          {upper_bound_without_next, reinterpret_cast<payload>(node_ptr)});
-#ifdef COUNT_STATS
-      ++stats[id].allocated_nodes;
-#endif
-    }
-#elif defined EXPLICIT_VALUE
-    handle.push({upper_bound_without_next,
-                 {get_index(value.second) + 1, hint_without_next,
-                  get_used_capacity(value.second), get_value(value.second)}});
-#endif
-    terminal = false;
-#ifdef COUNT_STATS
-    ++stats[id].pushed_nodes;
-#endif
-  }
-#ifdef POINTER_VALUE
+  handle.push(
+      {upper_bound_without_next, to_payload(node.index + 1, hint_without_next,
+                                            node.used_capacity, node.value)});
+#elif defined HEAP_VALUE
   if (terminal) {
-    AllocTraits::destroy(alloc, reinterpret_cast<Node*>(value.second));
-    AllocTraits::deallocate(alloc, reinterpret_cast<Node*>(value.second), 1);
-#ifdef COUNT_STATS
-    ++stats[id].freed_nodes;
-#endif
+    node_ptr->index = node.index + 1;
+    node_ptr->hint = hint_without_next;
+    handle.push({upper_bound_without_next, value.second});
+  } else {
+    node_ptr = AllocTraits::allocate(global_alloc, 1);
+    AllocTraits::construct(global_alloc, node_ptr, node.index + 1,
+                           hint_without_next, node.used_capacity, node.value);
+    handle.push(
+        {upper_bound_without_next, reinterpret_cast<payload_type>(node_ptr)});
+    allocated_node(id);
   }
+#elif defined EXPLICIT_VALUE
+  handle.push({upper_bound_without_next, Node{node.index + 1, hint_without_next,
+                                              node.used_capacity, node.value}});
 #endif
+  pushed_node(id);
   return terminal;
 }
 
@@ -375,17 +365,12 @@ void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
   PriorityQueue::value_type retval;
   while (true) {
     bool success = false;
-    for (std::size_t i = 0; i < retries; ++i) {
+    for (std::size_t i = 0; i < retries * settings.num_threads; ++i) {
       success = handle.try_extract_top(retval);
       if (success) {
         break;
       }
-#ifdef COUNT_STATS
-      ++stats[id].failed_extractions;
-#endif
-      if (i > 100) {
-        std::this_thread::yield();
-      }
+      extract_failed(id);
     }
     if (!success) {
 #ifdef EXACT_TERMINATION
@@ -402,9 +387,6 @@ void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
       success = handle.try_extract_top(retval);
 #endif
       if (!success) {
-#ifdef COUNT_STATS
-        ++stats[id].idle;
-#endif
         if (idle(id)) {
           break;
         } else {
@@ -417,28 +399,26 @@ void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
       break;
 #endif
     }
-#ifdef COUNT_STATS
-    ++stats[id].extracted_nodes;
-#endif
+    extracted_node(id);
 #ifdef EXACT_TERMINATION
-    bool is_leaf = process_node(handle, retval, id);
-    if (!is_leaf) {
+    bool terminal = process_node(handle, retval, id);
+    if (!terminal) {
       if (idle_counter.load(std::memory_order_acquire) != 0) {
-        for (std::size_t i = 0; i < ctx.get_num_threads(); ++i) {
+        for (std::size_t i = 0; i < settings.num_threads; ++i) {
           if (i == id) {
             continue;
           }
           unsigned int thread_idle_state =
-              idle_state[i].load(std::memory_order_relaxed);
+              idle_state[i].state.load(std::memory_order_relaxed);
           while (true) {
             while (thread_idle_state == 1) {
               std::this_thread::yield();
-              thread_idle_state = idle_state[i].load(std::memory_order_relaxed);
+              thread_idle_state =
+                  idle_state[i].state.load(std::memory_order_relaxed);
             }
             if (thread_idle_state != 2) {
               break;
             }
-            assert(thread_idle_state == 0 || thread_idle_state == 3);
             if (idle_state[i].state.compare_exchange_strong(
                     thread_idle_state, 3, std::memory_order_relaxed)) {
               idle_counter.fetch_sub(2, std::memory_order_relaxed);
@@ -458,16 +438,13 @@ void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
 struct Task {
   static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
     auto handle = pq.get_handle();
-
-    auto hint = get_upper_bound(0, 0, 0);
+    unsigned int hint;
+    value_type upper_bound = get_upper_bound(0, 0, hint);
+    value_type lower_bound = instance.prefix_sum[hint - 1].value;
     if (ctx.is_main()) {
-      auto upper_bound = (hint == instance.prefix_sum.size())
-                             ? instance.prefix_sum.back().value
-                             : instance.prefix_sum[hint].value;
-      if (hint == instance.prefix_sum.size() ||
-          instance.prefix_sum[hint].weight == instance.capacity) {
+      best_value.store(lower_bound, std::memory_order_relaxed);
+      if (lower_bound == upper_bound) {
         std::clog << "Instance is trivial\n";
-        best_value = upper_bound;
         return;
       }
       std::clog << "Solving knapsack instance..." << std::flush;
@@ -477,22 +454,18 @@ struct Task {
 #ifdef PACKED_VALUE
       process_node(handle, {upper_bound, to_payload(0, hint, 0, 0)},
                    ctx.get_id());
-#elif defined POINTER_VALUE
-      auto node_ptr = AllocTraits::allocate(alloc, 1);
-      AllocTraits::construct(alloc, node_ptr, 0, hint, 0, 0);
-#ifdef COUNT_STATS
-      ++stats[ctx.get_id()].allocated_nodes;
-#endif
-      process_node(handle, {upper_bound, reinterpret_cast<payload>(node_ptr)},
+#elif defined HEAP_VALUE
+      auto node_ptr = AllocTraits::allocate(global_alloc, 1);
+      AllocTraits::construct(global_alloc, node_ptr, 0, hint, 0, 0);
+      allocated_node(ctx.get_id());
+      process_node(handle,
+                   {upper_bound, reinterpret_cast<payload_type>(node_ptr)},
                    ctx.get_id());
 #elif defined EXPLICIT_VALUE
-      process_node(handle, {upper_bound, {0, hint, 0, 0}}, ctx.get_id());
+      process_node(handle, {upper_bound, Node{0, hint, 0, 0}}, ctx.get_id());
 #endif
-    } else {
-      if (hint == instance.prefix_sum.size() ||
-          instance.prefix_sum[hint].weight == instance.capacity) {
-        return;
-      }
+    } else if (lower_bound == upper_bound) {
+      return;
     }
 
     ctx.execute_synchronized_timed("main_loop", main_loop, handle,
@@ -572,8 +545,8 @@ int main(int argc, char* argv[]) {
 #endif
 #ifdef PACKED_VALUE
   std::clog << "Payload: packed\n";
-#elif defined POINTER_VALUE
-  std::clog << "Payload: pointer\n";
+#elif defined HEAP_VALUE
+  std::clog << "Payload: heap\n";
 #else
   std::clog << "Payload: explicit\n";
 #endif
@@ -605,8 +578,8 @@ int main(int argc, char* argv[]) {
 #ifndef PQ_MQ_RANDOM
       ("k,stickiness", "The stickiness"
        "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
-  #endif
-  #endif
+#endif
+#endif
       ("h,help", "Print this help");
   // clang-format on
 
@@ -655,7 +628,7 @@ int main(int argc, char* argv[]) {
   std::cout << "items: " << instance.items.size() << '\n';
   std::cout << "capacity: " << instance.capacity << '\n';
 
-#ifdef COUNT_STATS
+#ifdef EXACT_TERMINATION
   idle_counter = 0;
   idle_state = std::make_unique<IdleState[]>(settings.num_threads);
 #endif
@@ -674,6 +647,7 @@ int main(int argc, char* argv[]) {
 #endif
 
   PriorityQueue pq{settings.num_threads, params};
+  pq.reserve(1'000'000);
 #else
   PriorityQueue pq{settings.num_threads};
 #endif
@@ -694,7 +668,7 @@ int main(int argc, char* argv[]) {
         lhs.pushed_nodes += rhs.pushed_nodes;
         lhs.ignored_nodes += rhs.ignored_nodes;
         lhs.extracted_nodes += rhs.extracted_nodes;
-        lhs.failed_extractions += rhs.failed_extractions;
+        lhs.failed_extracts += rhs.failed_extracts;
         lhs.allocated_nodes += rhs.allocated_nodes;
         lhs.freed_nodes += rhs.freed_nodes;
         lhs.processed_nodes += rhs.processed_nodes;
@@ -704,7 +678,7 @@ int main(int argc, char* argv[]) {
   std::cout << "pushed nodes: " << total_stats.pushed_nodes << '\n';
   std::cout << "ignored nodes: " << total_stats.ignored_nodes << '\n';
   std::cout << "extracted nodes: " << total_stats.extracted_nodes << '\n';
-  std::cout << "failed extractions: " << total_stats.failed_extractions << '\n';
+  std::cout << "failed extracts: " << total_stats.failed_extracts << '\n';
   std::cout << "allocated nodes: " << total_stats.allocated_nodes << '\n';
   std::cout << "freed nodes: " << total_stats.freed_nodes << '\n';
   std::cout << "processed nodes: " << total_stats.processed_nodes << '\n';

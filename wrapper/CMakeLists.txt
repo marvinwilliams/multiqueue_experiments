@@ -22,7 +22,6 @@ target_include_directories(
 )
 target_compile_options(capq PRIVATE -w -std=gnu++11)
 target_compile_definitions(capq PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
-set_property(TARGET capq PROPERTY pq_name capq)
 target_compile_definitions(capq INTERFACE PQ_CAPQ)
 
 add_library(

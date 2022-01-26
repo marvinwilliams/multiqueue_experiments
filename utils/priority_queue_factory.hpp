@@ -17,12 +17,7 @@
 #endif
 
 #if defined PQ_IS_MQ
-#include "multiqueue/default_configuration.hpp"
 #include "multiqueue/factory.hpp"
-#include "multiqueue/selection_strategy/perm.hpp"
-#include "multiqueue/selection_strategy/random.hpp"
-#include "multiqueue/selection_strategy/sticky.hpp"
-#include "multiqueue/selection_strategy/swapping.hpp"
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "wrapper/capq.hpp"

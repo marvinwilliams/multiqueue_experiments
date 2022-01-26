@@ -18,13 +18,14 @@ namespace wrapper {
 
 template <typename KeyType, typename T, int Relaxation>
 class Klsm {
-  using pq_type = kpq::k_lsm<key_type, mapped_type, Relaxation>;
-
  public:
   using key_type = KeyType;
   using mapped_type = T;
-
   using value_type = std::pair<key_type, mapped_type>;
+ private:
+  using pq_type = kpq::k_lsm<key_type, mapped_type, Relaxation>;
+
+ public:
 
   class Handle {
     friend Klsm;
@@ -43,7 +44,7 @@ class Klsm {
   alignas(64) std::unique_ptr<pq_type> pq_;
 
  public:
-  Klsm(unsigned int /* num_threads */) {}
+  Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {}
 
   Handle get_handle() {
     auto h = Handle{};

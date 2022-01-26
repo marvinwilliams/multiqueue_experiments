@@ -13,7 +13,7 @@ template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 Capq<remove_min_relax, put_relax, catree_adapt>::Capq(
     unsigned int /* num_threads */)
     : pq_((_init_gc_subsystem(), capq_new()), [](CAPQ* pq) {
-        capq_delete(pq);
+        /* capq_delete(pq); */
         _destroy_gc_subsystem();
       }) {}
 
