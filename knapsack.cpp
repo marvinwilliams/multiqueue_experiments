@@ -358,7 +358,7 @@ bool process_node(PriorityQueue::Handle& handle,
                                               node.used_capacity, node.value}});
 #endif
   pushed_node(id);
-  return terminal;
+  return false;
 }
 
 void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
