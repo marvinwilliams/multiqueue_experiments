@@ -24,15 +24,15 @@
 #include <utility>
 #include <vector>
 
-#if !defined THROUGHPUT && !defined QUALITY
-#error Need to define either THROUGHPUT or QUALITY
+#if !defined THROUGHPUT_MODE && !defined QUALITY_MODE
+#error Need to define either THROUGHPUT_MODE or QUALITY_MODE
 #endif
 
-#if defined THROUGHPUT
-#undef QUALITY
+#if defined THROUGHPUT_MODE
+#undef QUALITY_MODE
 #endif
-#if defined QUALITY
-#undef THROUGHPUT
+#if defined QUALITY_MODE
+#undef THROUGHPUT_MODE
 #endif
 
 #ifndef L1_CACHE_LINESIZE
@@ -51,7 +51,7 @@ using PriorityQueue =
 
 using steady_clock = std::chrono::steady_clock;
 
-#ifdef QUALITY
+#ifdef QUALITY_MODE
 
 using tick_type = std::uint64_t;
 
@@ -73,7 +73,7 @@ static inline tick_type get_tick() noexcept {
 struct Settings {
   std::size_t prefill_size = 1'000'000;
   std::size_t num_operations = 10'000'000;
-#ifdef QUALITY
+#ifdef QUALITY_MODE
   std::chrono::microseconds sleep_between_operations =
       std::chrono::microseconds::zero();
 #endif
@@ -117,7 +117,7 @@ OperationCount operator+(OperationCount lhs,
   return lhs += rhs;
 }
 
-#ifdef QUALITY
+#ifdef QUALITY_MODE
 
 static constexpr unsigned int bits_for_thread_id = 8;
 static constexpr value_type value_mask =
@@ -157,7 +157,7 @@ struct alignas(L1_CACHE_LINESIZE) ThreadData {
   xoroshiro256starstar rng;
   OperationCount op_count;
   InsertingStrategy<key_type> inserter;
-#ifdef QUALITY
+#ifdef QUALITY_MODE
   std::vector<InsertionLogEntry> ins_log;
   std::vector<DeletionLogEntry> del_log;
   std::vector<tick_type> failed_del_log;
@@ -198,7 +198,7 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
       "prefill", prefill_keys, prefill_keys + settings.prefill_size,
       [&, id = ctx.get_id()](key_type* begin, key_type* end) {
         std::for_each(begin, end, [&, id](key_type k) {
-#ifdef QUALITY
+#ifdef QUALITY_MODE
           auto v = to_value(id, thread_data[id].ins_log.size());
           handle.push({k, v});
           thread_data[id].ins_log.push_back({0, k});
@@ -210,7 +210,7 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
       });
 }
 
-#ifdef QUALITY
+#ifdef QUALITY_MODE
 
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
   ctx.execute_synchronized_blockwise_timed(
@@ -318,9 +318,9 @@ int main(int argc, char* argv[]) {
 #ifndef NDEBUG
   std::clog << "DEBUG build\n";
 #endif
-#if defined THROUGHPUT
+#if defined THROUGHPUT_MODE
   std::clog << "Mode: Throughput\n";
-#elif defined QUALITY
+#elif defined QUALITY_MODE
   std::clog << "Mode: Quality\n";
 #ifdef USE_TSC
   std::clog << "Use TSC\n";
@@ -346,7 +346,7 @@ int main(int argc, char* argv[]) {
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
-  #ifdef QUALITY
+  #ifdef QUALITY_MODE
       ("w,sleep", "Specify the sleep time between operations in microseconds"
        "(default: 0)", cxxopts::value<unsigned int>(), "NUMBER")
   #endif
@@ -410,7 +410,7 @@ int main(int argc, char* argv[]) {
     if (result.count("threads") > 0) {
       settings.num_threads = result["threads"].as<unsigned int>();
     }
-#ifdef QUALITY
+#ifdef QUALITY_MODE
     if (result.count("sleep") > 0) {
       settings.sleep_between_operations =
           std::chrono::microseconds{result["sleep"].as<unsigned int>()};
@@ -454,7 +454,7 @@ int main(int argc, char* argv[]) {
             << "\n\t"
             << "Min key: " << settings.insert_config.min_key << "\n\t"
             << "Max key: " << settings.insert_config.max_key << "\n\t"
-#ifdef QUALITY
+#ifdef QUALITY_MODE
             << "Sleep between operations: "
             << settings.sleep_between_operations.count() << " us\n\t"
 #endif
@@ -465,7 +465,7 @@ int main(int argc, char* argv[]) {
             << "Seed: " << settings.seed;
   std::clog << "\n\n";
 
-#ifdef QUALITY
+#ifdef QUALITY_MODE
   if (settings.num_threads > (1 << bits_for_thread_id) - 1) {
     std::cerr << "Too many threads, increase the number of thread bits!"
               << std::endl;
@@ -528,7 +528,7 @@ int main(int argc, char* argv[]) {
   std::clog << "Work time (s): " << std::setprecision(3)
             << std::chrono::duration<double>(work_duration).count() << '\n';
 
-#ifdef QUALITY
+#ifdef QUALITY_MODE
   std::cout << settings.num_threads << '\n';
   for (unsigned int t = 0; t < settings.num_threads; ++t) {
     for (auto const& [tick, key] : thread_data[t].ins_log) {
