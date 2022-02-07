@@ -8,24 +8,31 @@ extern "C" {
 #include "ssalloc.h"
 }
 
+#undef min
+#undef max
+
 #include <cstddef>
 #include <iostream>
 #include <memory>
 
 __thread unsigned long* seeds;
 
+void sl_intset_deleter::operator()(sl_intset_t* p) { sl_set_delete(p); }
+void thread_data_deleter::operator()(thread_data_t* p) { delete p; }
+
 namespace wrapper {
 
-Spraylist::Spraylist(unsigned int num_threads)
-    : pq_((*levelmax = floor_log_2(1'000'000), sl_set_new()),
-          [](sl_intset_t* pq) { sl_set_delete(pq); }),
-      num_threads_(num_threads) {}
+Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads) {
+  ssalloc_init(num_threads_);
+  *levelmax = floor_log_2(1'000'000);
+  pq_.reset(sl_set_new());
+}
 
 Spraylist::Handle Spraylist::get_handle() {
   ssalloc_init(num_threads_);
   seeds = seed_rand();
   Handle handle{};
-  handle.data_ = std::make_unique<thread_data_t>();
+  handle.data_.reset(new thread_data_t());
   handle.data_->seed = rand();
   handle.data_->seed2 = rand();
   handle.data_->nb_threads = num_threads_;

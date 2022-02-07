@@ -1,4 +1,5 @@
 #include "wrapper/capq.hpp"
+#include "capq.hpp"
 
 extern "C" {
 #include "capq/capq.h"
@@ -7,15 +8,19 @@ extern "C" {
 
 __thread ptst_t* ptst;
 
+void CAPQ_deleter::operator()(CAPQ* p) {
+  capq_delete(p);
+  _destroy_gc_subsystem();
+}
+
 namespace wrapper {
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 Capq<remove_min_relax, put_relax, catree_adapt>::Capq(
-    unsigned int /* num_threads */)
-    : pq_((_init_gc_subsystem(), capq_new()), [](CAPQ* pq) {
-        /* capq_delete(pq); */
-        _destroy_gc_subsystem();
-      }) {}
+    unsigned int /* num_threads */) {
+  _init_gc_subsystem();
+  pq_.reset(capq_new());
+}
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 typename Capq<remove_min_relax, put_relax, catree_adapt>::Handle

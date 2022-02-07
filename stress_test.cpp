@@ -165,9 +165,9 @@ struct alignas(L1_CACHE_LINESIZE) ThreadData {
 };
 
 static Settings settings;
+alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
 alignas(L1_CACHE_LINESIZE) static key_type* prefill_keys;
 alignas(L1_CACHE_LINESIZE) static key_type* keys;
-alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
 
 void generate_prefill_keys(thread_coordination::Context& ctx) {
   ctx.execute_synchronized_blockwise_timed(
@@ -490,17 +490,16 @@ int main(int argc, char* argv[]) {
 
   std::clog << "Using priority queue: " << pq.description() << "\n\n";
 
-  thread_data = new ThreadData[settings.num_threads];
+  thread_data = ::new ThreadData[settings.num_threads];
   for (std::size_t i = 0; i < settings.num_threads; ++i) {
     thread_data[i].rng.seed(rng());
     thread_data[i].inserter =
         InsertingStrategy<key_type>(settings.insert_config);
   }
 
-  prefill_keys =
-      new (std::align_val_t{L1_CACHE_LINESIZE}) key_type[settings.prefill_size];
+  prefill_keys = ::new (std::align_val_t{L1_CACHE_LINESIZE}) key_type[settings.prefill_size];
 
-  keys = new (std::align_val_t{L1_CACHE_LINESIZE})
+  keys = ::new (std::align_val_t{L1_CACHE_LINESIZE})
       key_type[settings.num_threads * settings.num_operations];
   thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
   coordinator.run_task<Task>(std::ref(pq));
@@ -558,8 +557,8 @@ int main(int argc, char* argv[]) {
                    std::chrono::duration<double>(work_duration).count()
             << std::endl;
 #endif
-  delete[] keys;
-  delete[] prefill_keys;
+  ::operator delete[](keys, std::align_val_t{L1_CACHE_LINESIZE});
+  ::operator delete[](prefill_keys, std::align_val_t{L1_CACHE_LINESIZE});
   delete[] thread_data;
   return 0;
 }

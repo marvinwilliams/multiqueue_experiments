@@ -4,16 +4,15 @@
 
 // Adapted from klsm
 
-extern "C" {
-#include "spraylist_linden/linden.h"
-}
-
-#undef min
-#undef max
 #include <limits>
 #include <memory>
 #include <string>
 #include <utility>
+
+struct linden_pq_t;
+struct linden_pq_deleter {
+  void operator()(linden_pq_t*);
+};
 
 namespace wrapper {
 
@@ -25,7 +24,7 @@ class Linden {
   using value_type = std::pair<key_type, mapped_type>;
   class Handle {
     friend Linden;
-    pq_t* pq_;
+    linden_pq_t* pq_;
 
    public:
     void push(value_type const& value);
@@ -42,7 +41,7 @@ class Linden {
 
   struct wrapper_type;
 
-  alignas(64) std::unique_ptr<pq_t, void (*)(pq_t*)> pq_;
+  alignas(64) std::unique_ptr<linden_pq_t, linden_pq_deleter> pq_;
 
  public:
   Linden(unsigned int num_threads);

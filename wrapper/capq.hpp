@@ -12,6 +12,9 @@
 #include <utility>
 
 typedef struct fpasl_catree_set CAPQ;
+struct CAPQ_deleter {
+  void operator()(CAPQ*);
+};
 
 namespace wrapper {
 
@@ -43,7 +46,7 @@ class Capq {
  private:
   static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
-  alignas(64) std::unique_ptr<CAPQ, void (*)(CAPQ*)> pq_;
+  alignas(64) std::unique_ptr<CAPQ, CAPQ_deleter> pq_;
 
  public:
   Capq(unsigned int /* num_threads */);

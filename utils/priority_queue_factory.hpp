@@ -18,6 +18,8 @@
 
 #if defined PQ_IS_MQ
 #include "multiqueue/factory.hpp"
+#elif defined PQ_MQ_FIFO
+
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "wrapper/capq.hpp"
@@ -28,14 +30,14 @@
 #include "wrapper/linden.hpp"
 #elif defined PQ_SPRAYLIST
 #include "wrapper/spraylist.hpp"
-#elif defined PQ_FIFO
+#elif defined PQ_TBB_QUEUE
 
-#elif defined PQ_LOCKING
-
-#elif defined PQ_TBB
+#elif defined PQ_TBB_PQ
 
 #else
+
 #error No valid PQ specified
+
 #endif
 
 #include <cstdint>
@@ -49,8 +51,9 @@ namespace util {
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
 #if defined PQ_IS_MQ
-  using type = typename multiqueue::MultiqueueFactory<
-      KeyType, ValueType>::template multiqueue_type<>;
+  using type =
+      typename multiqueue::MultiqueueFactory<KeyType,
+                                             ValueType>::multiqueue_type;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
   // not available with generic types
@@ -72,8 +75,9 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
   using KeyType = unsigned long;
   using ValueType = unsigned long;
 #if defined PQ_IS_MQ
-  using type = typename multiqueue::MultiqueueFactory<
-      KeyType, ValueType>::template multiqueue_type<>;
+  using type =
+      typename multiqueue::MultiqueueFactory<KeyType,
+                                             ValueType>::multiqueue_type;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1
   using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_CAPQ2
