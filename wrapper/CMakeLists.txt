@@ -90,3 +90,15 @@ target_include_directories(
 )
 set_property(TARGET spraylist PROPERTY pq_name spraylist)
 target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
+
+add_library(
+  tbb_q INTERFACE
+  )
+target_link_libraries(tbb_q INTERFACE wrapper tbb)
+target_compile_definitions(tbb_q INTERFACE PQ_TBB_QUEUE)
+
+add_library(
+  tbb_pq INTERFACE
+  )
+target_link_libraries(tbb_pq INTERFACE wrapper tbb)
+target_compile_definitions(tbb_pq INTERFACE PQ_TBB_PRIORITY_QUEUE)

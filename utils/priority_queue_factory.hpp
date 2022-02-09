@@ -18,8 +18,8 @@
 
 #if defined PQ_IS_MQ
 #include "multiqueue/factory.hpp"
-#elif defined PQ_MQ_FIFO
-
+#elif defined PQ_MF_STICKY || defined PQ_MF_PERM
+#include "multififo/multififo.hpp"
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
 #include "wrapper/capq.hpp"
@@ -31,13 +31,11 @@
 #elif defined PQ_SPRAYLIST
 #include "wrapper/spraylist.hpp"
 #elif defined PQ_TBB_QUEUE
-
-#elif defined PQ_TBB_PQ
-
+#include "wrapper/tbb_queue.hpp"
+#elif defined PQ_TBB_PRIORITY_QUEUE
+#include "wrapper/tbb_priority_queue.hpp"
 #else
-
 #error No valid PQ specified
-
 #endif
 
 #include <cstdint>
@@ -45,6 +43,7 @@
 #include <sstream>
 #include <string>
 #include <type_traits>
+#include <utility>
 
 namespace util {
 
@@ -54,6 +53,8 @@ struct PriorityQueueFactory {
   using type =
       typename multiqueue::MultiqueueFactory<KeyType,
                                              ValueType>::multiqueue_type;
+#elif defined PQ_MF_STICKY
+  using type = multififo::Multififo<ValueType>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
   // not available with generic types
@@ -67,6 +68,10 @@ struct PriorityQueueFactory {
   // not available with generic types
 #elif defined PQ_SPRAYLIST
   // not available with generic types
+#elif defined PQ_TBB_QUEUE
+  using type = wrapper::TBBQueue<KeyType, ValueType>;
+#elif defined PQ_TBB_PRIORITY_QUEUE
+  using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
 #endif
 };
 
@@ -78,6 +83,8 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
   using type =
       typename multiqueue::MultiqueueFactory<KeyType,
                                              ValueType>::multiqueue_type;
+#elif defined PQ_MF_STICKY
+  using type = multififo::Multififo<unsigned long>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1
   using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_CAPQ2
@@ -96,6 +103,10 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
   using type = wrapper::Linden;
 #elif defined PQ_SPRAYLIST
   using type = wrapper::Spraylist;
+#elif defined PQ_TBB_QUEUE
+  using type = wrapper::TBBQueue<KeyType, ValueType>;
+#elif defined PQ_TBB_PRIORITY_QUEUE
+  using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
 #endif
 };
 

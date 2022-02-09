@@ -44,7 +44,7 @@ class Klsm {
   alignas(64) std::unique_ptr<pq_type> pq_;
 
  public:
-  Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {}
+  Klsm(std::size_t /* capacity */, unsigned int /* num_threads */) : pq_(new pq_type) {}
 
   Handle get_handle() {
     auto h = Handle{};
@@ -52,7 +52,7 @@ class Klsm {
     return h;
   }
 
-  std::string description() const {
+  static std::string description() {
     std::stringstream ss;
     ss << "klsm\n";
     ss << "Relaxation: " << Relaxation;

@@ -286,7 +286,8 @@ bool process_node(PriorityQueue::Handle& handle,
     handle.push({value.first, payload});
 #elif defined HEAP_VALUE
     node_ptr->index = node.index + 1;
-    node_ptr->used_capacity = node.used_capacity + instance.items[node.index].weight;
+    node_ptr->used_capacity =
+        node.used_capacity + instance.items[node.index].weight;
     node_ptr->value = node.value + instance.items[node.index].value;
     handle.push(value);
 #elif defined EXPLICIT_VALUE
@@ -646,10 +647,9 @@ int main(int argc, char* argv[]) {
   params.stickiness = settings.stickiness;
 #endif
 
-  PriorityQueue pq{settings.num_threads, params};
-  pq.reserve(1'000'000);
+  auto pq = PriorityQueue{1'000'000, settings.num_threads, params};
 #else
-  PriorityQueue pq{settings.num_threads};
+  auto pq = PriorityQueue{1'000'000, settings.num_threads};
 #endif
 
   std::clog << "Using priority queue: " << pq.description() << "\n\n";

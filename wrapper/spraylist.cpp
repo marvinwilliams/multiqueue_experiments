@@ -22,7 +22,7 @@ void thread_data_deleter::operator()(thread_data_t* p) { delete p; }
 
 namespace wrapper {
 
-Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads) {
+Spraylist::Spraylist(std::size_t /* capacity */, unsigned int num_threads) : num_threads_(num_threads) {
   ssalloc_init(num_threads_);
   *levelmax = floor_log_2(1'000'000);
   pq_.reset(sl_set_new());

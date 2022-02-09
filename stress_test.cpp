@@ -79,7 +79,7 @@ struct Settings {
 #endif
   unsigned int num_threads = 4;
   std::uint64_t seed = 1;
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
   std::size_t c = PriorityQueue::param_type{}.c;
 #ifndef PQ_MQ_RANDOM
   unsigned int stickiness = PriorityQueue::param_type{}.stickiness;
@@ -202,6 +202,8 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
           auto v = to_value(id, thread_data[id].ins_log.size());
           handle.push({k, v});
           thread_data[id].ins_log.push_back({0, k});
+#elif defined PQ_MF_STICKY
+          handle.push(k);
 #else
           handle.push({k, k});
 #endif
@@ -270,7 +272,11 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             asm volatile("" ::: "memory");
             ++thread_data[id].op_count.num_deletions;
           } else {
+#ifdef PQ_MF_STICKY
+            handle.push(k);
+#else
             handle.push({k, k});
+#endif
             ++thread_data[id].op_count.num_insertions;
           }
         });
@@ -346,10 +352,10 @@ int main(int argc, char* argv[]) {
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("j,threads", "Specify the number of threads "
        "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
-  #ifdef QUALITY_MODE
+#ifdef QUALITY_MODE
       ("w,sleep", "Specify the sleep time between operations in microseconds"
        "(default: 0)", cxxopts::value<unsigned int>(), "NUMBER")
-  #endif
+#endif
       ("d,distribution", "Specify the key distribution as one of \"uniform\", \"dijkstra\", \"ascending\", \"descending\", \"threadid\" "
        "(default: uniform)", cxxopts::value<std::string>(), "ARG")
       ("m,max", "Specify the max key "
@@ -358,14 +364,14 @@ int main(int argc, char* argv[]) {
        "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
       ("s,seed", "Specify the initial seed"
        "(default: 0)", cxxopts::value<std::uint32_t>(), "NUMBER")
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
       ("c,factor", "The number of queues per thread"
        "(default: 4)", cxxopts::value<std::size_t>(), "NUMBER")
-#if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
+#ifndef PQ_MQ_RANDOM
       ("k,stickiness", "The stickiness"
        "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
-  #endif
-  #endif
+#endif
+#endif
       ("h,help", "Print this help");
   // clang-format on
 
@@ -425,11 +431,11 @@ int main(int argc, char* argv[]) {
     if (result.count("seed") > 0) {
       settings.seed = result["seed"].as<std::uint32_t>();
     }
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
     if (result.count("factor") > 0) {
       settings.c = result["factor"].as<std::size_t>();
     }
-#if defined PQ_MQ_STICKY || defined PQ_MQ_SWAPPING || defined PQ_MQ_PERM
+#ifndef PQ_MQ_RANDOM
     if (result.count("stickiness") > 0) {
       settings.stickiness = result["stickiness"].as<unsigned int>();
     }
@@ -475,7 +481,7 @@ int main(int argc, char* argv[]) {
   xoroshiro256starstar rng;
   rng.seed(settings.seed);
 
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
   auto params = PriorityQueue::param_type{};
   params.seed = rng();
   params.c = settings.c;
@@ -483,9 +489,9 @@ int main(int argc, char* argv[]) {
   params.stickiness = settings.stickiness;
 #endif
 
-  PriorityQueue pq{settings.num_threads, params};
+  PriorityQueue pq{settings.prefill_size, settings.num_threads, params};
 #else
-  PriorityQueue pq{settings.num_threads};
+  auto pq = PriorityQueue(settings.prefill_size, settings.num_threads);
 #endif
 
   std::clog << "Using priority queue: " << pq.description() << "\n\n";
@@ -497,7 +503,8 @@ int main(int argc, char* argv[]) {
         InsertingStrategy<key_type>(settings.insert_config);
   }
 
-  prefill_keys = ::new (std::align_val_t{L1_CACHE_LINESIZE}) key_type[settings.prefill_size];
+  prefill_keys = ::new (std::align_val_t{L1_CACHE_LINESIZE})
+      key_type[settings.prefill_size];
 
   keys = ::new (std::align_val_t{L1_CACHE_LINESIZE})
       key_type[settings.num_threads * settings.num_operations];

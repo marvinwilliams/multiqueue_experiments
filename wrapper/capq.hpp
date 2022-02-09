@@ -49,7 +49,7 @@ class Capq {
   alignas(64) std::unique_ptr<CAPQ, CAPQ_deleter> pq_;
 
  public:
-  Capq(unsigned int /* num_threads */);
+  Capq(std::size_t /* capacity */, unsigned int /* num_threads */);
 
   Handle get_handle();
 

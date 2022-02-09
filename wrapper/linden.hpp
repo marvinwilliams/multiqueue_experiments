@@ -44,11 +44,11 @@ class Linden {
   alignas(64) std::unique_ptr<linden_pq_t, linden_pq_deleter> pq_;
 
  public:
-  Linden(unsigned int num_threads);
+  Linden(std::size_t /* capacity */, unsigned int num_threads);
 
   Handle get_handle();
 
-  std::string description() const { return "linden"; }
+  static std::string description() { return "linden"; }
 };
 
 }  // namespace wrapper

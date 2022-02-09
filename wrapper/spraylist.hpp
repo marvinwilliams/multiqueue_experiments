@@ -51,11 +51,11 @@ class Spraylist {
   unsigned int num_threads_;
 
  public:
-  explicit Spraylist(unsigned int num_threads);
+  explicit Spraylist(std::size_t /* capacity */, unsigned int num_threads);
 
   Handle get_handle();
 
-  std::string description() const { return "spraylist"; }
+  static std::string description() { return "spraylist"; }
 };
 
 }  // namespace wrapper
