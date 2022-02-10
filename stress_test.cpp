@@ -202,8 +202,6 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
           auto v = to_value(id, thread_data[id].ins_log.size());
           handle.push({k, v});
           thread_data[id].ins_log.push_back({0, k});
-#elif defined PQ_MF_STICKY
-          handle.push(k);
 #else
           handle.push({k, k});
 #endif
@@ -272,11 +270,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             asm volatile("" ::: "memory");
             ++thread_data[id].op_count.num_deletions;
           } else {
-#ifdef PQ_MF_STICKY
-            handle.push(k);
-#else
             handle.push({k, k});
-#endif
             ++thread_data[id].op_count.num_insertions;
           }
         });

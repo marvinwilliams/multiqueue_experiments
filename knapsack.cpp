@@ -130,7 +130,7 @@ using payload_type = Node;
 
 #ifdef PQ_IS_MQ
 using PriorityQueue = typename multiqueue::MultiqueueFactory<
-    value_type, payload_type, std::greater<>>::template multiqueue_type<>;
+    value_type, payload_type, std::greater<>>::multiqueue_type;
 #else
 using PriorityQueue =
     typename util::PriorityQueueFactory<value_type, payload_type>::type;
@@ -142,7 +142,7 @@ struct Settings {
   std::filesystem::path instance_file;
   unsigned int num_threads = 4;
   std::uint64_t seed = 1;
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
   std::size_t c = PriorityQueue::param_type{}.c;
 #ifndef PQ_MQ_RANDOM
   unsigned int stickiness = PriorityQueue::param_type{}.stickiness;
@@ -242,7 +242,7 @@ alignas(2 * L1_CACHE_LINESIZE) std::atomic<value_type> best_value;
 bool process_node(PriorityQueue::Handle& handle,
                   PriorityQueue::value_type const& value, unsigned int id) {
   auto current_best_value = best_value.load(std::memory_order_relaxed);
-#ifdef PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
   value_type upper_bound = value.first;
 #else
   value_type upper_bound = value_max - value.first;
@@ -334,7 +334,7 @@ bool process_node(PriorityQueue::Handle& handle,
 #endif
     return terminal;
   }
-#ifndef PQ_IS_MQ
+#if !defined PQ_IS_MQ && !defined PQ_MF_STICKY
   upper_bound_without_next = value_max - upper_bound_without_next;
 #endif
 #ifdef PACKED_VALUE
@@ -377,7 +377,7 @@ void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
 #ifdef EXACT_TERMINATION
       idle_state[id].state.store(1, std::memory_order_relaxed);
       idle_counter.fetch_add(1, std::memory_order_release);
-#ifdef PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
       for (unsigned int i = 0; i < settings.c; ++i) {
         if (handle.try_extract_from(id * settings.c + i, retval)) {
           success = true;
@@ -449,7 +449,7 @@ struct Task {
         return;
       }
       std::clog << "Solving knapsack instance..." << std::flush;
-#ifndef PQ_IS_MQ
+#if !defined PQ_IS_MQ && !defined PQ_MF_STICKY
       upper_bound = value_max - upper_bound;
 #endif
 #ifdef PACKED_VALUE
@@ -573,7 +573,7 @@ int main(int argc, char* argv[]) {
       ("f,file", "The input graph", cxxopts::value<std::filesystem::path>(settings.instance_file)->default_value("knapsack.kp"), "PATH")
       ("s,seed", "Specify the initial seed"
        "(default: 0)", cxxopts::value<std::uint32_t>(), "NUMBER")
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
       ("c,factor", "The number of queues per thread"
        "(default: 4)", cxxopts::value<std::size_t>(), "NUMBER")
 #ifndef PQ_MQ_RANDOM
@@ -596,7 +596,7 @@ int main(int argc, char* argv[]) {
     if (result.count("seed") > 0) {
       settings.seed = result["seed"].as<std::uint32_t>();
     }
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
     if (result.count("factor") > 0) {
       settings.c = result["factor"].as<std::size_t>();
     }
@@ -639,7 +639,7 @@ int main(int argc, char* argv[]) {
 
   xoroshiro256starstar rng;
   rng.seed(settings.seed);
-#if defined PQ_IS_MQ
+#if defined PQ_IS_MQ || defined PQ_MF_STICKY
   auto params = PriorityQueue::param_type{};
   params.seed = rng();
   params.c = settings.c;

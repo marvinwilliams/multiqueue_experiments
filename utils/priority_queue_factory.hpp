@@ -54,7 +54,7 @@ struct PriorityQueueFactory {
       typename multiqueue::MultiqueueFactory<KeyType,
                                              ValueType>::multiqueue_type;
 #elif defined PQ_MF_STICKY
-  using type = multififo::Multififo<ValueType>;
+  using type = multififo::Multififo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
     defined PQ_CAPQ3 || defined PQ_CAPQ4
   // not available with generic types
@@ -84,7 +84,7 @@ struct PriorityQueueFactory<unsigned long, unsigned long> {
       typename multiqueue::MultiqueueFactory<KeyType,
                                              ValueType>::multiqueue_type;
 #elif defined PQ_MF_STICKY
-  using type = multififo::Multififo<unsigned long>;
+  using type = multififo::Multififo<std::pair<unsigned long, unsigned long>>;
 #elif defined PQ_CAPQ || defined PQ_CAPQ1
   using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_CAPQ2
