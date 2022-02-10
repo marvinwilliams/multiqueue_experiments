@@ -18,7 +18,7 @@ class TBBPriorityQueue {
   struct value_compare {
     bool operator()(value_type const& lhs,
                     value_type const& rhs) const noexcept {
-      return lhs.first < rhs.first;
+      return lhs.first > rhs.first;
     }
   };
 
