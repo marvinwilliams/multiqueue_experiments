@@ -94,7 +94,7 @@ function prepare_experiment {
       cmd+=("$arg")
     done < <(jq -r '.[]' <<<${cmd_json})
     set +e
-    (cd "${exp_dir}"; "${cmd[@]}")
+    ("${cmd[@]}")
     exit_status=$?
     set -e
     if [[ ${exit_status} -ne 0 ]]; then
