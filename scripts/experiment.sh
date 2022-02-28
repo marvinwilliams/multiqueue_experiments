@@ -6,38 +6,39 @@ function usage {
   echo "Usage:  $0 [<options>] <command> [<args>]
 
   Options:
-    -h|help         Display this message
+    -h|--help         Display this message
 
   Commands:
-    create          Create a new experiment from definition
-    run             Run an experiment or steps from it
-    fetch           Aggregate experiment results" >&2
+    create            Create a new experiment from definition
+    run               Run an experiment
+    fetch             Aggregate experiment results" >&2
 }
 
 function create_usage {
-  echo "Usage:  $0 create [<options>] [<definition>...]
+  echo "Usage:  $0 create [<options>] <definition>
 
-  <definition>      Path to the experiment definition in JSON format
+  <definition>        Path to the experiment definition in JSON format
 
   Options:
-    -h|help         Display this message
-    -d|directory    Directory to create the experiments in
-    --              Signal end of options" >&2
+    -d|directory      Directory to create the experiment in
+    -P|--no-prepare   Don't execute the prepare commands
+    -R|--no-resources Don't add resources
+    -h|--help         Display this message
+    --                Signal end of options" >&2
 }
 
 function run_usage {
-  echo "Usage:  $0 run [<options>] <experiment> [<step>...]
+  echo "Usage:  $0 run [<options>] <experiment>
 
   <experiment>      Path to the experiment
-  <step>            Steps to run. Possible steps are
-                      p[repare]: Prepare the experiment
-                      e[xecute]: Execute the runs of this experiment
-                      c[leanup]: Perform experiment cleanup
-                    Defaults to 'p e c'
 
   Options:
-    -h|help         Display this message
-    --              Signal end of options" >&2
+    -p|--prepare      (Re-) run the prepare commands
+    -r|--resources    (Re-) add resources
+    -E|--no-execute   Don't execute the runs itself
+    -C|--no-cleanup   Don't perform cleanup
+    -h|--help         Display this message
+    --                Signal end of options" >&2
 }
 
 function fetch_usage {
@@ -46,16 +47,21 @@ function fetch_usage {
   <experiment>      Path to the experiment to fetch the results from
 
   Options:
-    -h|help         Display this message
     -f|--filter     Filter passed to jq applied to each fetched run. Defaults to '.'
+    -h|--help       Display this message
     --              Signal end of options" >&2
 }
+
+run_dir_format="%04d"
 
 exp_base_dir=$(pwd)
 positional_args=()
 filter='.'
-outfile="fetched_results.json"
-run_dir_format="%04d"
+outfile="fetch_results.json"
+with_prepare="true"
+with_resources="true"
+with_execute="true"
+with_cleanup="true"
 
 if command -v hostname; then
   hostname=$(hostname -s)
@@ -66,107 +72,157 @@ else
   hostname="unknown"
 fi
 
-function create_experiment {
-  local exp_file exp_json exp_name exp_dir runs_json num_runs runs_dir i run_json run_dir resource_json res_name res_path
-  for exp_file in "${positional_args[@]}"; do
-    if [[ ! -f ${exp_file} ]]; then
-      echo "Warning: Experiment file '${exp_file}' not found, skipping" >&2
-      continue
-    fi
-
-    exp_json=$(jq -c '.' ${exp_file})
-
-    exp_name=$(jq -r '.properties.name // ""' <<<${exp_json})
-
-    if [[ -z $exp_name ]]; then
-      echo "Error: Key 'name' nof found in 'properties' or \"name\" is empty" >&2
-      return 1
-    fi
-
-    exp_dir="${exp_base_dir}/${exp_name}"
-
-    if [[ -d ${exp_dir} ]]; then
-      echo "Warning: Experiment directory '${exp_dir}' already exists, skipping" >&2
-      return 1
-    fi
-
-    echo ":: Creating experiment '${exp_name}' in '${exp_dir}'"
-
-    mkdir -p "${exp_dir}"
-
-    runs_json="$(jq -c '.runs // []' <<<${exp_json})"
-    num_runs=$(jq 'length' <<<${runs_json})
-    echo "-> Writing static properties"
-    jq --argjson runs $num_runs '{properties: .properties, prepare: (.prepare // []), cleanup: (.cleanup // []), runs: $runs}' <<<$exp_json > "${exp_dir}/static.json"
-
-    echo "-> Adding resources"
-    for resource_json in $(jq -c '.resources // [] | .[]' <<<${exp_json}); do
-      res_name=$(jq -r '.name' <<<${resource_json})
-      res_path=$(jq -r '.path' <<<${resource_json})
-      if [[ $(jq '(.symlink // false) == true' <<<${resource_json}) == "true" ]]; then
-        ln -s -r ${res_path} ${exp_dir}/${res_name}
-      else
-        cp ${res_path} "${exp_dir}/${res_name}"
-      fi
-    done
-
-    runs_dir="${exp_dir}/runs"
-    mkdir ${runs_dir}
-
-    i=0
-    while IFS='' read -r run_json; do
-      run_dir=${runs_dir}/$(printf "${run_dir_format}" $i)
-      i=$((i+1))
-      echo -ne "-> Create run directories ($i/$num_runs) \r"
-      mkdir ${run_dir}
-      jq '{properties: (.properties // {}), commands: (.commands // [])}' <<<$run_json > "${run_dir}/static.json"
-
-      while IFS='' read -r resource_json; do
-        res_name=$(jq -r '.name' <<<${resource_json})
-        res_path=$(jq -r '.path' <<<${resource_json})
-        if jq '.symlink' > /dev/null <<<${resource_json}; then
-          ln -s -r ${res_path} ${run_dir}/${res_name}
-        else
-          cp ${res_path} "${run_dir}/${res_name}"
-        fi
-      done < <(jq -c '.resources // [] | .[]' <<<${run_json})
-    done < <(jq -c '.[]' <<<${runs_json})
-    echo ""
-  done
-  echo ":: Done"
-}
-
 function prepare_experiment {
   local exp_dir="$1"
-  local cmd exit_status
 
-  echo ":: Preparing experiment"
-
-  if [[ ! -f "${exp_dir}/static.json" ]]; then
-    echo "Error: 'static.json' not found in '${exp_dir}'" >&2
+  if [[ ! -d "${exp_dir}" ]]; then
+    echo "Error: Experiment '${exp_dir}' not found" >&2
     return 1
   fi
 
+  if [[ ! -f "${exp_dir}/static.json" ]]; then
+    echo "Error: Experiment file '${exp_dir}/static.json' not found" >&2
+    return 1
+  fi
+
+  echo ":: Preparing experiment..."
+
+  local cmd exit_status
   while IFS='' read -r cmd_json; do
     cmd=()
     while IFS='' read -r arg; do
       cmd+=("$arg")
     done < <(jq -r '.[]' <<<${cmd_json})
-    echo ""
-    echo "-> Executing '${cmd[@]}'"
     set +e
-    (cd ${exp_dir}; "${cmd[@]}")
+    (cd "${exp_dir}"; "${cmd[@]}")
     exit_status=$?
     set -e
     if [[ ${exit_status} -ne 0 ]]; then
       echo "Error: Preparation failed" >&2
       return 1
     fi
-  done < <(jq -c '.prepare[]' < "${exp_dir}/static.json")
+  done < <(jq -c '.prepare_commands[]?' < "${exp_dir}/static.json")
+}
+
+function add_resources {
+  local exp_dir="$1"
+
+  if [[ ! -d "${exp_dir}" ]]; then
+    echo "Error: Experiment '${exp_dir}' not found" >&2
+    return 1
+  fi
+
+  if [[ ! -f "${exp_dir}/static.json" ]]; then
+    echo "Error: Experiment file '${exp_dir}/static.json' not found" >&2
+    return 1
+  fi
+
+  echo ":: Adding resources..."
+
+  local res_name res_path 
+  while IFS='' read -r resource_json; do
+    res_name=$(jq -r '.name' <<<${resource_json})
+    res_path=$(jq -r '.path' <<<${resource_json})
+    if jq -e '(.symlink // false)' <<<${resource_json} > /dev/null; then
+      ln -s -r "${res_path}" ${exp_dir}/${res_name}
+    else
+      cp "${res_path}" "${exp_dir}/${res_name}"
+    fi
+  done < <(jq -c '.resources[]?' < "${exp_dir}/static.json")
+
+  local runs_dir="${exp_dir}/runs"
+
+  local num_runs=$(jq -r '.runs // 0' < "${exp_dir}/static.json")
+
+  local i run_dir
+  for ((i=0;i<num_runs;i++)); do
+    run_dir="${runs_dir}/$(printf ${run_dir_format} $i)"
+    if [[ ! -d "${run_dir}" ]]; then
+      echo "Warning: Run directory '${run_dir}' not found, skipping" >&2
+      continue
+    fi
+    if [[ ! -f "${run_dir}/static.json" ]]; then
+      echo "Warning: Run directory '${run_dir}' contains no 'static.json', skipping" >&2
+      continue
+    fi
+    while IFS='' read -r resource_json; do
+      res_name=$(jq -r '.name' <<<${resource_json})
+      res_path=$(jq -r '.path' <<<${resource_json})
+      if jq -e '(.symlink // false)' <<<${resource_json} > /dev/null; then
+        ln -s -r "${res_path}" "${run_dir}/${res_name}"
+      else
+        cp "${res_path}" "${run_dir}/${res_name}"
+      fi
+    done < <(jq -c '.resources[]?' < "${run_dir}/static.json")
+  done
+}
+
+function create_experiment {
+  if [[ ${#positional_args[@]} -eq 0 ]]; then
+    echo "Error: Specify at least one experiment definition"
+    return 129
+  fi
+  if [[ ${#positional_args[@]} -gt 1 ]]; then
+    echo "Error: Excessive argument: ${positional_args[@]:1}"
+    return 129
+  fi
+  local exp_file="${positional_args[@]:0}"
+  if [[ ! -f ${exp_file} ]]; then
+    echo "Error: Experiment file '${exp_file}' not found" >&2
+    return 1
+  fi
+
+  local exp_json=$(jq -c '.' ${exp_file})
+
+  local exp_name=$(jq -r '.properties.name // ""' <<<${exp_json})
+
+  if [[ -z $exp_name ]]; then
+    echo "Error: Key 'name' nof found in 'properties' or \"name\" is empty" >&2
+    return 1
+  fi
+
+  local exp_dir="${exp_base_dir}/${exp_name}"
+
+  if [[ -d ${exp_dir} ]]; then
+    echo "Error: Experiment directory '${exp_dir}' already exists" >&2
+    return 1
+  fi
+
+  echo ":: Creating experiment '${exp_name}' (${exp_dir})..."
+
+  mkdir -p "${exp_dir}"
+
+  local runs_json="$(jq -c '.runs // []' <<<${exp_json})"
+  local num_runs=$(jq 'length' <<<${runs_json})
+  jq --argjson runs $num_runs '{properties: .properties, prepare_commands: (.prepare_commands // []), resources: (.resources // []), cleanup_commands: (.cleanup_commands // []), runs: $runs}' <<<$exp_json > "${exp_dir}/static.json"
+
+  local runs_dir="${exp_dir}/runs"
+  mkdir "${runs_dir}"
+
+  local i=0 run_dir
+  while IFS='' read -r run_json; do
+    run_dir=${runs_dir}/$(printf "${run_dir_format}" $i)
+    mkdir ${run_dir}
+    jq '{properties: (.properties // {}), resources: (.resources // []), commands: (.commands // [])}' <<<$run_json > "${run_dir}/static.json"
+    i=$((i+1))
+  done < <(jq -c '.[]' <<<${runs_json})
+
+  if "${with_prepare}"; then
+    prepare_experiment "${exp_dir}"
+  fi
+  if "${with_resources}"; then
+    add_resources "${exp_dir}"
+  fi
+  echo ":: Done"
 }
 
 function execute_runs {
   local exp_dir="$1"
+
+  if [[ ! -d "${exp_dir}" ]]; then
+    echo "Error: Experiment '${exp_dir}' not found" >&2
+    return 1
+  fi
 
   if [[ ! -f "${exp_dir}/static.json" ]]; then
     echo "Error: 'static.json' not found in '${exp_dir}'" >&2
@@ -175,7 +231,7 @@ function execute_runs {
 
   local num_runs=$(jq '.runs' < "${exp_dir}/static.json")
   local runs_dir="${exp_dir}/runs"
-  local i run_dir exit_status cmd
+  local i run_dir num_cmds cmd_json exit_status j cmd 
 
   for ((i=0;i<num_runs;i++)); do
     run_dir=${runs_dir}/$(printf "${run_dir_format}" $i)
@@ -188,14 +244,15 @@ function execute_runs {
       continue
     fi
     num_cmds=$(jq -r '.commands | length' < "${run_dir}/static.json")
-    echo ":: Start run $((i+1))/${num_runs} (${num_cmds} commands)"
+    echo ":: Start run $((i+1))/${num_runs}..."
     exit_status="null"
+    j=1
     while IFS='' read -r cmd_json; do
       cmd=()
       while IFS='' read -r arg; do
         cmd+=("$arg")
       done < <(jq -r '.[]' <<<${cmd_json})
-      echo "-> Execute '${cmd[@]}'"
+      echo "($j/${num_cmds}) ${cmd[@]}"
       set +e
       (cd "${run_dir}"; "${cmd[@]}" >> "stdout.log" 2>> "stderr.log")
       exit_status=$?
@@ -204,37 +261,37 @@ function execute_runs {
         echo "Warning: Command failed, skipping remaining commands" >&2
         break
       fi
+      j=$((j+1))
     done < <(jq -c '.commands[]' < "${run_dir}/static.json")
-    i=$((i+1))
     jq -n --arg hostname ${hostname} --argjson exit_status ${exit_status} '{host: $hostname, exit_status: $exit_status}' > "${run_dir}/result.json"
-    echo ""
   done
-  echo ":: Done"
 }
 
 function cleanup_experiment {
   local exp_dir="$1"
+
+  if [[ ! -d "${exp_dir}" ]]; then
+    echo "Error: Experiment '${exp_dir}' not found" >&2
+    return 1
+  fi
 
   if [[ ! -f "${exp_dir}/static.json" ]]; then
     echo "Error: 'static.json' not found in '${exp_dir}'" >&2
     return 1
   fi
 
-  local cmd
-
   echo ":: Cleaning up experiment"
 
+  local cmd_json cmd
   while IFS='' read -r cmd_json; do
     cmd=()
     while IFS='' read -r arg; do
       cmd+=("$arg")
     done < <(jq -r '.[]' <<<${cmd_json})
-    echo ""
-    echo "-> Executing '${cmd[@]}'"
     set +e
-    (cd ${exp_dir}; "${cmd[@]}")
+    (cd "${exp_dir}"; "${cmd[@]}")
     set -e
-  done < <(jq -c '.prepare[]' < "${exp_dir}/static.json")
+  done < <(jq -c '.cleanup_commands[]?' < "${exp_dir}/static.json")
 }
 
 function run_experiment {
@@ -242,45 +299,34 @@ function run_experiment {
     echo "Error: No experiment given" >&2
     return 129
   fi
+  if [[ ${#positional_args[@]} -gt 1 ]]; then
+    echo "Error: Excessive argument: ${positional_args[@]:1}"
+    return 129
+  fi
+
   local exp_dir="${positional_args[@]:0}"
-  if [[ ! -d "${exp_dir}" ]]; then
-    echo "Error: '${exp_dir}' not found" >&2
-    return 1
+
+  if "${with_prepare}"; then
+    prepare_experiment "${exp_dir}"
   fi
-  local steps
-  if [[ "${#positional_args[@]}" -eq 1 ]]; then
-    steps=("p" "e" "c")
-  else
-    steps=("${positional_args[@]:1}")
+  if "${with_resources}"; then
+    add_resources "${exp_dir}"
   fi
-  for step in "${steps[@]}"; do
-    case ${step} in
-      p|prepare)
-        prepare_experiment "${exp_dir}"
-        if [[ $? -ne 0 ]]; then
-          return $?
-        fi
-        ;;
-      e|execute)
-        execute_runs "${exp_dir}"
-        ;;
-      c|cleanup)
-        cleanup_experiment "${exp_dir}"
-        ;;
-      *)
-        echo "Error: Unknown step '${step}'" >&2
-        break
-    esac
-  done
+  if "${with_execute}"; then
+    execute_runs "${exp_dir}"
+  fi
+  if "${with_cleanup}"; then
+    cleanup_experiment "${exp_dir}"
+  fi
+  echo ":: Done"
 }
 
 function fetch_results {
-  local num_exps i exp_dir num_runs runs_dir j run_dir
+  local num_exps i exp_dir num_runs runs_dir exp_properties j run_dir
   num_exps="${#positional_args[@]}"
-  exec 4>&1
-  i=1
+
+  echo ":: Fetching results"
   for exp_dir in "${positional_args[@]}"; do
-    echo -ne ":: Fetching results ($i/${num_exps}) \r" >&4
     if [[ ! -d "${exp_dir}" ]]; then
       echo "Warning: '${exp_dir}' not found, skipping" >&2
       continue
@@ -291,6 +337,7 @@ function fetch_results {
     fi
 
     num_runs=$(jq '.runs' < "${exp_dir}/static.json")
+    exp_properties=$(jq '.properties' < "${exp_dir}/static.json")
     runs_dir="${exp_dir}/runs"
 
     for ((j=0;j<num_runs;j++)); do
@@ -299,16 +346,17 @@ function fetch_results {
         echo "Warning: Run directory '${run_dir}' not found, skipping" >&2
         continue
       fi
+      if [[ ! -f "${run_dir}/static.json" ]]; then
+        echo "Warning: Run directory '${run_dir}' contains no 'static.json', skipping" >&2
+        continue
+      fi
       if [[ ! -f "${run_dir}/result.json" ]]; then
         echo "Warning: Run directory '${run_dir}' contains no 'result.json', skipping" >&2
         continue
       fi
-      jq -c "${filter}" "${run_dir}/result.json"
+      jq -s -c --argjson exp_properties "${exp_properties}" "(\$exp_properties + .[0].properties + .[1]) | ${filter}" "${run_dir}/static.json" "${run_dir}/result.json"
     done
-    i=$((i+1))
-  done | jq --slurp '.' > "${outfile}"
-  echo "" >&4
-  echo ""
+  done | jq --slurp > "${outfile}"
   echo ":: Done"
 }
 
@@ -355,6 +403,12 @@ case ${command_verb} in
           fi
           exp_base_dir="$1"
           ;;
+        -P|--no-prepare)
+          with_prepare="false"
+          ;;
+        -R|--no-resources)
+          with_resources="false"
+          ;;
         --)
           shift
           break
@@ -376,11 +430,25 @@ case ${command_verb} in
     create_experiment
     ;;
   run)
+    with_prepare="false"
+    with_resources="false"
     while [[ $# -gt 0 ]]; do
       case $1 in
         --)
           shift
           break
+          ;;
+        -p|--prepare)
+          with_prepare="true"
+          ;;
+        -r|--resources)
+          with_resources="true"
+          ;;
+        -E|--no-execute)
+          with_execute="false"
+          ;;
+        -C|--no-cleanup)
+          with_cleanup="false"
           ;;
         -*)
           echo "Unknown option: $1" >&2
