@@ -289,7 +289,7 @@ function cleanup_experiment {
       cmd+=("$arg")
     done < <(jq -r '.[]' <<<${cmd_json})
     set +e
-    (cd "${exp_dir}"; "${cmd[@]}")
+    ("${cmd[@]}")
     set -e
   done < <(jq -c '.cleanup_commands[]?' < "${exp_dir}/static.json")
 }
@@ -354,7 +354,7 @@ function fetch_results {
         echo "Warning: Run directory '${run_dir}' contains no 'result.json', skipping" >&2
         continue
       fi
-      jq -s -c --argjson exp_properties "${exp_properties}" "(\$exp_properties + .[0].properties + .[1]) | ${filter}" "${run_dir}/static.json" "${run_dir}/result.json"
+      jq -s -c --argjson exp_properties --arg path ${run_dir} "${exp_properties}" "(\$exp_properties + {path:\$path} + .[0].properties + .[1]) | ${filter}" "${run_dir}/static.json" "${run_dir}/result.json"
     done
   done | jq --slurp > "${outfile}"
   echo ":: Done"
