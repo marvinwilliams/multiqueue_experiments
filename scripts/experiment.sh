@@ -63,7 +63,7 @@ with_resources="true"
 with_execute="true"
 with_cleanup="true"
 
-if command -v hostname; then
+if command -v hostname > /dev/null; then
   hostname=$(hostname -s)
 elif [[ -r "/proc/sys/kernel/hostname" ]]; then
   hostname=$(cat /proc/sys/kernel/hostname)
@@ -245,6 +245,8 @@ function execute_runs {
     fi
     num_cmds=$(jq -r '.commands | length' < "${run_dir}/static.json")
     echo ":: Start run $((i+1))/${num_runs}..."
+    : > "${run_dir}/stdout.log"
+    : > "${run_dir}/stderr.log"
     exit_status="null"
     j=1
     while IFS='' read -r cmd_json; do
