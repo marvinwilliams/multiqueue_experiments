@@ -9,9 +9,9 @@ extern "C" {
 __thread ptst_t* ptst;
 
 void CAPQ_deleter::operator()(CAPQ* p) {
-  capq_delete(p);
   // Segfaults
-  /* _destroy_gc_subsystem(); */
+  /* capq_delete(p); */
+  _destroy_gc_subsystem();
 }
 
 namespace wrapper {
