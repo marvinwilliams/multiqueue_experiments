@@ -68,6 +68,7 @@ string(
 )
 
 add_library(benchmark_base INTERFACE)
+target_include_directories(benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/external" "utils" "")
 target_include_directories(benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/external" "utils")
 target_compile_options(benchmark_base INTERFACE $<$<CONFIG:Release>:-march=native>)
 if(CMAKE_COMPILER_IS_GNUCXX)
@@ -221,6 +222,7 @@ endfunction()
 
 add_subdirectory(multiqueue)
 add_subdirectory(multififo)
+add_subdirectory(mt-kahypar)
 
 add_library(mq_random INTERFACE)
 target_compile_definitions(mq_random INTERFACE PQ_MQ_RANDOM MULTIQUEUE_DEFAULT_SELECTION_STRATEGY=selection_strategy::Random)
@@ -248,6 +250,10 @@ add_sssp("mq_random;mq_sticky;mq_swapping;mq_perm;capq;klsm256;klsm1024;klsm4096
 add_knapsack_packed("mq_random;mq_sticky;mq_swapping;mq_perm;capq;klsm256;klsm1024;klsm4096;linden;spraylist;tbb_q;tbb_pq;mf_sticky")
 add_knapsack_heap("mq_random;mq_sticky;mq_swapping;mq_perm;capq;klsm256;klsm1024;klsm4096;linden;spraylist;tbb_q;tbb_pq;mf_sticky")
 add_knapsack_explicit("mq_random;mq_sticky;mq_swapping;mq_perm;klsm256;klsm1024;klsm4096;tbb_q;tbb_pq;mf_sticky")
+
+# add_executable(MtKaHyParMQRandomC4)
+# target_link_libraries(MtKaHyParMQRandomC4 PRIVATE MtKaHyParStrongAsync mq_random benchmark_base)
+# target_compile_definitions(MtKaHyParMQRandomC4 PRIVATE MQ_C=4)
 
 if(experiments_BUILD_TESTS)
     include(CTest)

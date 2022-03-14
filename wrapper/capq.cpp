@@ -10,7 +10,8 @@ __thread ptst_t* ptst;
 
 void CAPQ_deleter::operator()(CAPQ* p) {
   capq_delete(p);
-  _destroy_gc_subsystem();
+  // Segfaults
+  /* _destroy_gc_subsystem(); */
 }
 
 namespace wrapper {
