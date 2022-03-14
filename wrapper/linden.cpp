@@ -25,12 +25,6 @@ Linden::Linden(std::size_t /* capacity */, unsigned int /* num_threads */) {
   pq_.reset(static_cast<linden_pq_t*>(pq_init(32)));
 }
 
-Linden::Handle Linden::get_handle() {
-  auto h = Handle{};
-  h.pq_ = pq_.get();
-  return h;
-}
-
 void Linden::Handle::push(value_type const& value) {
   ::insert(pq_, value.first + 1, value.second);
 }
@@ -38,6 +32,23 @@ void Linden::Handle::push(value_type const& value) {
 bool Linden::Handle::try_extract_top(value_type& retval) {
   unsigned long k_ret;
   retval.second = ::deletemin_key(pq_, &retval.first);
+  --retval.first;
+  return retval.first != sentinel_;
+}
+
+Linden::Handle Linden::get_handle() {
+  auto h = Handle{};
+  h.pq_ = pq_.get();
+  return h;
+}
+
+void Linden::push(value_type const& value) {
+  ::insert(pq_.get(), value.first + 1, value.second);
+}
+
+bool Linden::try_extract_top(value_type& retval) {
+  unsigned long k_ret;
+  retval.second = ::deletemin_key(pq_.get(), &retval.first);
   --retval.first;
   return retval.first != sentinel_;
 }

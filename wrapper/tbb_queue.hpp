@@ -11,38 +11,42 @@ namespace wrapper {
 
 template <typename KeyType, typename T>
 class TBBQueue {
- public:
-  using key_type = KeyType;
-  using mapped_type = T;
-  using value_type = std::pair<key_type, mapped_type>;
+   public:
+    using key_type = KeyType;
+    using mapped_type = T;
+    using value_type = std::pair<key_type, mapped_type>;
 
- private:
-  using pq_type = tbb::concurrent_queue<value_type>;
-
- public:
-  class Handle {
-    friend TBBQueue;
-    pq_type* pq_;
+   private:
+    using pq_type = tbb::concurrent_queue<value_type>;
 
    public:
-    void push(value_type const& value) { pq_->push(value); }
+    class Handle {
+        friend TBBQueue;
+        pq_type* pq_;
 
-    bool try_extract_top(value_type& retval) { return pq_->try_pop(retval); }
-  };
+       public:
+        void push(value_type const& value) { pq_->push(value); }
+        bool try_extract_top(value_type& retval) {
+            return pq_->try_pop(retval);
+        }
+    };
 
- private:
-  pq_type pq_;
+   private:
+    pq_type pq_;
 
- public:
-  TBBQueue(std::size_t /* capacity */, unsigned int /* num_threads */) {}
+   public:
+    TBBQueue(std::size_t /* capacity */, unsigned int /* num_threads */) {}
 
-  Handle get_handle() {
-    auto h = Handle{};
-    h.pq_ = &pq_;
-    return h;
-  }
+    Handle get_handle() {
+        auto h = Handle{};
+        h.pq_ = &pq_;
+        return h;
+    }
 
-  static std::string description() { return "TBBQueue"; }
+    void push(value_type const& value) { pq_.push(value); }
+    bool try_extract_top(value_type& retval) { return pq_.try_pop(retval); }
+
+    static std::string description() { return "TBBQueue"; }
 };
 
 }  // namespace wrapper

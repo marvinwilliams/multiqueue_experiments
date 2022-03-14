@@ -29,11 +29,9 @@ class Capq {
   using mapped_type = unsigned long;
   using value_type = std::pair<key_type, mapped_type>;
 
-  class Handle {
-    friend Capq;
+  struct Handle {
     CAPQ* pq_;
 
-   public:
     void push(value_type const& value);
     bool try_extract_top(value_type& retval);
   };
@@ -52,6 +50,9 @@ class Capq {
   Capq(std::size_t /* capacity */, unsigned int /* num_threads */);
 
   Handle get_handle();
+
+  void push(value_type const& value);
+  bool try_extract_top(value_type& retval);
 
   std::string description() const {
     std::stringstream ss;
