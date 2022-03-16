@@ -19,7 +19,7 @@ namespace thread_coordination {
 
 class ThreadCoordinator;
 
-class alignas(L1_CACHE_LINESIZE) Context {
+class Context {
   friend ThreadCoordinator;
   ThreadCoordinator& coordinator_;
   unsigned int id_;

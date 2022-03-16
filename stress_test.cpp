@@ -19,6 +19,7 @@
 #include <memory>
 #include <new>
 #include <numeric>
+#include <optional>
 #include <thread>
 #include <type_traits>
 #include <utility>
@@ -79,12 +80,7 @@ struct Settings {
 #endif
     unsigned int num_threads = 4;
     std::uint64_t seed = 1;
-#if defined PQ_IS_MQ || defined PQ_MF_STICKY
-    std::size_t c = PriorityQueue::param_type{}.c;
-#ifndef PQ_MQ_RANDOM
-    unsigned int stickiness = PriorityQueue::param_type{}.stickiness;
-#endif
-#endif
+    util::PriorityQueueParameters pq_params;
     OperationGenerator<key_type> insert_config{
         InsertPolicy::Uniform,
         KeyDistribution::Uniform,
@@ -360,14 +356,10 @@ int main(int argc, char* argv[]) {
        "(default: 0)", cxxopts::value<key_type>(), "NUMBER")
       ("s,seed", "Specify the initial seed"
        "(default: 0)", cxxopts::value<std::uint32_t>(), "NUMBER")
-#if defined PQ_IS_MQ || defined PQ_MF_STICKY
-      ("c,factor", "The number of queues per thread"
+      ("c,factor", "The number of queues when using multiqueue or multififo"
        "(default: 4)", cxxopts::value<std::size_t>(), "NUMBER")
-#ifndef PQ_MQ_RANDOM
-      ("k,stickiness", "The stickiness"
+      ("k,stickiness", "The stickiness when using multiqueue or multififo supporting stickiness"
        "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
-#endif
-#endif
       ("h,help", "Print this help");
     // clang-format on
 
@@ -432,16 +424,13 @@ int main(int argc, char* argv[]) {
         if (result.count("seed") > 0) {
             settings.seed = result["seed"].as<std::uint32_t>();
         }
-#if defined PQ_IS_MQ || defined PQ_MF_STICKY
         if (result.count("factor") > 0) {
-            settings.c = result["factor"].as<std::size_t>();
+            settings.pq_params.c = result["factor"].as<std::size_t>();
         }
-#ifndef PQ_MQ_RANDOM
         if (result.count("stickiness") > 0) {
-            settings.stickiness = result["stickiness"].as<unsigned int>();
+            settings.pq_params.stickiness =
+                result["stickiness"].as<unsigned int>();
         }
-#endif
-#endif
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << "Error parsing arguments: " << e.what() << '\n';
         std::cerr << options.help() << std::endl;
@@ -482,18 +471,9 @@ int main(int argc, char* argv[]) {
     xoroshiro256starstar rng;
     rng.seed(settings.seed);
 
-#if defined PQ_IS_MQ || defined PQ_MF_STICKY
-    auto params = PriorityQueue::param_type{};
-    params.seed = rng();
-    params.c = settings.c;
-#ifndef PQ_MQ_RANDOM
-    params.stickiness = settings.stickiness;
-#endif
-
-    PriorityQueue pq{settings.prefill_size, settings.num_threads, params};
-#else
-    auto pq = PriorityQueue(settings.prefill_size, settings.num_threads);
-#endif
+    settings.pq_params.seed = rng();
+    auto pq = util::create_pq<PriorityQueue>(
+        settings.prefill_size, settings.num_threads, settings.pq_params);
 
     std::clog << "Using priority queue: " << pq.description() << "\n\n";
 
