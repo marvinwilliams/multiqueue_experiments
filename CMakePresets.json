@@ -1,0 +1,71 @@
+{
+  "version": 3,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 16
+  },
+  "configurePresets": [
+    {
+      "name": "release",
+      "displayName": "Release Preset",
+      "generator": "Unix Makefiles",
+      "binaryDir": "build/release",
+      "cacheVariables": {
+        "MULTIQUEUE_EXP_EXACT_TERMINATION": "ON",
+        "CMAKE_BUILD_TYPE": "Release"
+      }
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Preset",
+      "generator": "Unix Makefiles",
+      "binaryDir": "build/debug",
+      "cacheVariables": {
+        "MULTIQUEUE_EXP_EXACT_TERMINATION": "ON",
+        "MULTIQUEUE_EXP_PC": "ON",
+        "CMAKE_BUILD_TYPE": "Debug"
+      }
+    },
+    {
+      "name": "sanitize",
+      "inherits": "debug",
+      "displayName": "UBSAN/ASAN Preset",
+      "binaryDir": "build/sanitize",
+      "cacheVariables": {
+        "MULTIQUEUE_EXP_ASAN": "ON",
+        "MULTIQUEUE_EXP_UBSAN": "ON"
+      }
+    },
+    {
+      "name": "thread_sanitize",
+      "inherits": "debug",
+      "displayName": "TSAN Preset",
+      "binaryDir": "build/thread_sanitize",
+      "cacheVariables": {
+        "MULTIQUEUE_EXP_TSAN": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "release",
+      "displayName": "Release Build preset",
+      "configurePreset": "release"
+    },
+    {
+      "name": "debug",
+      "displayName": "Debug Build preset",
+      "configurePreset": "debug"
+    },
+    {
+      "name": "sanitize",
+      "displayName": "UBSAN/ASAN Build Preset",
+      "configurePreset": "sanitize"
+    },
+    {
+      "name": "thread_sanitize",
+      "displayName": "TSAN Build Preset",
+      "configurePreset": "thread_sanitize"
+    }
+ ]
+}
