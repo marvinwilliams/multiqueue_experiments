@@ -2,7 +2,10 @@
 #define PACKED_VALUE
 #endif
 
-#include "utils/operation_generator.hpp"
+#if !(defined LINEAR_MODE || defined BINARY_MODE || defined HINT_MODE)
+#define HINT_MODE
+#endif
+
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
 #include "utils/threading.hpp"
@@ -51,66 +54,92 @@ struct KnapsackInstance {
     std::vector<KnapsackInstance::Item> prefix_sum;
 };
 
+#ifdef HINT_MODE
 struct Node {
     Node() {}
-    explicit Node(unsigned int i, unsigned int h, weight_type uc, value_type v)
-        : index{i}, hint{h}, used_capacity{uc}, value{v} {}
+    explicit Node(unsigned int i, weight_type cap, value_type v, unsigned int h)
+        : index{i}, free_capacity{cap}, value{v}, hint{h} {}
     unsigned int index;
+    weight_type free_capacity;
+    value_type value;
     unsigned int hint;
-    weight_type used_capacity;
+};
+#else
+struct Node {
+    Node() {}
+    explicit Node(unsigned int i, weight_type cap, value_type v)
+        : index{i}, free_capacity{cap}, value{v} {}
+    unsigned int index;
+    weight_type free_capacity;
     value_type value;
 };
+#endif
 
 #if defined PACKED_VALUE
 using payload_type = unsigned long;
 static_assert(sizeof(unsigned long) == sizeof(std::uint64_t),
               "64bit unsigned long required");
 
+#ifdef HINT_MODE
 static constexpr unsigned int bits_for_index = 12;
-static constexpr unsigned int bits_for_hint = 12;
-static constexpr unsigned int bits_for_used_capacity = 20;
+static constexpr unsigned int bits_for_free_capacity = 20;
 static constexpr unsigned int bits_for_value = 20;
-static_assert(bits_for_index + bits_for_hint + bits_for_used_capacity +
+static constexpr unsigned int bits_for_hint = 12;
+static_assert(bits_for_index + bits_for_hint + bits_for_free_capacity +
                       bits_for_value <=
                   64,
               "Can't use more than 64 bits to encode Node");
+#else
+static constexpr unsigned int bits_for_index = 16;
+static constexpr unsigned int bits_for_free_capacity = 24;
+static constexpr unsigned int bits_for_value = 24;
+static_assert(bits_for_index + bits_for_free_capacity + bits_for_value <= 64,
+              "Can't use more than 64 bits to encode Node");
+#endif
+
+static constexpr unsigned int index_pos = 0;
+static constexpr unsigned int free_capacity_pos = index_pos + bits_for_index;
+static constexpr unsigned int value_pos =
+    free_capacity_pos + bits_for_free_capacity;
+#ifdef HINT_MODE
+static constexpr unsigned int hint_pos = value_pos + bits_for_value;
+#endif
+
 constexpr unsigned int get_index(payload_type p) noexcept {
     return static_cast<unsigned int>(
-        p & ((static_cast<payload_type>(1) << bits_for_index) - 1));
+        (p >> index_pos) & p &
+        ((static_cast<payload_type>(1) << bits_for_index) - 1));
 }
 
-constexpr unsigned int get_hint(payload_type p) noexcept {
-    return static_cast<unsigned int>(
-        (p >> bits_for_index) &
-        ((static_cast<payload_type>(1) << bits_for_hint) - 1));
-}
-
-constexpr weight_type get_used_capacity(payload_type p) noexcept {
+constexpr weight_type get_free_capacity(payload_type p) noexcept {
     return static_cast<weight_type>(
-        (p >> (bits_for_index + bits_for_hint)) &
-        ((static_cast<payload_type>(1) << bits_for_used_capacity) - 1));
+        (p >> free_capacity_pos) &
+        ((static_cast<payload_type>(1) << bits_for_free_capacity) - 1));
 }
 
 constexpr value_type get_value(payload_type p) noexcept {
     return static_cast<weight_type>(
-        (p >> (bits_for_index + bits_for_hint + bits_for_used_capacity)) &
+        (p >> value_pos) &
         ((static_cast<payload_type>(1) << bits_for_value) - 1));
 }
 
-constexpr payload_type to_payload(unsigned int index, unsigned int hint,
-                                  weight_type used_capacity,
-                                  value_type value) noexcept {
-    return (static_cast<payload_type>(index) &
-            ((static_cast<payload_type>(1) << bits_for_index) - 1)) |
-           ((static_cast<payload_type>(hint) &
-             ((static_cast<payload_type>(1) << bits_for_hint) - 1))
-            << bits_for_index) |
-           ((static_cast<payload_type>(used_capacity) &
-             ((static_cast<payload_type>(1) << bits_for_used_capacity) - 1))
-            << (bits_for_index + bits_for_hint)) |
-           ((static_cast<payload_type>(value) &
-             ((static_cast<payload_type>(1) << bits_for_value) - 1))
-            << (bits_for_index + bits_for_hint + bits_for_used_capacity));
+#ifdef HINT_MODE
+constexpr unsigned int get_hint(payload_type p) noexcept {
+    return static_cast<unsigned int>(
+        (p >> (hint_pos)) &
+        ((static_cast<payload_type>(1) << bits_for_hint) - 1));
+}
+#endif
+
+constexpr payload_type to_payload(Node const& node) noexcept {
+    return (static_cast<payload_type>(node.index) << index_pos) |
+           (static_cast<payload_type>(node.free_capacity)
+            << free_capacity_pos) |
+           (static_cast<payload_type>(node.value) << value_pos)
+#ifdef HINT_MODE
+           | (static_cast<payload_type>(node.hint) << hint_pos)
+#endif
+        ;
 }
 
 #elif defined HEAP_VALUE
@@ -123,6 +152,13 @@ using Alloc = tbb::scalable_allocator<Node>;
 using AllocTraits = std::allocator_traits<Alloc>;
 
 Alloc global_alloc;
+
+struct node_deleter {
+    void operator()(Node* ptr) const {
+        AllocTraits::destroy(global_alloc, ptr);
+        AllocTraits::deallocate(global_alloc, ptr, 1);
+    }
+};
 
 #elif defined EXPLICIT_VALUE
 using payload_type = Node;
@@ -158,8 +194,6 @@ struct StatCounters {
     std::size_t ignored_nodes = 0;
     std::size_t extracted_nodes = 0;
     std::size_t failed_extracts = 0;
-    std::size_t allocated_nodes = 0;
-    std::size_t freed_nodes = 0;
     std::size_t processed_nodes = 0;
     std::size_t idle = 0;
 };
@@ -170,8 +204,6 @@ inline void pushed_node(unsigned int id) { ++stats[id].pushed_nodes; }
 inline void ignored_node(unsigned int id) { ++stats[id].ignored_nodes; }
 inline void extracted_node(unsigned int id) { ++stats[id].extracted_nodes; }
 inline void extract_failed(unsigned int id) { ++stats[id].failed_extracts; }
-inline void allocated_node(unsigned int id) { ++stats[id].allocated_nodes; }
-inline void freed_node(unsigned int id) { ++stats[id].freed_nodes; }
 inline void processed_node(unsigned int id) { ++stats[id].processed_nodes; }
 inline void started_idling(unsigned int id) { ++stats[id].idle; }
 #else
@@ -179,8 +211,6 @@ inline void pushed_node(unsigned int) {}
 inline void ignored_node(unsigned int) {}
 inline void extracted_node(unsigned int) {}
 inline void extract_failed(unsigned int) {}
-inline void allocated_node(unsigned int) {}
-inline void freed_node(unsigned int) {}
 inline void processed_node(unsigned int) {}
 inline void started_idling(unsigned int) {}
 #endif
@@ -188,27 +218,85 @@ inline void started_idling(unsigned int) {}
 static Settings settings;
 static KnapsackInstance instance;
 
-value_type get_upper_bound(weight_type weight_unused, unsigned int index,
-                           unsigned int& hint) noexcept {
-    auto target_weight = instance.capacity + weight_unused;
-    assert(hint <= instance.prefix_sum.size());
-    while (hint != instance.prefix_sum.size() &&
-           instance.prefix_sum[hint].weight <= target_weight) {
-        ++hint;
+value_type get_lower_bound(weight_type capacity, unsigned int index) noexcept {
+    value_type value = 0;
+    while (index < instance.items.size() &&
+           instance.items[index].weight <= capacity) {
+        capacity -= instance.items[index].weight;
+        value += instance.items[index].value;
+        ++index;
     }
-    value_type result =
-        instance.prefix_sum[hint - 1].value - instance.prefix_sum[index].value;
-    if (hint != instance.prefix_sum.size()) {
-        weight_type free_capacity =
-            target_weight - instance.prefix_sum[hint - 1].weight;
-        result += (instance.items[hint - 1].value * free_capacity +
-                   instance.items[hint - 1].weight - 1) /
-                  instance.items[hint - 1].weight;
+    return value;
+}
+
+#ifdef LINEAR_MODE
+
+value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
+    value_type value = 0;
+    while (index < instance.items.size() &&
+           instance.items[index].weight <= capacity) {
+        capacity -= instance.items[index].weight;
+        value += instance.items[index].value;
+        ++index;
+    }
+    if (index < instance.items.size() && capacity > 0) {
+        value +=
+            static_cast<value_type>(instance.items[index].value * capacity /
+                                    instance.items[index].weight);
+    }
+    return value;
+}
+
+#elif defined BINARY_MODE
+
+value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
+    assert(index <= instance.items.size());
+    assert(hint <= instance.prefix_sum.size());
+    value_type value_offset = instance.prefix_sum[index].value;
+    weight_type target_capacity = instance.prefix_sum[index].weight + capacity;
+    auto it = std::upper_bound(
+        instance.prefix_sum.begin(), instance.prefix_sum.end(), target_capacity,
+        [](auto lhs, auto rhs) { return lhs < rhs.weight; });
+    value_type result = (it - 1)->value - value_offset;
+    if (it != instance.prefix_sum.end()) {
+        double fraction =
+            static_cast<double>(target_capacity - (it - 1)->weight) /
+            static_cast<double>(it->weight - (it - 1)->weight);
+        result += static_cast<value_type>(
+            static_cast<double>(it->value - (it - 1)->value) * fraction);
     }
     return result;
 }
 
-#ifdef EXACT_TERMINATION
+#else
+
+value_type get_upper_bound(weight_type capacity, unsigned int index,
+                           unsigned int& hint) noexcept {
+    assert(index <= instance.items.size());
+    assert(hint <= instance.prefix_sum.size());
+    value_type value_offset = instance.prefix_sum[index].value;
+    weight_type target_capacity = instance.prefix_sum[index].weight + capacity;
+    while (hint != instance.prefix_sum.size()) {
+        if (instance.prefix_sum[hint].weight > target_capacity) {
+            double fraction =
+                static_cast<double>(target_capacity -
+                                    instance.prefix_sum[hint - 1].weight) /
+                static_cast<double>(instance.prefix_sum[hint].weight -
+                                    instance.prefix_sum[hint - 1].weight);
+            return (instance.prefix_sum[hint - 1].value - value_offset) +
+                   static_cast<value_type>(
+                       static_cast<double>(
+                           instance.prefix_sum[hint].value -
+                           instance.prefix_sum[hint - 1].value) *
+                       fraction);
+        }
+        ++hint;
+    }
+    // All items fit
+    return instance.prefix_sum[hint - 1].value - value_offset;
+}
+#endif
+
 // Each thread has a state, which is either working (0), check_idle (1) or idle
 // (2) or woken up by another thread (3)
 struct alignas(2 * L1_CACHE_LINESIZE) IdleState {
@@ -220,10 +308,10 @@ alignas(2 * L1_CACHE_LINESIZE) std::atomic_size_t idle_counter = 0;
 
 static inline bool idle(unsigned int id) {
     idle_state[id].state.store(2, std::memory_order_relaxed);
-    idle_counter.fetch_add(1, std::memory_order_release);
+    idle_counter.fetch_add(1, std::memory_order_relaxed);
     started_idling(id);
     while (true) {
-        if (idle_state[id].state.load(std::memory_order_relaxed) == 0) {
+        if (idle_state[id].state.load(std::memory_order_acquire) == 0) {
             // Someone woke this thread up
             return false;
         }
@@ -235,179 +323,204 @@ static inline bool idle(unsigned int id) {
         std::this_thread::yield();
     }
 }
-#endif
 
 // The best known solution value
 alignas(2 * L1_CACHE_LINESIZE) std::atomic<value_type> best_value;
 
-// Returns true if this node was terminal
+// Returns true if this node inserted new nodes
 bool process_node(PriorityQueue::Handle& handle,
                   PriorityQueue::value_type const& value, unsigned int id) {
+#ifdef PACKED_VALUE
+    if (get_index(value.second) == instance.items.size()) {
+#elif defined HEAP_VALUE
+    auto node_ptr = std::unique_ptr<Node, node_deleter>(
+        reinterpret_cast<Node*>(value.second));
+    if (node_ptr->index == instance.items.size()) {
+#elif defined EXPLICIT_VALUE
+    if (value.second.index == instance.items.size()) {
+#endif
+        return false;
+    }
     auto current_best_value = best_value.load(std::memory_order_relaxed);
     value_type upper_bound =
         reverse_priority ? value_max - value.first : value.first;
     if (upper_bound <= current_best_value) {
         // The upper bound of this node is worse than the currently best value
         ignored_node(id);
-#ifdef HEAP_VALUE
-        AllocTraits::destroy(global_alloc,
-                             reinterpret_cast<Node*>(value.second));
-        AllocTraits::deallocate(global_alloc,
-                                reinterpret_cast<Node*>(value.second), 1);
-        freed_node(id);
-#endif
-        return true;
+        return false;
     }
     processed_node(id);
 
-    bool terminal = true;
 #ifdef PACKED_VALUE
-    Node node{get_index(value.second), get_hint(value.second),
-              get_used_capacity(value.second), get_value(value.second)};
+    Node node{get_index(value.second), get_free_capacity(value.second),
+              get_value(value.second)
+#ifdef HINT_MODE
+                  ,
+              get_hint(value.second)
+#endif
+    };
 #elif defined HEAP_VALUE
-    Node* node_ptr = reinterpret_cast<Node*>(value.second);
     Node node = *node_ptr;
 #elif defined EXPLICIT_VALUE
     Node const& node = value.second;
 #endif
-    while (node.value > current_best_value &&
-           !best_value.compare_exchange_weak(current_best_value, node.value,
-                                             std::memory_order_relaxed)) {
-        _mm_pause();
-    }
+
+    bool inserted = false;
     // Check if there is enough capacity for the next item
+#ifdef HINT_MODE
     assert(node.index < node.hint);
+    assert(!!(instance.items[node.index].weight <= node.free_capacity) ==
+           !!(node.index + 1 != node.hint));
     if (node.index + 1 != node.hint) {
-#ifdef PACKED_VALUE
-        auto payload =
-            to_payload(node.index + 1, node.hint,
-                       node.used_capacity + instance.items[node.index].weight,
-                       node.value + instance.items[node.index].value);
-        handle.push({value.first, payload});
-#elif defined HEAP_VALUE
-        node_ptr->index = node.index + 1;
-        node_ptr->used_capacity =
-            node.used_capacity + instance.items[node.index].weight;
-        node_ptr->value = node.value + instance.items[node.index].value;
-        handle.push(value);
-#elif defined EXPLICIT_VALUE
-        handle.push(
-            {value.first,
-             Node{node.index + 1, node.hint,
-                  node.used_capacity + instance.items[node.index].weight,
-                  node.value + instance.items[node.index].value}});
+#else
+    if (instance.items[node.index].weight <= node.free_capacity) {
 #endif
-        terminal = false;
-        pushed_node(id);
-    }
-    weight_type weight_unused =
-        instance.prefix_sum[node.index + 1].weight - node.used_capacity;
-    unsigned int hint_without_next = node.hint;
-    value_type upper_bound_without_next =
-        node.value +
-        get_upper_bound(weight_unused, node.index + 1, hint_without_next);
-    if (upper_bound_without_next <= current_best_value) {
-#ifdef HEAP_VALUE
-        if (terminal) {
-            AllocTraits::destroy(global_alloc, node_ptr);
-            AllocTraits::deallocate(global_alloc, node_ptr, 1);
-            freed_node(id);
-        }
-#endif
-        return terminal;
-    }
-    if (hint_without_next == instance.prefix_sum.size() ||
-        instance.prefix_sum[hint_without_next - 1].weight ==
-            instance.capacity + weight_unused) {
-        // All remaining items fit or the upper bound matches
-        while (upper_bound_without_next > current_best_value &&
-               !best_value.compare_exchange_weak(current_best_value,
-                                                 upper_bound_without_next,
+        value_type new_value = node.value + instance.prefix_sum[node.index + 1].value - instance.prefix_sum[node.index].value;
+        value_type new_capacity = node.free_capacity - (instance.prefix_sum[node.index + 1].weight - instance.prefix_sum[node.index].weight);
+        while (new_value > current_best_value &&
+               !best_value.compare_exchange_weak(current_best_value, new_value,
                                                  std::memory_order_relaxed)) {
             _mm_pause();
         }
-#ifdef HEAP_VALUE
-        if (terminal) {
-            AllocTraits::destroy(global_alloc, node_ptr);
-            AllocTraits::deallocate(global_alloc, node_ptr, 1);
-            freed_node(id);
-        }
+#ifdef PACKED_VALUE
+        auto payload = to_payload(Node{
+            node.index + 1,
+            new_capacity, new_value
+#ifdef HINT_MODE
+            ,
+            node.hint
 #endif
-        return terminal;
+        });
+        handle.push({value.first, payload});
+#elif defined HEAP_VALUE
+        ++node_ptr->index;
+        node_ptr->free_capacity = new_capacity;
+        node_ptr->value = new_value;
+        handle.push(value);
+        node_ptr.release();
+#elif defined EXPLICIT_VALUE
+    handle.push(
+        {value.first,
+         Node{node.index + 1,
+              new_capacity, new_value
+#ifdef HINT_MODE
+              ,
+              node.hint
+#endif
+         }});
+#endif
+        pushed_node(id);
+        inserted = true;
+    }
+#ifdef HINT_MODE
+    unsigned int hint_without_next = node.hint;
+    value_type upper_bound_without_next =
+        node.value +
+        get_upper_bound(node.free_capacity, node.index + 1, hint_without_next);
+#else
+    value_type upper_bound_without_next =
+        node.value + get_upper_bound(node.free_capacity, node.index + 1);
+#endif
+    if (upper_bound_without_next <= current_best_value) {
+        return inserted;
     }
     if (reverse_priority) {
         upper_bound_without_next = value_max - upper_bound_without_next;
     }
 #ifdef PACKED_VALUE
-    handle.push(
-        {upper_bound_without_next, to_payload(node.index + 1, hint_without_next,
-                                              node.used_capacity, node.value)});
+    handle.push({upper_bound_without_next,
+                 to_payload(Node{node.index + 1, node.free_capacity, node.value
+#ifdef HINT_MODE
+                                 ,
+                                 hint_without_next
+#endif
+                 })});
 #elif defined HEAP_VALUE
-    if (terminal) {
-        node_ptr->index = node.index + 1;
+    if (node_ptr) {
+        ++node_ptr->index;
+#ifdef HINT_MODE
         node_ptr->hint = hint_without_next;
+#endif
         handle.push({upper_bound_without_next, value.second});
+        node_ptr.release();
     } else {
-        node_ptr = AllocTraits::allocate(global_alloc, 1);
-        AllocTraits::construct(global_alloc, node_ptr, node.index + 1,
-                               hint_without_next, node.used_capacity,
-                               node.value);
-        handle.push({upper_bound_without_next,
-                     reinterpret_cast<payload_type>(node_ptr)});
-        allocated_node(id);
+        auto ptr = AllocTraits::allocate(global_alloc, 1);
+        AllocTraits::construct(global_alloc, ptr, node.index + 1,
+                               node.free_capacity, node.value
+#ifdef HINT_MODE
+                               ,
+                               hint_without_next
+#endif
+        );
+        handle.push(
+            {upper_bound_without_next, reinterpret_cast<payload_type>(ptr)});
     }
 #elif defined EXPLICIT_VALUE
-    handle.push(
-        {upper_bound_without_next, Node{node.index + 1, hint_without_next,
-                                        node.used_capacity, node.value}});
+handle.push({upper_bound_without_next, Node{node.index + 1,
+                               node.free_capacity, node.value
+#ifdef HINT_MODE
+                               ,
+                               hint_without_next
+#endif
+                               }});
 #endif
     pushed_node(id);
-    return false;
+    return true;
 }
 
 void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
-    PriorityQueue::value_type retval;
-    while (true) {
-        bool success = false;
+    auto extract_node = [&handle, id](auto& retval) {
         for (std::size_t i = 0; i < retries * settings.num_threads; ++i) {
-            success = handle.try_extract_top(retval);
-            if (success) {
-                break;
+            if (handle.try_extract_top(retval)) {
+                return true;
             }
             extract_failed(id);
         }
-        if (!success) {
-#ifdef EXACT_TERMINATION
+        return false;
+    };
+
+#if defined PQ_MQ || defined PQ_MF
+    auto partition_empty = [&handle, id]() {
+        for (unsigned int i = 0; i < *settings.pq_params.c; ++i) {
+            if (!handle.is_empty(id * (*settings.pq_params.c) + i)) {
+                return false;
+            }
+        }
+        return true;
+    };
+#endif
+
+    PriorityQueue::value_type retval;
+
+    while (true) {
+        if (!extract_node(retval)) {
+            // no item found, initiate idling
             idle_state[id].state.store(1, std::memory_order_relaxed);
             idle_counter.fetch_add(1, std::memory_order_release);
 #if defined PQ_MQ || defined PQ_MF
-            for (unsigned int i = 0; i < *settings.pq_params.c; ++i) {
-                if (handle.try_extract_from(id * (*settings.pq_params.c) + i,
-                                            retval)) {
-                    success = true;
-                    break;
-                }
-            }
-#else
-            success = handle.try_extract_top(retval);
-#endif
-            if (!success) {
+            if (partition_empty()) {
                 if (idle(id)) {
-                    break;
+                    return;
+                }
+            } else {
+                idle_state[id].state.store(0, std::memory_order_relaxed);
+                idle_counter.fetch_sub(1, std::memory_order_release);
+            }
+            continue;
+#else
+            if (!handle.try_extract_top(retval)) {
+                if (idle(id)) {
+                    return;
                 } else {
                     continue;
                 }
             }
             idle_state[id].state.store(0, std::memory_order_relaxed);
             idle_counter.fetch_sub(1, std::memory_order_release);
-#else
-            break;
 #endif
         }
         extracted_node(id);
-#ifdef EXACT_TERMINATION
-        bool terminal = process_node(handle, retval, id);
-        if (!terminal) {
+        if (process_node(handle, retval, id)) {
             if (idle_counter.load(std::memory_order_acquire) != 0) {
                 for (std::size_t i = 0; i < settings.num_threads; ++i) {
                     if (i == id) {
@@ -417,7 +530,7 @@ void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
                         idle_state[i].state.load(std::memory_order_relaxed);
                     while (true) {
                         while (thread_idle_state == 1) {
-                            std::this_thread::yield();
+                            _mm_pause();
                             thread_idle_state = idle_state[i].state.load(
                                 std::memory_order_relaxed);
                         }
@@ -437,46 +550,62 @@ void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
                 }
             }
         }
-#else
-        process_node(handle, retval, id);
-#endif
     }
 }
 
 struct Task {
     static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
         auto handle = pq.get_handle();
-        unsigned int hint;
-        value_type upper_bound = get_upper_bound(0, 0, hint);
-        value_type lower_bound = instance.prefix_sum[hint - 1].value;
         if (ctx.is_main()) {
-            best_value.store(lower_bound, std::memory_order_relaxed);
-            if (lower_bound == upper_bound) {
-                std::clog << "Instance is trivial\n";
-                return;
-            }
-            std::clog << "Solving knapsack instance..." << std::flush;
-            if (reverse_priority) {
-                upper_bound = value_max - upper_bound;
-            }
-#ifdef PACKED_VALUE
-            process_node(handle, {upper_bound, to_payload(0, hint, 0, 0)},
-                         ctx.get_id());
-#elif defined HEAP_VALUE
-            auto node_ptr = AllocTraits::allocate(global_alloc, 1);
-            AllocTraits::construct(global_alloc, node_ptr, 0, hint, 0, 0);
-            allocated_node(ctx.get_id());
-            process_node(
-                handle, {upper_bound, reinterpret_cast<payload_type>(node_ptr)},
-                ctx.get_id());
-#elif defined EXPLICIT_VALUE
-            process_node(handle, {upper_bound, Node{0, hint, 0, 0}},
-                         ctx.get_id());
+#ifdef HINT_MODE
+            unsigned int hint = 1;
+            value_type upper_bound =
+                get_upper_bound(instance.capacity, 0, hint);
+#else
+            value_type upper_bound = get_upper_bound(instance.capacity, 0);
 #endif
-        } else if (lower_bound == upper_bound) {
-            return;
+            value_type lower_bound = get_lower_bound(instance.capacity, 0);
+            best_value.store(lower_bound, std::memory_order_relaxed);
+            std::clog << "Solving knapsack instance..." << std::flush;
+            if (lower_bound < upper_bound) {
+                if (reverse_priority) {
+                    upper_bound = value_max - upper_bound;
+                }
+#ifdef PACKED_VALUE
+                process_node(
+                    handle,
+                    {upper_bound, to_payload(Node{0, instance.capacity, 0
+#ifdef HINT_MODE
+                                                  ,
+                                                  hint
+#endif
+                                  })},
+                    ctx.get_id());
+#elif defined HEAP_VALUE
+                auto node_ptr = AllocTraits::allocate(global_alloc, 1);
+                AllocTraits::construct(global_alloc, node_ptr, 0,
+                                       instance.capacity, 0
+#ifdef HINT_MODE
+                                       ,
+                                       hint
+#endif
+                );
+                process_node(
+                    handle,
+                    {upper_bound, reinterpret_cast<payload_type>(node_ptr)},
+                    ctx.get_id());
+#elif defined EXPLICIT_VALUE
+                process_node(handle,
+                             {upper_bound, Node{0, instance.capacity, 0
+#ifdef HINT_MODE
+                                                ,
+                                                hint
+#endif
+                                           }},
+                             ctx.get_id());
+#endif
+            }
         }
-
         ctx.execute_synchronized_timed("main_loop", main_loop, handle,
                                        ctx.get_id());
         if (ctx.is_main()) {
@@ -532,8 +661,8 @@ static void read_problem() {
                          (static_cast<double>(rhs.value) /
                           static_cast<double>(rhs.weight));
               });
-    instance.prefix_sum = {KnapsackInstance::Item{0, 0}};
     instance.prefix_sum.reserve(instance.items.size() + 1);
+    instance.prefix_sum = {KnapsackInstance::Item{0, 0}};
     std::inclusive_scan(instance.items.begin(), instance.items.end(),
                         std::back_inserter(instance.prefix_sum),
                         [](auto const& lhs, auto const& rhs) {
@@ -546,11 +675,6 @@ int main(int argc, char* argv[]) {
     std::clog << "Build configuration:\n\n";
 #ifndef NDEBUG
     std::clog << "DEBUG build\n";
-#endif
-#ifdef EXACT_TERMINATION
-    std::clog << "Termination: exact\n";
-#else
-    std::clog << "Termination: heuristic\n";
 #endif
 #ifdef PACKED_VALUE
     std::clog << "Payload: packed\n";
@@ -629,11 +753,18 @@ int main(int argc, char* argv[]) {
 
     std::cout << "items: " << instance.items.size() << '\n';
     std::cout << "capacity: " << instance.capacity << '\n';
+#ifdef PACKED_VALUE
+    if (instance.items.size() + 1 >= (1 << bits_for_index) ||
+        instance.capacity >= (1 << bits_for_free_capacity) ||
+        instance.prefix_sum.back().weight >= (1 << bits_for_free_capacity) ||
+        instance.prefix_sum.back().value >= (1 << bits_for_value)) {
+        std::cerr << "Instance cannot be represented in packed format\n";
+        return 1;
+    }
+#endif
 
-#ifdef EXACT_TERMINATION
     idle_counter = 0;
     idle_state = std::make_unique<IdleState[]>(settings.num_threads);
-#endif
 #ifdef COUNT_STATS
     stats = std::make_unique<StatCounters[]>(settings.num_threads);
 #endif
@@ -661,8 +792,6 @@ int main(int argc, char* argv[]) {
             lhs.ignored_nodes += rhs.ignored_nodes;
             lhs.extracted_nodes += rhs.extracted_nodes;
             lhs.failed_extracts += rhs.failed_extracts;
-            lhs.allocated_nodes += rhs.allocated_nodes;
-            lhs.freed_nodes += rhs.freed_nodes;
             lhs.processed_nodes += rhs.processed_nodes;
             lhs.idle += rhs.idle;
             return lhs;
@@ -671,8 +800,6 @@ int main(int argc, char* argv[]) {
     std::cout << "ignored nodes: " << total_stats.ignored_nodes << '\n';
     std::cout << "extracted nodes: " << total_stats.extracted_nodes << '\n';
     std::cout << "failed extracts: " << total_stats.failed_extracts << '\n';
-    std::cout << "allocated nodes: " << total_stats.allocated_nodes << '\n';
-    std::cout << "freed nodes: " << total_stats.freed_nodes << '\n';
     std::cout << "processed nodes: " << total_stats.processed_nodes << '\n';
     std::cout << "idle: " << total_stats.idle << '\n';
 #endif
