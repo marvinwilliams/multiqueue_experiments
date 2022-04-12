@@ -106,6 +106,7 @@ value_type get_lower_bound(weight_type capacity, unsigned int index) noexcept {
     }
     return value;
 }
+
 value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
     value_type value = 0;
     while (index < instance.items.size() &&
@@ -116,8 +117,8 @@ value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
     }
     if (index < instance.items.size() && capacity > 0) {
         value += static_cast<value_type>(
-            std::ceil(instance.items[index].value * capacity /
-                      instance.items[index].weight));
+            instance.items[index].value * capacity /
+                      instance.items[index].weight);
     }
     return value;
 }
@@ -334,7 +335,6 @@ int main(int argc, char* argv[]) {
 #ifndef NDEBUG
     std::clog << "DEBUG build\n";
 #endif
-    std::clog << "Termination: exact\n";
     std::clog << "Payload: explicit\n";
 #ifdef COUNT_STATS
     std::clog << "Counting stats\n";

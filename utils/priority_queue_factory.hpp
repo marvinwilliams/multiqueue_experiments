@@ -65,9 +65,9 @@ struct PriorityQueueTypeFactory {
     // not available with generic types
 #elif defined PQ_SPRAYLIST
     // not available with generic types
-#elif defined PQ_TBB_QUEUE
+#elif defined PQ_TBB_Q
     using type = wrapper::TBBQueue<KeyType, ValueType>;
-#elif defined PQ_TBB_PRIORITY_QUEUE
+#elif defined PQ_TBB_PQ
     using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
 #endif
 };
@@ -100,9 +100,9 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long> {
     using type = wrapper::Linden;
 #elif defined PQ_SPRAYLIST
     using type = wrapper::Spraylist;
-#elif defined PQ_TBB_QUEUE
+#elif defined PQ_TBB_Q
     using type = wrapper::TBBQueue<KeyType, ValueType>;
-#elif defined PQ_TBB_PRIORITY_QUEUE
+#elif defined PQ_TBB_PQ
     using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
 #endif
 };
