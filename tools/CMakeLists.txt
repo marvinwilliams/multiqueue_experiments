@@ -13,3 +13,11 @@ target_compile_features(
   sequential_shortest_path PRIVATE
   cxx_std_17
 )
+
+add_executable(sequential_knapsack sequential_knapsack.cpp)
+target_include_directories(sequential_knapsack PRIVATE "${CMAKE_SOURCE_DIR}/external")
+target_link_libraries(sequential_knapsack PRIVATE multiqueue_internal)
+target_compile_features(
+  sequential_knapsack PRIVATE
+  cxx_std_17
+)

@@ -162,6 +162,14 @@ if(MULTIQUEUE_EXP_COUNT_STATS)
   target_compile_definitions(knapsack_explicit INTERFACE COUNT_STATS)
 endif()
 
+add_library(knapsack_simple INTERFACE)
+target_sources(knapsack_simple INTERFACE knapsack_simple.cpp)
+target_compile_features(knapsack_simple INTERFACE cxx_std_17)
+target_link_libraries(knapsack_simple INTERFACE thread_coordination benchmark_base)
+if(MULTIQUEUE_EXP_COUNT_STATS)
+  target_compile_definitions(knapsack_simple INTERFACE COUNT_STATS)
+endif()
+
 add_custom_target(knapsack_all)
 
 function(add_throughput targets)
@@ -229,6 +237,14 @@ function(add_knapsack_explicit targets)
   endforeach()
 endfunction()
 
+function(add_knapsack_simple targets)
+  foreach(target ${targets})
+    add_executable(knapsack_simple_${target})
+    target_link_libraries(knapsack_simple_${target} PRIVATE ${target} knapsack_simple)
+    add_dependencies(knapsack_all knapsack_simple_${target})
+  endforeach()
+endfunction()
+
 add_subdirectory(multiqueue)
 add_subdirectory(multififo)
 add_subdirectory(mt-kahypar)
@@ -263,6 +279,7 @@ add_sssp("mq_random;mq_sticky;mq_swapping;mq_perm;capq;klsm256;klsm1024;klsm4096
 add_knapsack_packed("mq_random;mq_sticky;mq_swapping;mq_perm;capq;klsm256;klsm1024;klsm4096;linden;spraylist;tbb_q;tbb_pq;mf_sticky")
 add_knapsack_heap("mq_random;mq_sticky;mq_swapping;mq_perm;capq;klsm256;klsm1024;klsm4096;linden;spraylist;tbb_q;tbb_pq;mf_sticky")
 add_knapsack_explicit("mq_random;mq_sticky;mq_swapping;mq_perm;klsm256;klsm1024;klsm4096;tbb_q;tbb_pq;mf_sticky")
+add_knapsack_simple("mq_random;mq_sticky;mq_swapping;mq_perm")
 
 if(MULTIQUEUE_EXP_BUILD_TESTS)
     include(CTest)
