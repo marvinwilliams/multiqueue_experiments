@@ -1,16 +1,13 @@
 #include "cxxopts.hpp"
 
-#include <math.h>
 #include <algorithm>
-#include <cassert>
 #include <chrono>
-#include <cstdlib>
 #include <filesystem>
 #include <fstream>
+#include <iomanip>
 #include <iostream>
 #include <iterator>
-#include <numeric>
-#include <thread>
+#include <queue>
 #include <vector>
 
 using weight_type = unsigned long;
@@ -25,11 +22,41 @@ struct KnapsackInstance {
     weight_type capacity;
 };
 
-static KnapsackInstance instance;
+struct Node {
+    value_type upper_bound;
+    unsigned int index;
+    weight_type free_capacity;
+    value_type value;
+};
 
-static value_type bestValue;
+bool operator<(Node const& lhs, Node const& rhs) noexcept {
+    return lhs.upper_bound < rhs.upper_bound;
+}
 
-value_type getUpperBound(weight_type capacity, size_t index) {
+struct StatCounters {
+    std::size_t pushed_nodes = 0;
+    std::size_t ignored_nodes = 0;
+    std::size_t extracted_nodes = 0;
+    std::size_t processed_nodes = 0;
+};
+
+KnapsackInstance instance;
+std::priority_queue<Node> pq;
+value_type best_value;
+StatCounters stats;
+
+value_type get_lower_bound(weight_type capacity, unsigned int index) noexcept {
+    value_type value = 0;
+    while (index < instance.items.size() &&
+           instance.items[index].weight <= capacity) {
+        capacity -= instance.items[index].weight;
+        value += instance.items[index].value;
+        ++index;
+    }
+    return value;
+}
+
+value_type get_upper_bound(weight_type capacity, std::size_t index) noexcept {
     value_type result = 0;
     while (index < instance.items.size() &&
            capacity >= instance.items[index].weight) {
@@ -38,40 +65,55 @@ value_type getUpperBound(weight_type capacity, size_t index) {
         ++index;
     }
     if (index < instance.items.size()) {
-        double fraction =
-            static_cast<double>(capacity) / instance.items[index].weight;
-        result += std::ceil(fraction * instance.items[index].value);
+        result += static_cast<value_type>(
+            static_cast<double>(capacity * instance.items[index].value) /
+            static_cast<double>(instance.items[index].weight));
     }
     return result;
 }
 
-void solveRec(weight_type capacity, size_t index, value_type currentValue) {
-    if (currentValue > bestValue) {
-        bestValue = currentValue;
-    }
-
-    if (capacity == 0 || index == instance.items.size()) {
+void process_node(Node const& node) noexcept {
+    if (node.index == instance.items.size()) {
         return;
     }
-
-    value_type upperBound = getUpperBound(capacity, index);
-
-    if (currentValue + upperBound <= bestValue) {
+    if (node.upper_bound <= best_value) {
+        // The upper bound of this node is worse than the currently best value
+        ++stats.ignored_nodes;
         return;
     }
+    ++stats.processed_nodes;
 
-    if (instance.items[index].weight > capacity) {
-        solveRec(capacity, index + 1, currentValue);
+    // Check if there is enough capacity for the next item
+    if (instance.items[node.index].weight <= node.free_capacity) {
+        value_type new_value = node.value + instance.items[node.index].value;
+        value_type new_capacity =
+            node.free_capacity - instance.items[node.index].weight;
+        if (new_value > best_value) {
+            best_value = new_value;
+        }
+        pq.push({node.upper_bound, node.index + 1, new_capacity, new_value});
+        ++stats.pushed_nodes;
+    }
+    value_type upper_bound_without_next =
+        node.value + get_upper_bound(node.free_capacity, node.index + 1);
+    if (upper_bound_without_next <= best_value) {
         return;
     }
-
-    solveRec(capacity - instance.items[index].weight, index + 1,
-             currentValue + instance.items[index].value);
-    solveRec(capacity, index + 1, currentValue);
-    return;
+    pq.push({upper_bound_without_next, node.index + 1, node.free_capacity,
+             node.value});
+    ++stats.pushed_nodes;
 }
 
-static void read_problem(std::filesystem::path instance_file) {
+void main_loop() noexcept {
+    while (!pq.empty()) {
+        auto node = pq.top();
+        pq.pop();
+        ++stats.extracted_nodes;
+        process_node(node);
+    }
+}
+
+void read_problem(std::filesystem::path instance_file) {
     std::ifstream file_stream{instance_file};
     if (!file_stream) {
         throw std::runtime_error{"Could not open knapsack file"};
@@ -152,7 +194,21 @@ int main(int argc, char* argv[]) {
 
     std::cout << "items: " << instance.items.size() << '\n';
     std::cout << "capacity: " << instance.capacity << '\n';
-    bestValue = 0;
-    solveRec(instance.capacity, 0, 0);
-    std::cout << "value: " << bestValue << '\n';
+    value_type upper_bound = get_upper_bound(instance.capacity, 0);
+    best_value = get_lower_bound(instance.capacity, 0);
+    std::clog << "Solving knapsack instance..." << std::flush;
+    if (best_value < upper_bound) {
+        process_node({upper_bound, 0, instance.capacity, 0});
+    }
+    auto start = std::chrono::steady_clock::now();
+    main_loop();
+    auto end = std::chrono::steady_clock::now();
+    std::clog << "done\n";
+    std::cout << "value: " << best_value << '\n';
+    std::cout << "time: " << std::setprecision(3)
+              << std::chrono::duration<double>(end - start).count() << '\n';
+    std::cout << "pushed nodes: " << stats.pushed_nodes << '\n';
+    std::cout << "ignored nodes: " << stats.ignored_nodes << '\n';
+    std::cout << "extracted nodes: " << stats.extracted_nodes << '\n';
+    std::cout << "processed nodes: " << stats.processed_nodes << '\n';
 }

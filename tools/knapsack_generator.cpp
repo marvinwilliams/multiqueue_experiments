@@ -26,10 +26,10 @@ int main(int argc, char* argv[]) {
     // clang-format on
 
     std::size_t n = 1000;
-    std::size_t a = 1;
+    std::size_t a = 10;
     std::size_t b = 1000;
-    std::size_t l = 100;
-    std::size_t u = 125;
+    std::size_t l = 0;
+    std::size_t u = 200;
     std::size_t f = 2;
     std::size_t s = 1;
 
@@ -49,10 +49,10 @@ int main(int argc, char* argv[]) {
             b = result["weight-max"].as<std::size_t>();
         }
         if (result.count("p-min") > 0) {
-            l = result["lower"].as<std::size_t>();
+            l = result["p-min"].as<std::size_t>();
         }
         if (result.count("p-max") > 0) {
-            u = result["upper"].as<std::size_t>();
+            u = result["p-max"].as<std::size_t>();
         }
         if (result.count("capacity-divide") > 0) {
             f = result["capacity-divide"].as<std::size_t>();

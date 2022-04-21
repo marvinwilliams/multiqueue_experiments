@@ -231,7 +231,7 @@ value_type get_lower_bound(weight_type capacity, unsigned int index) noexcept {
 
 #ifdef LINEAR_MODE
 
-value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
+value_type get_upper_bound(weight_type capacity, std::size_t index) noexcept {
     value_type value = 0;
     while (index < instance.items.size() &&
            instance.items[index].weight <= capacity) {
@@ -241,15 +241,15 @@ value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
     }
     if (index < instance.items.size() && capacity > 0) {
         value +=
-            static_cast<value_type>(instance.items[index].value * capacity /
-                                    instance.items[index].weight);
+            static_cast<value_type>(static_cast<double>(instance.items[index].value * capacity) /
+                                    static_cast<double>(instance.items[index].weight);
     }
     return value;
 }
 
 #elif defined BINARY_MODE
 
-value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
+value_type get_upper_bound(weight_type capacity, std::size_t index) noexcept {
     assert(index <= instance.items.size());
     assert(hint <= instance.prefix_sum.size());
     value_type value_offset = instance.prefix_sum[index].value;
@@ -270,7 +270,7 @@ value_type get_upper_bound(weight_type capacity, unsigned int index) noexcept {
 
 #else
 
-value_type get_upper_bound(weight_type capacity, unsigned int index,
+value_type get_upper_bound(weight_type capacity, std::size_t index,
                            unsigned int& hint) noexcept {
     assert(index <= instance.items.size());
     assert(hint <= instance.prefix_sum.size());
