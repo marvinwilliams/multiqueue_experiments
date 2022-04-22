@@ -72,47 +72,6 @@ value_type get_upper_bound(weight_type capacity, std::size_t index) noexcept {
     return result;
 }
 
-void process_node(Node const& node) noexcept {
-    if (node.index == instance.items.size()) {
-        return;
-    }
-    if (node.upper_bound <= best_value) {
-        // The upper bound of this node is worse than the currently best value
-        ++stats.ignored_nodes;
-        return;
-    }
-    ++stats.processed_nodes;
-
-    // Check if there is enough capacity for the next item
-    if (instance.items[node.index].weight <= node.free_capacity) {
-        value_type new_value = node.value + instance.items[node.index].value;
-        value_type new_capacity =
-            node.free_capacity - instance.items[node.index].weight;
-        if (new_value > best_value) {
-            best_value = new_value;
-        }
-        pq.push({node.upper_bound, node.index + 1, new_capacity, new_value});
-        ++stats.pushed_nodes;
-    }
-    value_type upper_bound_without_next =
-        node.value + get_upper_bound(node.free_capacity, node.index + 1);
-    if (upper_bound_without_next <= best_value) {
-        return;
-    }
-    pq.push({upper_bound_without_next, node.index + 1, node.free_capacity,
-             node.value});
-    ++stats.pushed_nodes;
-}
-
-void main_loop() noexcept {
-    while (!pq.empty()) {
-        auto node = pq.top();
-        pq.pop();
-        ++stats.extracted_nodes;
-        process_node(node);
-    }
-}
-
 void read_problem(std::filesystem::path instance_file) {
     std::ifstream file_stream{instance_file};
     if (!file_stream) {
@@ -152,6 +111,47 @@ void read_problem(std::filesystem::path instance_file) {
                          (static_cast<double>(rhs.value) /
                           static_cast<double>(rhs.weight));
               });
+}
+
+void process_node(Node const& node) noexcept {
+    if (node.index == instance.items.size()) {
+        return;
+    }
+    if (node.upper_bound <= best_value) {
+        // The upper bound of this node is worse than the currently best value
+        ++stats.ignored_nodes;
+        return;
+    }
+    ++stats.processed_nodes;
+
+    // Check if there is enough capacity for the next item
+    if (instance.items[node.index].weight <= node.free_capacity) {
+        value_type new_value = node.value + instance.items[node.index].value;
+        value_type new_capacity =
+            node.free_capacity - instance.items[node.index].weight;
+        if (new_value > best_value) {
+            best_value = new_value;
+        }
+        pq.push({node.upper_bound, node.index + 1, new_capacity, new_value});
+        ++stats.pushed_nodes;
+    }
+    value_type upper_bound_without_next =
+        node.value + get_upper_bound(node.free_capacity, node.index + 1);
+    if (upper_bound_without_next <= best_value) {
+        return;
+    }
+    pq.push({upper_bound_without_next, node.index + 1, node.free_capacity,
+             node.value});
+    ++stats.pushed_nodes;
+}
+
+void main_loop() noexcept {
+    while (!pq.empty()) {
+        auto node = pq.top();
+        pq.pop();
+        ++stats.extracted_nodes;
+        process_node(node);
+    }
 }
 
 int main(int argc, char* argv[]) {

@@ -38,7 +38,6 @@
 
 using weight_type = unsigned long;
 using value_type = unsigned long;
-static constexpr unsigned int retries = 100;
 
 // Some pqs need higher values as sentinels
 static constexpr value_type value_max =
@@ -179,8 +178,6 @@ static constexpr bool reverse_priority = false;
 static constexpr bool reverse_priority = true;
 #endif
 
-using steady_type = std::chrono::steady_clock;
-
 struct Settings {
     std::filesystem::path instance_file;
     unsigned int num_threads = 4;
@@ -198,7 +195,7 @@ struct StatCounters {
     std::size_t idle = 0;
 };
 
-static std::unique_ptr<StatCounters[]> stats;
+std::unique_ptr<StatCounters[]> stats;
 
 inline void pushed_node(unsigned int id) { ++stats[id].pushed_nodes; }
 inline void ignored_node(unsigned int id) { ++stats[id].ignored_nodes; }
@@ -215,8 +212,8 @@ inline void processed_node(unsigned int) {}
 inline void started_idling(unsigned int) {}
 #endif
 
-static Settings settings;
-static KnapsackInstance instance;
+Settings settings;
+KnapsackInstance instance;
 
 value_type get_lower_bound(weight_type capacity, unsigned int index) noexcept {
     value_type value = 0;
@@ -375,20 +372,21 @@ bool process_node(PriorityQueue::Handle& handle,
 #else
     if (instance.items[node.index].weight <= node.free_capacity) {
 #endif
-        value_type new_value = node.value + instance.prefix_sum[node.index + 1].value - instance.prefix_sum[node.index].value;
-        value_type new_capacity = node.free_capacity - (instance.prefix_sum[node.index + 1].weight - instance.prefix_sum[node.index].weight);
+        value_type new_value = node.value +
+                               instance.prefix_sum[node.index + 1].value -
+                               instance.prefix_sum[node.index].value;
+        value_type new_capacity =
+            node.free_capacity - (instance.prefix_sum[node.index + 1].weight -
+                                  instance.prefix_sum[node.index].weight);
         while (new_value > current_best_value &&
                !best_value.compare_exchange_weak(current_best_value, new_value,
                                                  std::memory_order_relaxed)) {
-            _mm_pause();
         }
 #ifdef PACKED_VALUE
-        auto payload = to_payload(Node{
-            node.index + 1,
-            new_capacity, new_value
+        auto payload = to_payload(Node{node.index + 1, new_capacity, new_value
 #ifdef HINT_MODE
-            ,
-            node.hint
+                                       ,
+                                       node.hint
 #endif
         });
         handle.push({value.first, payload});
@@ -399,15 +397,12 @@ bool process_node(PriorityQueue::Handle& handle,
         handle.push(value);
         node_ptr.release();
 #elif defined EXPLICIT_VALUE
-    handle.push(
-        {value.first,
-         Node{node.index + 1,
-              new_capacity, new_value
+    handle.push({value.first, Node{node.index + 1, new_capacity, new_value
 #ifdef HINT_MODE
-              ,
-              node.hint
+                                   ,
+                                   node.hint
 #endif
-         }});
+                              }});
 #endif
         pushed_node(id);
         inserted = true;
@@ -456,17 +451,19 @@ bool process_node(PriorityQueue::Handle& handle,
             {upper_bound_without_next, reinterpret_cast<payload_type>(ptr)});
     }
 #elif defined EXPLICIT_VALUE
-handle.push({upper_bound_without_next, Node{node.index + 1,
-                               node.free_capacity, node.value
+handle.push({upper_bound_without_next,
+             Node{node.index + 1, node.free_capacity, node.value
 #ifdef HINT_MODE
-                               ,
-                               hint_without_next
+                  ,
+                  hint_without_next
 #endif
-                               }});
+             }});
 #endif
     pushed_node(id);
     return true;
 }
+
+static constexpr unsigned int retries = 100;
 
 void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
     auto extract_node = [&handle, id](auto& retval) {
@@ -557,6 +554,7 @@ struct Task {
     static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
         auto handle = pq.get_handle();
         if (ctx.is_main()) {
+            std::clog << "Solving knapsack instance..." << std::flush;
 #ifdef HINT_MODE
             unsigned int hint = 1;
             value_type upper_bound =
@@ -566,7 +564,6 @@ struct Task {
 #endif
             value_type lower_bound = get_lower_bound(instance.capacity, 0);
             best_value.store(lower_bound, std::memory_order_relaxed);
-            std::clog << "Solving knapsack instance..." << std::flush;
             if (lower_bound < upper_bound) {
                 if (reverse_priority) {
                     upper_bound = value_max - upper_bound;
@@ -622,7 +619,7 @@ struct Task {
     }
 };
 
-static void read_problem() {
+void read_problem() {
     std::ifstream file_stream{settings.instance_file};
     if (!file_stream) {
         throw std::runtime_error{"Could not open knapsack file"};
@@ -742,6 +739,14 @@ int main(int argc, char* argv[]) {
               << "Seed: " << settings.seed;
     std::clog << "\n\n";
 
+    xoroshiro256starstar rng;
+    rng.seed(settings.seed);
+    settings.pq_params.seed = rng();
+    auto pq = util::create_pq<PriorityQueue>(1'000'000, settings.num_threads,
+                                             settings.pq_params);
+
+    std::clog << "Using priority queue: " << pq.description() << "\n\n";
+
     std::clog << "Reading problem..." << std::flush;
     try {
         read_problem();
@@ -768,14 +773,6 @@ int main(int argc, char* argv[]) {
 #ifdef COUNT_STATS
     stats = std::make_unique<StatCounters[]>(settings.num_threads);
 #endif
-
-    xoroshiro256starstar rng;
-    rng.seed(settings.seed);
-    settings.pq_params.seed = rng();
-    auto pq = util::create_pq<PriorityQueue>(1'000'000, settings.num_threads,
-                                             settings.pq_params);
-
-    std::clog << "Using priority queue: " << pq.description() << "\n\n";
 
     thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
     coordinator.run_task<Task>(std::ref(pq));
