@@ -277,13 +277,13 @@ void read_graph() {
         throw std::runtime_error{"Could not get file size"};
     }
 
-    auto addr = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    auto addr = mmap(NULL, static_cast<std::size_t>(sb.st_size), PROT_READ, MAP_PRIVATE, fd, 0);
     if (addr == MAP_FAILED) {
         close(fd);
         throw std::runtime_error{"mmap failed"};
     }
     close(fd);
-    madvise(addr, sb.st_size, MADV_SEQUENTIAL);
+    madvise(addr, static_cast<std::size_t>(sb.st_size), MADV_SEQUENTIAL);
 
     std::vector<std::pair<std::size_t, Graph::Edge>> edge_list;
     std::size_t num_nodes = 0;
@@ -349,7 +349,7 @@ void read_graph() {
         // 1-based
         edge_list.push_back({source - 1, {target - 1, weight}});
     }
-    munmap(addr, sb.st_size);
+    munmap(addr, static_cast<std::size_t>(sb.st_size));
     std::sort(edge_list.begin(), edge_list.end(),
               [](auto& lhs, auto& rhs) { return lhs.first < rhs.first; });
     graph.nodes[0] = 0;

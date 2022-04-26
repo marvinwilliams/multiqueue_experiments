@@ -15,11 +15,9 @@
 #include "multiqueue/factory.hpp"
 #elif defined PQ_MF
 #include "multififo/multififo.hpp"
-#elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
-    defined PQ_CAPQ3 || defined PQ_CAPQ4
+#elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
-#elif defined PQ_KLSM || defined PQ_KLSM256 || defined PQ_KLSM1024 || \
-    defined PQ_KLSM4096
+#elif defined PQ_KLSM256 || defined PQ_KLSM1024 || defined PQ_KLSM4096
 #include "wrapper/klsm.hpp"
 #elif defined PQ_LINDEN
 #include "wrapper/linden.hpp"
@@ -52,8 +50,7 @@ struct PriorityQueueTypeFactory {
                                                ValueType>::multiqueue_type;
 #elif defined PQ_MF
     using type = multififo::Multififo<std::pair<KeyType, ValueType>>;
-#elif defined PQ_CAPQ || defined PQ_CAPQ1 || defined PQ_CAPQ2 || \
-    defined PQ_CAPQ3 || defined PQ_CAPQ4
+#elif defined PQ_CAPQ
     // not available with generic types
 #elif defined PQ_KLSM256
     using type = wrapper::Klsm<KeyType, ValueType, 256>;
@@ -82,14 +79,8 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long> {
                                                ValueType>::multiqueue_type;
 #elif defined PQ_MF
     using type = multififo::Multififo<std::pair<unsigned long, unsigned long>>;
-#elif defined PQ_CAPQ || defined PQ_CAPQ1
+#elif defined PQ_CAPQ
     using type = wrapper::Capq<true, true, true>;
-#elif defined PQ_CAPQ2
-    using type = wrapper::Capq<true, false, true>;
-#elif defined PQ_CAPQ3
-    using type = wrapper::Capq<false, true, true>;
-#elif defined PQ_CAPQ4
-    using type = wrapper::Capq<false, false, true>;
 #elif defined PQ_KLSM256
     using type = wrapper::Klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024
@@ -111,7 +102,8 @@ template <typename PriorityQueue, typename = void>
 struct has_params : std::false_type {};
 
 template <typename PriorityQueue>
-struct has_params<PriorityQueue, std::void_t<typename PriorityQueue::param_type>>
+struct has_params<PriorityQueue,
+                  std::void_t<typename PriorityQueue::param_type>>
     : std::true_type {};
 
 template <typename PriorityQueue>

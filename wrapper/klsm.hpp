@@ -4,6 +4,9 @@
 
 // Adapted from klsm
 
+#include <algorithm>
+#include <stdio.h>
+
 #include "k_lsm/k_lsm.h"
 
 #include <limits>
