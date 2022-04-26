@@ -751,13 +751,13 @@ int main(int argc, char* argv[]) {
     try {
         read_problem();
     } catch (std::runtime_error const& e) {
-        std::cerr << e.what() << '\n';
+        std::cerr << '\n' << e.what() << '\n';
         return 1;
     }
-    std::clog << "done\n\n";
-
+    std::clog << "done\n";
     std::cout << "items: " << instance.items.size() << '\n';
     std::cout << "capacity: " << instance.capacity << '\n';
+
 #ifdef PACKED_VALUE
     if (instance.items.size() + 1 >= (1 << bits_for_index) ||
         instance.capacity >= (1 << bits_for_free_capacity) ||

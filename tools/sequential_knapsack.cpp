@@ -155,11 +155,12 @@ void main_loop() noexcept {
 }
 
 int main(int argc, char* argv[]) {
-    std::filesystem::path instance_file;
     std::clog << "Command line: ";
     std::copy(argv, argv + argc,
               std::ostream_iterator<char const*>(std::clog, " "));
     std::clog << "\n\n";
+
+    std::filesystem::path instance_file;
 
     cxxopts::Options options("Sequential knapsack", "");
     // clang-format off
@@ -190,10 +191,10 @@ int main(int argc, char* argv[]) {
         std::cerr << e.what() << '\n';
         return 1;
     }
-    std::clog << "done\n\n";
-
+    std::clog << "done\n";
     std::cout << "items: " << instance.items.size() << '\n';
     std::cout << "capacity: " << instance.capacity << '\n';
+
     value_type upper_bound = get_upper_bound(instance.capacity, 0);
     best_value = get_lower_bound(instance.capacity, 0);
     std::clog << "Solving knapsack instance..." << std::flush;

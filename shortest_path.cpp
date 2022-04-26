@@ -5,10 +5,15 @@
 
 #include "cxxopts.hpp"
 
+#include <fcntl.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <unistd.h>
 #include <x86intrin.h>
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <charconv>
 #include <chrono>
 #include <filesystem>
 #include <fstream>
@@ -234,7 +239,7 @@ struct Task {
         auto handle = pq.get_handle();
 
         if (ctx.is_main()) {
-            std::clog << "Solving knapsack instance..." << std::flush;
+            std::clog << "\nComputing shortest paths..." << std::flush;
             for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
                 shortest_distances[i].value =
                     std::numeric_limits<distance_type>::max();
@@ -260,42 +265,103 @@ struct Task {
 };
 
 void read_graph() {
-    std::ifstream graph_stream{settings.graph_file};
-    if (!graph_stream) {
-        throw std::runtime_error{"Could not open graph file"};
+    int fd = open(settings.graph_file.c_str(), O_RDONLY);
+    if (fd == -1) {
+        throw std::runtime_error{"Could not open file"};
     }
-    std::vector<std::vector<Graph::Edge>> edges_per_node;
-    node_type source;
-    node_type target;
-    distance_type weight;
-    std::string problem;
-    std::string first;
-    while (graph_stream >> first) {
-        if (first == "c") {
-            graph_stream.ignore(std::numeric_limits<std::streamsize>::max(),
-                                '\n');
-        } else if (first == "p") {
-            graph_stream >> problem;
-            std::size_t num_nodes;
-            std::size_t num_edges;
-            graph_stream >> num_nodes >> num_edges;
-            graph.nodes.resize(num_nodes + 1, 0);
-            edges_per_node.resize(num_nodes);
-            graph.edges.reserve(num_edges);
-        } else if (first == "a") {
-            graph_stream >> source >> target >> weight;
-            edges_per_node[source - 1].push_back(
-                Graph::Edge{target - 1, weight});
-        } else {
-            throw std::runtime_error{"Error reading file"};
+
+    struct stat sb;
+
+    if (fstat(fd, &sb) == -1) {
+        close(fd);
+        throw std::runtime_error{"Could not get file size"};
+    }
+
+    auto addr = mmap(NULL, sb.st_size, PROT_READ, MAP_PRIVATE, fd, 0);
+    if (addr == MAP_FAILED) {
+        close(fd);
+        throw std::runtime_error{"mmap failed"};
+    }
+    close(fd);
+    madvise(addr, sb.st_size, MADV_SEQUENTIAL);
+
+    std::vector<std::pair<std::size_t, Graph::Edge>> edge_list;
+    std::size_t num_nodes = 0;
+    std::size_t num_edges = 0;
+    auto it = static_cast<char const*>(addr);
+    auto end = it + sb.st_size;
+    while (*it == 'c') {
+        ++it;
+        while (*it++ != '\n') {
         }
     }
-    for (std::size_t i = 0; i < edges_per_node.size(); ++i) {
-        graph.nodes[i + 1] =
-            graph.nodes[i] + static_cast<node_type>(edges_per_node[i].size());
-        std::copy(edges_per_node[i].begin(), edges_per_node[i].end(),
-                  std::back_inserter(graph.edges));
+    if (*it == 'p') {
+        while (std::isspace(*++it)) {
+        }
+        while (!std::isspace(*++it)) {
+        }
+        while (std::isspace(*++it)) {
+        }
+        auto res = std::from_chars(it, end, num_nodes);
+        assert(res.ec == std::errc{});
+        it = res.ptr;
+        while (std::isspace(*++it)) {
+        }
+        res = std::from_chars(it, end, num_edges);
+        assert(res.ec == std::errc{});
+        it = res.ptr;
+        graph.nodes.resize(num_nodes + 1);
+        graph.edges.resize(num_edges);
+        edge_list.reserve(num_edges);
+        while (std::isspace(*it)) {
+            ++it;
+        }
     }
+    while (*it == 'c') {
+        ++it;
+        while (*it++ != '\n') {
+        }
+    }
+    std::size_t source = 0;
+    std::size_t target = 0;
+    unsigned int weight = 0;
+    for (std::size_t i = 0; i != num_edges; ++i) {
+        while (std::isspace(*it)) {
+            ++it;
+        }
+        assert(*it == 'a' && std::isspace(*(it + 1)));
+        it += 2;
+        auto res = std::from_chars(it, end, source);
+        assert(res.ec == std::errc{});
+        it = res.ptr;
+        while (std::isspace(*it)) {
+            ++it;
+        }
+        res = std::from_chars(it, end, target);
+        assert(res.ec == std::errc{});
+        it = res.ptr;
+        while (std::isspace(*it)) {
+            ++it;
+        }
+        res = std::from_chars(it, end, weight);
+        assert(res.ec == std::errc{});
+        it = res.ptr;
+        // 1-based
+        edge_list.push_back({source - 1, {target - 1, weight}});
+    }
+    munmap(addr, sb.st_size);
+    std::sort(edge_list.begin(), edge_list.end(),
+              [](auto& lhs, auto& rhs) { return lhs.first < rhs.first; });
+    graph.nodes[0] = 0;
+    for (std::size_t i = 1; i < num_nodes + 1; ++i) {
+        graph.nodes[i] = graph.nodes[i - 1];
+        while (graph.nodes[i] < num_edges &&
+               edge_list[graph.nodes[i]].first == i - 1) {
+            ++graph.nodes[i];
+        }
+    }
+    std::transform(edge_list.begin(), edge_list.end(), graph.edges.begin(),
+                   [](auto const& e) { return e.second; });
 }
 
 int main(int argc, char* argv[]) {
@@ -362,9 +428,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-#ifndef NDEBUG
-    std::clog << "Using debug build!\n\n";
-#endif
     std::clog << "Settings: \n\t"
               << "Threads: " << settings.num_threads << "\n\t"
               << "Graph file: " << settings.graph_file.string() << "\n\t"
@@ -384,13 +447,12 @@ int main(int argc, char* argv[]) {
     try {
         read_graph();
     } catch (std::runtime_error const& e) {
-        std::cerr << e.what() << '\n';
+        std::cerr << '\n' << e.what() << '\n';
         return 1;
     }
     assert(graph.nodes.size() > 0);
 
     std::clog << "done\n";
-
     std::cout << "nodes: " << graph.nodes.size() - 1 << '\n';
     std::cout << "edges: " << graph.edges.size() << '\n';
 
@@ -428,10 +490,10 @@ int main(int argc, char* argv[]) {
     std::cout << "idle: " << total_stats.idle << '\n';
 #endif
     if (!settings.output.empty()) {
-        std::clog << "Writing output..." << std::flush;
+        std::clog << "\nWriting output..." << std::flush;
         std::ofstream out_stream{settings.output};
         if (!out_stream) {
-            std::cerr << "Could not open output file\n";
+            std::cerr << "\nCould not open output file\n";
             return 1;
         }
         out_stream << "node dist\n";

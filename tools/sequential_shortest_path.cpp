@@ -105,11 +105,17 @@ void main_loop() noexcept {
 }
 
 int main(int argc, char* argv[]) {
+    std::clog << "Command line: ";
+    std::copy(argv, argv + argc,
+              std::ostream_iterator<char const*>(std::clog, " "));
+
+    std::clog << "\n\n";
+
     std::filesystem::path graph_file;
     std::filesystem::path output;
 
     cxxopts::Options options("Sequential shortest path",
-                             "Generate shortest paths");
+                             "Compute shortest paths");
     // clang-format off
     options.add_options()
       ("f,file", "The input graph", cxxopts::value<std::filesystem::path>(graph_file)->default_value("graph.gr"), "PATH")
@@ -138,16 +144,20 @@ int main(int argc, char* argv[]) {
     try {
         read_graph(graph_file);
     } catch (std::runtime_error const& e) {
-        std::cerr << e.what() << '\n';
+        std::cerr << '\n' << e.what() << '\n';
         return 1;
     }
+
+    std::clog << "done\n";
+    std::cout << "nodes: " << graph.nodes.size() - 1 << '\n';
+    std::cout << "edges: " << graph.edges.size() << '\n';
+
     shortest_distances =
         std::make_unique<std::uint64_t[]>(graph.nodes.size() - 1);
     for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
         shortest_distances[i] = std::numeric_limits<std::uint64_t>::max();
     }
-    std::clog << "done\n";
-    std::clog << "Calculating shortest paths..." << std::flush;
+    std::clog << "\nComputing shortest paths..." << std::flush;
     shortest_distances[starting_node] = 0;
     pq.push({0, starting_node});
     auto start = std::chrono::steady_clock::now();
@@ -161,10 +171,10 @@ int main(int argc, char* argv[]) {
     std::cout << "extracted nodes: " << stats.extracted_nodes << '\n';
     std::cout << "processed nodes: " << stats.processed_nodes << '\n';
     if (!output.empty()) {
-        std::clog << "Writing output..." << std::flush;
+        std::clog << "\nWriting output..." << std::flush;
         std::ofstream out_stream{output};
         if (!out_stream) {
-            std::cerr << "Could not open output file\n";
+            std::cerr << "\nCould not open output file\n";
             return 1;
         }
         out_stream << "node dist\n";

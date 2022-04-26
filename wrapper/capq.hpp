@@ -60,7 +60,7 @@ class Capq {
     ss << std::boolalpha;
     ss << "Remove min relax: " << remove_min_relax << '\n';
     ss << "Put relax: " << put_relax << '\n';
-    ss << "Catree adapt: " << catree_adapt << '\n';
+    ss << "Catree adapt: " << catree_adapt;
     return ss.str();
   }
 };
