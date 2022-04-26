@@ -11,7 +11,7 @@
       "generator": "Unix Makefiles",
       "binaryDir": "build/release",
       "cacheVariables": {
-        "MULTIQUEUE_EXP_EXACT_TERMINATION": "ON",
+        "MULTIQUEUE_EXP_COUNT_STATS": "ON",
         "CMAKE_BUILD_TYPE": "Release"
       }
     },
@@ -21,7 +21,7 @@
       "generator": "Unix Makefiles",
       "binaryDir": "build/debug",
       "cacheVariables": {
-        "MULTIQUEUE_EXP_EXACT_TERMINATION": "ON",
+        "MULTIQUEUE_EXP_COUNT_STATS": "ON",
         "MULTIQUEUE_EXP_PC": "ON",
         "CMAKE_BUILD_TYPE": "Debug"
       }
@@ -32,6 +32,7 @@
       "displayName": "UBSAN/ASAN Preset",
       "binaryDir": "build/sanitize",
       "cacheVariables": {
+        "MULTIQUEUE_EXP_COUNT_STATS": "OFF",
         "MULTIQUEUE_EXP_ASAN": "ON",
         "MULTIQUEUE_EXP_UBSAN": "ON"
       }
@@ -42,6 +43,7 @@
       "displayName": "TSAN Preset",
       "binaryDir": "build/thread_sanitize",
       "cacheVariables": {
+        "MULTIQUEUE_EXP_COUNT_STATS": "OFF",
         "MULTIQUEUE_EXP_TSAN": "ON"
       }
     }
