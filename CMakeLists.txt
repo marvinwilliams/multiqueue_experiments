@@ -237,7 +237,6 @@ endfunction()
 
 add_subdirectory(multiqueue)
 add_subdirectory(multififo)
-add_subdirectory(mt-kahypar)
 
 add_library(mq_random INTERFACE)
 target_compile_definitions(mq_random INTERFACE PQ_MQ MULTIQUEUE_DEFAULT_SELECTION_STRATEGY=selection_strategy::Random)
