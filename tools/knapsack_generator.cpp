@@ -26,10 +26,10 @@ int main(int argc, char* argv[]) {
     // clang-format on
 
     std::size_t n = 1000;
-    std::size_t a = 10;
-    std::size_t b = 1000;
+    std::size_t a = 1000;
+    std::size_t b = 100000;
     std::size_t l = 0;
-    std::size_t u = 200;
+    std::size_t u = 20000;
     std::size_t f = 2;
     std::size_t s = 1;
 

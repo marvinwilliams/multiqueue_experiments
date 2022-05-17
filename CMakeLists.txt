@@ -110,6 +110,11 @@ target_compile_features(throughput INTERFACE cxx_std_17)
 target_link_libraries(throughput INTERFACE thread_coordination benchmark_base)
 target_compile_definitions(throughput INTERFACE THROUGHPUT_MODE)
 
+add_library(insert_delete INTERFACE)
+target_sources(insert_delete INTERFACE insert_delete.cpp)
+target_compile_features(insert_delete INTERFACE cxx_std_17)
+target_link_libraries(insert_delete INTERFACE thread_coordination benchmark_base)
+
 add_library(sssp INTERFACE)
 target_sources(sssp INTERFACE shortest_path.cpp)
 target_compile_features(sssp INTERFACE cxx_std_17)
@@ -162,6 +167,9 @@ function(add_throughput targets)
   foreach(target ${targets})
     add_executable(throughput_${target})
     target_link_libraries(throughput_${target} PRIVATE ${target} throughput)
+
+    add_executable(insert_delete_${target})
+    target_link_libraries(insert_delete_${target} PRIVATE ${target} insert_delete)
   endforeach()
 endfunction()
 
