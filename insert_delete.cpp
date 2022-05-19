@@ -44,6 +44,7 @@ struct Settings {
     util::PriorityQueueParameters pq_params;
     key_type min_key = 1;
     key_type max_key = (1ul << 32) - 2;
+    bool json_output = false;
 };
 
 struct alignas(L1_CACHE_LINESIZE) ThreadData {
@@ -162,7 +163,7 @@ struct Task {
         delete_all(ctx, handle);
 
         if (ctx.is_main()) {
-            std::clog << "Done" << std::endl;
+            std::clog << std::endl;
         }
     }
 
@@ -176,17 +177,13 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
-    std::clog << "Build configuration\n";
 #ifndef NDEBUG
     std::clog << "DEBUG build\n";
 #endif
-    std::clog << "L1 cache linesize (byte): " << L1_CACHE_LINESIZE << "\n\t";
-    std::clog << '\n';
-
     std::clog << "Command line: ";
     std::copy(argv, argv + argc,
               std::ostream_iterator<char const*>(std::clog, " "));
-    std::clog << "\n\n";
+    std::clog << '\n' << '\n';
 
     cxxopts::Options options(argv[0]);
     // clang-format off
@@ -207,6 +204,7 @@ int main(int argc, char* argv[]) {
        "(default: 4)", cxxopts::value<std::size_t>(), "NUMBER")
       ("k,stickiness", "The stickiness when using multiqueue or multififo supporting stickiness"
        "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
+      ("o,json", "Produce json output")
       ("h,help", "Print this help");
     // clang-format on
 
@@ -241,21 +239,34 @@ int main(int argc, char* argv[]) {
             settings.pq_params.stickiness =
                 result["stickiness"].as<unsigned int>();
         }
+        if (result.count("json") > 0) {
+            settings.json_output = true;
+        }
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << "Error parsing arguments: " << e.what() << '\n';
         std::cerr << options.help() << std::endl;
         return 1;
     }
 
-    std::clog << "Settings: \n\t"
-              << "Prefill: " << settings.prefill_size << "\n\t"
-              << "Operations per thread: " << settings.num_operations << "\n\t"
-              << "Threads: " << settings.num_threads << "\n\t"
-              << "Min key: " << settings.min_key << "\n\t"
-              << "Max key: " << settings.max_key << "\n\t"
-              << "Seed: " << settings.seed;
-    std::clog << "\n\n";
-
+    if (settings.json_output) {
+        std::cout << "{\"settings\": {"
+                  << "\"prefill\": " << settings.prefill_size << ','
+                  << "\"ops_per_thread\": " << settings.num_operations << ','
+                  << "\"threads\": " << settings.num_threads << ','
+                  << "\"min_key\": " << settings.min_key << ','
+                  << "\"max_key\": " << settings.max_key << ','
+                  << "\"seed\": " << settings.seed;
+        std::cout << "}";
+    } else {
+        std::cout << "Settings\n";
+        std::cout << "  Prefill: " << settings.prefill_size << '\n'
+                  << "  Ops per thread: " << settings.num_operations << '\n'
+                  << "  Threads: " << settings.num_threads << '\n'
+                  << "  Min key: " << settings.min_key << '\n'
+                  << "  Max key: " << settings.max_key << '\n'
+                  << "  Seed: " << settings.seed << '\n';
+        std::cout << '\n';
+    }
     xoroshiro256starstar rng;
     rng.seed(settings.seed);
 
@@ -263,7 +274,12 @@ int main(int argc, char* argv[]) {
     auto pq = util::create_pq<PriorityQueue>(
         settings.prefill_size, settings.num_threads, settings.pq_params);
 
-    std::clog << "Using priority queue: " << pq.description() << "\n\n";
+    if (settings.json_output) {
+    } else {
+        std::cout << "Priority queue description\n  " << pq.description()
+                  << '\n'
+                  << '\n';
+    }
 
     thread_data = ::new ThreadData[settings.num_threads];
     for (std::size_t i = 0; i < settings.num_threads; ++i) {
@@ -290,32 +306,51 @@ int main(int argc, char* argv[]) {
     auto insert_duration = *coordinator.get_duration("insert");
     auto delete_duration = *coordinator.get_duration("delete");
 
-    std::clog
-        << "Generate prefill keys (s): " << std::setprecision(3)
-        << std::chrono::duration<double>(generate_prefill_duration).count()
-        << '\n';
-    std::clog << "Generate keys (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(generate_duration).count()
-              << '\n';
-    std::clog << "Prefill time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(prefill_duration).count()
-              << '\n';
-    std::clog << "Insert time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(insert_duration).count() << '\n';
+    if (settings.json_output) {
+        std::cout << ", \"results\": {";
+        std::cout
+            << std::fixed << "\"gen_prefill_keys_time\": "
+            << std::chrono::duration<double>(generate_prefill_duration).count()
+            << ",\"gen_workload_keys_time\": "
+            << std::chrono::duration<double>(generate_duration).count()
+            << ",\"prefill_time\": "
+            << std::chrono::duration<double>(prefill_duration).count()
+            << ",\"insert_time\": "
+            << std::chrono::duration<double>(insert_duration).count()
+            << ",\"delete_time\": "
+            << std::chrono::duration<double>(delete_duration).count()
+            << ",\"insert_throughput\": "
+            << static_cast<double>(settings.num_operations) /
+                   std::chrono::duration<double>(insert_duration).count()
+            << ",\"delete_throughput\": "
+            << static_cast<double>(settings.num_operations) /
+                   std::chrono::duration<double>(delete_duration).count();
+        std::cout << "}}\n";
+    } else {
+        std::cout
+            << std::fixed << std::setprecision(3)
+            << "Prefill key generation time (s): "
+            << std::chrono::duration<double>(generate_prefill_duration).count()
+            << '\n'
+            << "Workload key generation time (s): "
+            << std::chrono::duration<double>(generate_duration).count() << '\n'
+            << "Prefill time (s): "
+            << std::chrono::duration<double>(prefill_duration).count() << '\n'
+            << "Insert time (s): "
+            << std::chrono::duration<double>(insert_duration).count() << '\n'
 
-    std::clog << "Delete time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(delete_duration).count() << '\n';
+            << "Delete time (s): "
+            << std::chrono::duration<double>(delete_duration).count() << '\n'
 
-    std::cout << "Insert throughput (ops/t/s): " << std::fixed
-              << std::setprecision(2)
-              << static_cast<double>(settings.num_operations) /
-                     std::chrono::duration<double>(insert_duration).count()
-              << std::endl;
+            << "Insert throughput (ops/t/s): "
+            << static_cast<double>(settings.num_operations) /
+                   std::chrono::duration<double>(insert_duration).count()
+            << '\n'
 
-    std::cout << "Delete throughput (ops/t/s): " << std::fixed
-              << std::setprecision(2)
-              << static_cast<double>(settings.num_operations) /
-                     std::chrono::duration<double>(delete_duration).count()
-              << std::endl;
+            << "Delete throughput (ops/t/s): "
+            << static_cast<double>(settings.num_operations) /
+                   std::chrono::duration<double>(delete_duration).count()
+            << '\n';
+    }
     return 0;
 }
