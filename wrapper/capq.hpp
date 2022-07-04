@@ -33,7 +33,7 @@ class Capq {
     CAPQ* pq_;
 
     void push(value_type const& value);
-    bool try_extract_top(value_type& retval);
+    bool try_pop(value_type& retval);
   };
 
   static constexpr key_type min_valid_key =
@@ -52,7 +52,7 @@ class Capq {
   Handle get_handle();
 
   void push(value_type const& value);
-  bool try_extract_top(value_type& retval);
+  bool try_pop(value_type& retval);
 
   std::string description() const {
     std::stringstream ss;

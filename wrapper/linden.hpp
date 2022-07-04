@@ -27,14 +27,14 @@ class Linden {
         linden_pq_t* pq_;
 
         void push(value_type const& value);
-        bool try_extract_top(value_type& retval);
+        bool try_pop(value_type& retval);
     };
 
     // The queue itself only supports
     // keys >= 1, so one is added on each insert
-    static constexpr key_type min_key = std::numeric_limits<key_type>::min();
-    static constexpr key_type max_key =
-        std::numeric_limits<key_type>::max() - 1;
+    static constexpr key_type min_valid_key = std::numeric_limits<key_type>::min();
+    static constexpr key_type max_valid_key =
+        std::numeric_limits<key_type>::max() - 3;
 
    private:
     static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
@@ -49,7 +49,7 @@ class Linden {
     Handle get_handle();
 
     void push(value_type const& value);
-    bool try_extract_top(value_type& retval);
+    bool try_pop(value_type& retval);
 
     static std::string description() { return "linden"; }
 };

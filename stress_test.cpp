@@ -15,6 +15,7 @@
 #include <functional>
 #include <iomanip>
 #include <iostream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <new>
@@ -38,10 +39,6 @@
 
 #ifndef L1_CACHE_LINESIZE
 #define L1_CACHE_LINESIZE 64
-#endif
-
-#ifndef PAGESIZE
-#define PAGESIZE 4096
 #endif
 
 using key_type = unsigned long;
@@ -196,12 +193,13 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
         "prefill", prefill_keys, prefill_keys + settings.prefill_size,
         [&, id = ctx.get_id()](key_type* begin, key_type* end) {
             std::for_each(begin, end, [&, id](key_type k) {
+                assert(k < std::numeric_limits<std::uint32_t>::max());
 #ifdef QUALITY_MODE
                 auto v = to_value(id, thread_data[id].ins_log.size());
                 handle.push({k, v});
                 thread_data[id].ins_log.push_back({0, k});
 #else
-          handle.push({k, k});
+                handle.push({k, k});
 #endif
                 ++thread_data[id].op_count.num_prefill_insertions;
             });
@@ -217,7 +215,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             std::for_each(begin, end, [&, id](key_type k) {
                 if (k == std::numeric_limits<std::uint32_t>::max()) {
                     PriorityQueue::value_type retval;
-                    while (!handle.try_extract_top(retval)) {
+                    while (!handle.try_pop(retval)) {
                         // Not expected due to prefill
                         auto tick = get_tick();
                         thread_data[id].failed_del_log.push_back(tick);
@@ -260,7 +258,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
             asm volatile("" ::"g"(&retval));
             std::for_each(begin, end, [&, id](key_type k) {
                 if (k == std::numeric_limits<std::uint32_t>::max()) {
-                    while (!handle.try_extract_top(retval)) {
+                    while (!handle.try_pop(retval)) {
                         // Not expected due to prefill
                         ++thread_data[id].op_count.num_failed_deletions;
                     }
@@ -325,7 +323,6 @@ int main(int argc, char* argv[]) {
 #endif
 #endif
     std::clog << "L1 cache linesize (byte): " << L1_CACHE_LINESIZE << "\n\t";
-    std::clog << "Pagesize (byte): " << PAGESIZE << "\n\t";
     std::clog << '\n';
 
     std::clog << "Command line: ";
@@ -475,7 +472,7 @@ int main(int argc, char* argv[]) {
     auto pq = util::create_pq<PriorityQueue>(
         settings.prefill_size, settings.num_threads, settings.pq_params);
 
-    std::clog << "Using priority queue: " << pq.description() << "\n\n";
+    /* std::clog << "Using priority queue: " << pq.description() << "\n\n"; */
 
     thread_data = ::new ThreadData[settings.num_threads];
     for (std::size_t i = 0; i < settings.num_threads; ++i) {

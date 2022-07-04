@@ -4,7 +4,7 @@ target_include_directories(replay_tree_test PRIVATE "..")
 
 add_executable(wrapper_test wrapper.cpp)
 target_link_libraries(wrapper_test PRIVATE Catch2::Catch2WithMain)
-target_link_libraries(wrapper_test PRIVATE capq_wrapper klsm_wrapper linden_wrapper spraylist_wrapper)
+target_link_libraries(wrapper_test PRIVATE klsm linden spraylist)
 
 list(APPEND CMAKE_MODULE_PATH "${EXTERNAL_DIR}/Catch2/extras")
 include(Catch)

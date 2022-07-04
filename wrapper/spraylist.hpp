@@ -33,12 +33,12 @@ class Spraylist {
         sl_intset_t* pq_;
 
         void push(value_type const& value);
-        bool try_extract_top(value_type& retval);
+        bool try_pop(value_type& retval);
     };
 
-    static constexpr key_type min_key = std::numeric_limits<key_type>::min();
+    static constexpr key_type min_valid_key = std::numeric_limits<key_type>::min();
     // Use INT_MAX_32
-    static constexpr key_type max_key =
+    static constexpr key_type max_valid_key =
         std::numeric_limits<std::uint32_t>::max() - 1ul;
     static_assert(std::numeric_limits<unsigned long>::max() == -1ul, "");
 
@@ -55,7 +55,7 @@ class Spraylist {
     Handle get_handle();
 
     void push(value_type const& value);
-    bool try_extract_top(value_type& retval);
+    bool try_pop(value_type& retval);
 
     static std::string description() { return "spraylist"; }
 };

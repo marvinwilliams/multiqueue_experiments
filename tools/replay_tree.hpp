@@ -187,9 +187,6 @@ struct leaf_node : public node {
  * red-black tree and almost always uses less memory. The insertion function
  * splits the nodes on the recursion unroll. Erase is largely based on Jannink's
  * ideas.
- *
- * This class is specialized into btree_set, btree_multiset, btree_map and
- * btree_multimap using default template parameters and facade functions.
  */
 template <typename Key, typename Value, typename KeyOfValue, typename Compare = std::less<Key>,
           typename Traits = btree_default_traits<Key, Value>, typename Allocator = std::allocator<char>>

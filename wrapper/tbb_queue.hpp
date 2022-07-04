@@ -26,7 +26,7 @@ class TBBQueue {
 
        public:
         void push(value_type const& value) { pq_->push(value); }
-        bool try_extract_top(value_type& retval) {
+        bool try_pop(value_type& retval) {
             return pq_->try_pop(retval);
         }
     };
@@ -44,7 +44,7 @@ class TBBQueue {
     }
 
     void push(value_type const& value) { pq_.push(value); }
-    bool try_extract_top(value_type& retval) { return pq_.try_pop(retval); }
+    bool try_pop(value_type& retval) { return pq_.try_pop(retval); }
 
     static std::string description() { return "TBBQueue"; }
 };

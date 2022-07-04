@@ -47,7 +47,7 @@ void Spraylist::Handle::push(value_type const& value) {
   sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
 }
 
-bool Spraylist::Handle::try_extract_top(value_type& retval) {
+bool Spraylist::Handle::try_pop(value_type& retval) {
   retval.first = 0;
   while (true) {
     bool success = spray_delete_min_key(pq_, &retval.first, &retval.second,
@@ -61,7 +61,7 @@ void Spraylist::push(value_type const& value) {
   sl_add_val(pq_.get(), value.first, value.second, TRANSACTIONAL);
 }
 
-bool Spraylist::try_extract_top(value_type& retval) {
+bool Spraylist::try_pop(value_type& retval) {
   retval.first = 0;
   while (true) {
     bool success = spray_delete_min_key(pq_.get(), &retval.first, &retval.second,

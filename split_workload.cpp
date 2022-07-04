@@ -41,6 +41,7 @@ struct Settings {
     util::PriorityQueueParameters pq_params;
     key_type min_key = 1;
     key_type max_key = (1ul << 32) - 2;
+    double split = 0.5;
     bool json_output = false;
 };
 

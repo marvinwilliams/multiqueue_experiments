@@ -12,7 +12,7 @@
 #define UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 
 #if defined PQ_MQ
-#include "multiqueue/factory.hpp"
+#include "multiqueue/multiqueue.hpp"
 #elif defined PQ_MF
 #include "multififo/multififo.hpp"
 #elif defined PQ_CAPQ
@@ -45,13 +45,11 @@ namespace detail {
 template <typename KeyType, typename ValueType>
 struct PriorityQueueTypeFactory {
 #if defined PQ_MQ
-    using type =
-        typename multiqueue::MultiqueueFactory<KeyType,
-                                               ValueType>::multiqueue_type;
+    using type = multiqueue::MultiQueue<KeyType, ValueType>;
 #elif defined PQ_MF
-    using type = multififo::Multififo<std::pair<KeyType, ValueType>>;
+    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ
-    // not available with generic types
+#error Not available with generic types
 #elif defined PQ_KLSM256
     using type = wrapper::Klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024
@@ -59,9 +57,9 @@ struct PriorityQueueTypeFactory {
 #elif defined PQ_KLSM4096
     using type = wrapper::Klsm<KeyType, ValueType, 4096>;
 #elif defined PQ_LINDEN
-    // not available with generic types
+#error Not available with generic types
 #elif defined PQ_SPRAYLIST
-    // not available with generic types
+#error Not available with generic types
 #elif defined PQ_TBB_Q
     using type = wrapper::TBBQueue<KeyType, ValueType>;
 #elif defined PQ_TBB_PQ
@@ -74,11 +72,9 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type =
-        typename multiqueue::MultiqueueFactory<KeyType,
-                                               ValueType>::multiqueue_type;
+    using type = multiqueue::MultiQueue<KeyType, ValueType>;
 #elif defined PQ_MF
-    using type = multififo::Multififo<std::pair<unsigned long, unsigned long>>;
+    using type = multififo::MultiFifo<std::pair<unsigned long, unsigned long>>;
 #elif defined PQ_CAPQ
     using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_KLSM256
@@ -103,7 +99,7 @@ struct has_params : std::false_type {};
 
 template <typename PriorityQueue>
 struct has_params<PriorityQueue,
-                  std::void_t<typename PriorityQueue::param_type>>
+                  std::void_t<typename PriorityQueue::config_type>>
     : std::true_type {};
 
 template <typename PriorityQueue>
@@ -119,8 +115,8 @@ struct PriorityQueueParameters {
 
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactory {
-    using factory_type = detail::PriorityQueueTypeFactory<KeyType, ValueType>;
-    using type = typename factory_type::type;
+    using type =
+        typename detail::PriorityQueueTypeFactory<KeyType, ValueType>::type;
 };
 
 template <typename PriorityQueue>
@@ -128,19 +124,19 @@ static PriorityQueue create_pq(std::size_t initial_capacity,
                                unsigned int num_threads,
                                PriorityQueueParameters const& params = {}) {
     if constexpr (detail::has_params_v<PriorityQueue>) {
-        typename PriorityQueue::param_type pq_params{};
+        typename PriorityQueue::config_type config{};
         if (params.seed) {
-            pq_params.seed = *params.seed;
+            config.seed = *params.seed;
         }
         if (params.c) {
-            pq_params.c = *params.c;
+            config.c = *params.c;
         }
 #ifdef MQ_HAS_STICKINESS
         if (params.stickiness) {
-            pq_params.stickiness = *params.stickiness;
+            config.stick_policy_config.stickiness = *params.stickiness;
         }
 #endif
-        return PriorityQueue(initial_capacity, num_threads, pq_params);
+        return PriorityQueue(initial_capacity, num_threads, config);
     } else {
         return PriorityQueue(initial_capacity, num_threads);
     }

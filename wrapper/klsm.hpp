@@ -36,7 +36,7 @@ class Klsm {
         void push(value_type const& value) {
             pq_->insert(value.first, value.second);
         }
-        bool try_extract_top(value_type& retval) {
+        bool try_pop(value_type& retval) {
             return pq_->delete_min(retval.first, retval.second);
         }
     };
@@ -53,7 +53,7 @@ class Klsm {
     void push(value_type const& value) {
         pq_->insert(value.first, value.second);
     }
-    bool try_extract_top(value_type& retval) {
+    bool try_pop(value_type& retval) {
         return pq_->delete_min(retval.first, retval.second);
     }
 
