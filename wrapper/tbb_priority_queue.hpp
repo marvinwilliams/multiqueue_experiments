@@ -9,16 +9,24 @@
 
 namespace wrapper {
 
-template <typename KeyType, typename T>
+template <typename KeyType, typename T, typename Compare>
 class TBBPriorityQueue {
    public:
     using key_type = KeyType;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
-    struct value_compare {
-        bool operator()(value_type const& lhs,
-                        value_type const& rhs) const noexcept {
-            return lhs.first > rhs.first;
+    class value_compare {
+        friend class TBBPriorityQueue<KeyType, T, Compare>;
+
+       protected:
+        Compare comp;
+
+        explicit value_compare(Compare const& c) : comp{c} {}
+
+       public:
+        constexpr bool operator()(value_type const& lhs,
+                                  value_type const& rhs) const noexcept {
+            return comp(lhs.first, rhs.first);
         }
     };
 
@@ -32,9 +40,7 @@ class TBBPriorityQueue {
 
        public:
         void push(value_type const& value) { pq_->push(value); }
-        bool try_pop(value_type& retval) {
-            return pq_->try_pop(retval);
-        }
+        bool try_pop(value_type& retval) { return pq_->try_pop(retval); }
     };
 
    private:
@@ -42,7 +48,7 @@ class TBBPriorityQueue {
 
    public:
     TBBPriorityQueue(std::size_t capacity, unsigned int /* num_threads */)
-        : pq_(capacity) {}
+        : pq_(capacity, value_compare{Compare{}}) {}
 
     Handle get_handle() {
         auto h = Handle{};

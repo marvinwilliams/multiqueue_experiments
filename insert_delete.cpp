@@ -38,7 +38,7 @@ struct Settings {
     std::size_t num_operations = 10'000'000;
     unsigned int num_threads = 4;
     std::uint64_t seed = 1;
-    util::PriorityQueueParameters pq_params;
+    util::PriorityQueueConfig config;
     key_type min_key = 1;
     key_type max_key = (1ul << 32) - 2;
     bool json_output = false;
@@ -109,7 +109,7 @@ void delete_all(thread_coordination::Context& ctx,
             std::size_t current;
             do {
                 std::size_t local_count = 0;
-                while (handle.try_extract_top(retval)) {
+                while (handle.try_pop(retval)) {
                     // "Use" memory to force write to retval
                     asm volatile("" ::: "memory");
                     ++local_count;
@@ -222,10 +222,10 @@ int main(int argc, char* argv[]) {
             settings.seed = result["seed"].as<std::uint32_t>();
         }
         if (result.count("factor") > 0) {
-            settings.pq_params.c = result["factor"].as<std::size_t>();
+            settings.config.c = result["factor"].as<std::size_t>();
         }
         if (result.count("stickiness") > 0) {
-            settings.pq_params.stickiness =
+            settings.config.stickiness =
                 result["stickiness"].as<unsigned int>();
         }
         if (result.count("json") > 0) {
@@ -259,9 +259,9 @@ int main(int argc, char* argv[]) {
     xoroshiro256starstar rng;
     rng.seed(settings.seed);
 
-    settings.pq_params.seed = rng();
+    settings.config.seed = rng();
     auto pq = util::create_pq<PriorityQueue>(
-        settings.prefill_size, settings.num_threads, settings.pq_params);
+        settings.prefill_size, settings.num_threads, settings.config);
 
     if (settings.json_output) {
     } else {

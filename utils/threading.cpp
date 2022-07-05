@@ -275,12 +275,12 @@ std::chrono::milliseconds get_thread_runtime() {
   auto rc = pthread_getcpuclockid(pthread_self(), &cid);
   if (rc != 0) {
     throw std::system_error{rc, std::system_category(),
-                            "Failed to get thread's clock id"};
+                            "Failed to get thread clock id"};
   }
   timespec ts;
   if (clock_gettime(cid, &ts) == -1) {
     throw std::system_error{errno, std::system_category(),
-                            "Failed to get thread's time"};
+                            "Failed to get thread runtime"};
   }
   return std::chrono::seconds{ts.tv_sec} +
          std::chrono::duration_cast<std::chrono::milliseconds>(
