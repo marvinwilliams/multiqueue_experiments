@@ -15,6 +15,10 @@
 #include <utility>
 #include <vector>
 
+#ifndef L1_CACHE_LINESIZE
+#error L1_CACHE_LINESIZE needs to be defined
+#endif
+
 namespace thread_coordination {
 
 namespace detail {

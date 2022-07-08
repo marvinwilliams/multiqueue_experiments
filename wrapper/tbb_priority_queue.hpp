@@ -47,8 +47,8 @@ class TBBPriorityQueue {
     pq_type pq_;
 
    public:
-    TBBPriorityQueue(std::size_t capacity, unsigned int /* num_threads */)
-        : pq_(capacity, value_compare{Compare{}}) {}
+    TBBPriorityQueue(unsigned int /* num_threads */)
+        : pq_(1'000'000, value_compare{Compare{}}) {}
 
     Handle get_handle() {
         auto h = Handle{};

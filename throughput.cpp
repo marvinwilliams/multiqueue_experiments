@@ -1,3 +1,7 @@
+#ifndef L1_CACHE_LINESIZE
+#define L1_CACHE_LINESIZE 64
+#endif
+
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
 #include "utils/threading.hpp"
@@ -7,10 +11,9 @@
 
 #ifdef USE_PAPI
 #include <papi.h>
+#include <pthread.h>
 #endif
 
-#include <time.h>
-#include <x86intrin.h>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -23,61 +26,21 @@
 #include <memory>
 #include <new>
 #include <numeric>
-#include <optional>
 #include <random>
-#include <thread>
 #include <type_traits>
 #include <utility>
-#include <vector>
-
-#if !defined THROUGHPUT_MODE && !defined QUALITY_MODE
-#error Need to define either THROUGHPUT_MODE or QUALITY_MODE
-#endif
-
-#if defined THROUGHPUT_MODE
-#undef QUALITY_MODE
-#endif
-#if defined QUALITY_MODE
-#undef THROUGHPUT_MODE
-#endif
-
-#ifndef L1_CACHE_LINESIZE
-#define L1_CACHE_LINESIZE 64
-#endif
 
 using key_type = unsigned long;
 using value_type = unsigned long;
 
 using PriorityQueue =
-    typename util::PriorityQueueFactory<key_type, value_type>::type;
+    typename util::PriorityQueueFactory<key_type, value_type, true>::type;
 static constexpr key_type PopOp =
     static_cast<value_type>(std::numeric_limits<std::uint32_t>::max());
-#ifdef QUALITY_MODE
-
-using tick_type = std::uint64_t;
-
-static inline tick_type get_tick() noexcept {
-#ifdef USE_TSC
-    // Not synchronized among sockets
-    _mm_lfence();
-    return __rdtsc();
-    _mm_lfence();
-#else
-    timespec ts;
-    clock_gettime(CLOCK_REALTIME, &ts);
-    return static_cast<tick_type>(ts.tv_sec * 1000000000 + ts.tv_nsec);
-#endif
-}
-
-#endif
 
 struct Settings {
     std::size_t prefill_size = 1'000'000;
     std::size_t num_operations = 10'000'000;
-#ifdef QUALITY_MODE
-    std::chrono::microseconds sleep_between_operations =
-        std::chrono::microseconds::zero();
-#endif
     unsigned int num_threads = 4;
     std::uint64_t seed = 1;
     util::PriorityQueueConfig pq_config;
@@ -86,52 +49,12 @@ struct Settings {
     double pop_prob = 0.5;
 };
 
-#ifdef QUALITY_MODE
-
-static constexpr unsigned int bits_for_thread_id = 8;
-static constexpr value_type value_mask =
-    (static_cast<value_type>(1)
-     << (std::numeric_limits<value_type>::digits - bits_for_thread_id)) -
-    1;
-
-static constexpr value_type to_value(unsigned int thread_id,
-                                     value_type elem_id) noexcept {
-    return (static_cast<value_type>(thread_id)
-            << (std::numeric_limits<value_type>::digits - bits_for_thread_id)) |
-           (elem_id & value_mask);
-}
-
-static constexpr unsigned int get_thread_id(value_type value) noexcept {
-    return static_cast<unsigned int>(
-        value >>
-        (std::numeric_limits<value_type>::digits - bits_for_thread_id));
-}
-
-static constexpr value_type get_elem_id(value_type value) noexcept {
-    return value & value_mask;
-}
-
-struct PushLogEntry {
-    tick_type tick;
-    key_type key;
-};
-
-struct PopLogEntry {
-    tick_type tick;
-    value_type value;
-};
-
-#endif
-
 struct alignas(L1_CACHE_LINESIZE) ThreadData {
     xoroshiro256starstar rng;
     unsigned int num_ops = 0;
-#ifdef QUALITY_MODE
-    std::vector<PushLogEntry> push_log;
-    std::vector<PopLogEntry> pop_log;
-    std::vector<tick_type> failed_pop_log;
-#else
     unsigned int num_failed_pops = 0;
+#ifdef USE_PAPI
+    long long l1_stats[2];
 #endif
 };
 
@@ -181,58 +104,32 @@ void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
         [&handle, id = ctx.get_id()](key_type* begin, key_type* end) {
             for (auto it = begin; it != end; ++it) {
                 assert(*it < PopOp);
-#ifdef QUALITY_MODE
-                auto v = to_value(id, thread_data[id].push_log.size());
-                handle.push({*it, v});
-                thread_data[id].push_log.push_back({0, *it});
-#else
                 handle.push({*it, *it});
-#endif
             };
         });
 }
 
-#ifdef QUALITY_MODE
-
 void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
           std::chrono::steady_clock::duration& duration) {
-    ctx.execute_synchronized_blockwise_timed(
-        duration, keys, keys + settings.num_threads * settings.num_operations,
-        [&handle, id = ctx.get_id()](key_type* begin, key_type* end) {
-            for (auto it = begin; it != end; ++it) {
-                if (*it == PopOp) {
-                    PriorityQueue::value_type retval;
-                    while (!handle.try_pop(retval)) {
-                        auto tick = get_tick();
-                        thread_data[id].failed_pop_log.push_back(tick);
-                    }
-                    auto tick = get_tick();
-
-                    thread_data[id].pop_log.push_back({tick, retval.second});
-                } else {
-                    value_type value =
-                        to_value(id, thread_data[id].push_log.size());
-                    handle.push({*it, value});
-                    auto tick = get_tick();
-                    thread_data[id].push_log.push_back({tick, *it});
-                }
-                if (settings.sleep_between_operations !=
-                    std::chrono::microseconds::zero()) {
-                    auto dist = std::uniform_int_distribution<std::uint64_t>(
-                        1, static_cast<std::uint64_t>(
-                               settings.sleep_between_operations.count()));
-                    std::this_thread::sleep_for(
-                        std::chrono::microseconds{dist(thread_data[id].rng)});
-                }
-            }
-            thread_data[id].num_ops += static_cast<unsigned int>(end - begin);
-        });
-}
-
-#else
-
-void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
-          std::chrono::steady_clock::duration& duration) {
+#ifdef USE_PAPI
+    int event_set = PAPI_NULL;
+    if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
+        ctx.write(std::cerr) << "Failed to init event set\n";
+        std::abort();
+    }
+    if (int ret = PAPI_add_event(event_set, PAPI_L1_DCA); ret != PAPI_OK) {
+        ctx.write(std::cerr) << "Failed to add PAPI_L1_DCA to event set";
+        std::abort();
+    }
+    if (int ret = PAPI_add_event(event_set, PAPI_BR_MSP); ret != PAPI_OK) {
+        ctx.write(std::cerr) << "Failed to add PAPI_BR_MSP to event set\n";
+        std::abort();
+    }
+    if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
+        ctx.write(std::cerr) << "Failed to start counters\n";
+        std::abort();
+    }
+#endif
     ctx.execute_synchronized_blockwise_timed(
         duration, keys, keys + settings.num_threads * settings.num_operations,
         [&, id = ctx.get_id()](key_type* begin, key_type* end) {
@@ -252,9 +149,14 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
             }
             thread_data[id].num_ops += static_cast<unsigned int>(end - begin);
         });
-}
-
+#ifdef USE_PAPI
+    if (int ret = PAPI_stop(event_set, thread_data[ctx.get_id()].l1_stats);
+        ret != PAPI_OK) {
+        ctx.write(std::cerr) << "Failed to stop counters\n";
+        std::abort();
+    }
 #endif
+}
 
 struct GenerateTask {
     static void run(thread_coordination::Context ctx) {
@@ -274,6 +176,12 @@ struct WorkTask {
     static void run(thread_coordination::Context ctx, PriorityQueue& pq,
                     std::chrono::steady_clock::duration& prefill_duration,
                     std::chrono::steady_clock::duration& work_duration) {
+#ifdef USE_PAPI
+        if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
+            ctx.write(std::cerr) << "Failed to register thread to PAPI\n";
+            std::abort();
+        }
+#endif
         PriorityQueue::Handle handle = pq.get_handle();
 
         prefill(ctx, handle, prefill_duration);
@@ -296,14 +204,6 @@ int main(int argc, char* argv[]) {
 #ifndef NDEBUG
     std::clog << "DEBUG build\n";
 #endif
-#if defined THROUGHPUT_MODE
-    std::clog << "Mode: Throughput\n";
-#elif defined QUALITY_MODE
-    std::clog << "Mode: Quality\n";
-#ifdef USE_TSC
-    std::clog << "Use TSC\n";
-#endif
-#endif
     std::clog << "L1 cache linesize (byte): " << L1_CACHE_LINESIZE << "\n\t";
     std::clog << '\n';
 
@@ -324,10 +224,6 @@ int main(int argc, char* argv[]) {
          "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
         ("d,pop-prob", "Specify the probability of pops"
          "(default: 0.5)", cxxopts::value<double>(), "NUMBER")
-#ifdef QUALITY_MODE
-        ("w,sleep", "Specify the sleep time between operations in microseconds"
-         "(default: 0)", cxxopts::value<unsigned int>(), "NUMBER")
-#endif
         ("m,max", "Specify the max key "
          "(default: MAX)", cxxopts::value<key_type>(), "NUMBER")
         ("l,min", "Specify the min key "
@@ -361,12 +257,6 @@ int main(int argc, char* argv[]) {
         if (result.count("pop-prob") > 0) {
             settings.pop_prob = result["pop-prob"].as<double>();
         }
-#ifdef QUALITY_MODE
-        if (result.count("sleep") > 0) {
-            settings.sleep_between_operations =
-                std::chrono::microseconds{result["sleep"].as<unsigned int>()};
-        }
-#endif
         if (result.count("max") > 0) {
             settings.max_key = result["max"].as<key_type>();
         }
@@ -399,23 +289,13 @@ int main(int argc, char* argv[]) {
               << "\n\t"
               << "Max key: " << settings.max_key << "\n\t"
               << "Min key: " << settings.min_key << "\n\t"
-#ifdef QUALITY_MODE
-              << "Sleep between operations: "
-              << settings.sleep_between_operations.count() << " us\n\t"
-#endif
               << "Seed: " << settings.seed;
     std::clog << "\n\n";
 
-#ifdef QUALITY_MODE
-    if (settings.num_threads > (1 << bits_for_thread_id) - 1) {
-        std::cerr << "Too many threads!" << std::endl;
-        return 1;
-    }
-#endif
     xoroshiro256starstar rng(settings.seed);
 
     settings.pq_config.seed = rng();
-    auto pq = util::PriorityQueueFactory<key_type, value_type>::create(
+    auto pq = util::PriorityQueueFactory<key_type, value_type, true>::create(
         settings.num_threads, settings.pq_config);
 
     thread_data = ::new ThreadData[settings.num_threads];
@@ -438,6 +318,27 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
+#ifdef USE_PAPI
+    if (int ret = PAPI_library_init(PAPI_VER_CURRENT);
+        ret != PAPI_VER_CURRENT) {
+        std::cerr << "Error initializing PAPI\n";
+        return 1;
+    }
+    if (int ret = PAPI_thread_init((unsigned long (*)(void))(pthread_self));
+        ret != PAPI_OK) {
+        std::cerr << "Error initializing threads for PAPI\n";
+        return 1;
+    }
+    if (int ret = PAPI_query_event(PAPI_L1_DCA); ret != PAPI_OK) {
+        std::cerr << "PAPI_L1_DCA not available\n";
+        return 1;
+    }
+    if (int ret = PAPI_query_event(PAPI_BR_MSP); ret != PAPI_OK) {
+        std::cerr << "PAPI_BR_MSP not available\n";
+        return 1;
+    }
+#endif
+
     std::clog << "Prefilling... " << std::flush;
     std::chrono::steady_clock::duration prefill_duration;
     std::chrono::steady_clock::duration work_duration;
@@ -449,18 +350,29 @@ int main(int argc, char* argv[]) {
     unsigned int total_failed_pops =
         std::accumulate(thread_data, thread_data + settings.num_threads, 0u,
                         [](unsigned int sum, auto const& data) {
-                            return sum +
-#ifdef QUALITY_MODE
-                                   data.failed_pop_log.size();
-#else
-                                   data.num_failed_pops;
-#endif
+                            return sum + data.num_failed_pops;
                         });
     auto [min_thread, max_thread] =
         std::minmax_element(thread_data, thread_data + settings.num_threads,
                             [](auto const& lhs, auto const& rhs) {
                                 return lhs.num_ops < rhs.num_ops;
                             });
+#ifdef USE_PAPI
+    auto avg_cache_accesses = std::accumulate(
+        thread_data, thread_data + settings.num_threads, .0,
+        [](double avg, auto const& data) {
+            return avg + static_cast<double>(data.l1_stats[0]) /
+                             static_cast<double>(settings.num_threads *
+                                                 settings.num_operations);
+        });
+    auto avg_cache_misses = std::accumulate(
+        thread_data, thread_data + settings.num_threads, .0,
+        [](double avg, auto const& data) {
+            return avg + static_cast<double>(data.l1_stats[1]) /
+                             static_cast<double>(settings.num_threads *
+                                                 settings.num_operations);
+        });
+#endif
     std::clog << "Most operations: " << max_thread->num_ops << '\n';
     std::clog << "Least operations: " << min_thread->num_ops << '\n';
     std::clog << "Failed pops: " << total_failed_pops << '\n';
@@ -469,59 +381,34 @@ int main(int argc, char* argv[]) {
               << '\n';
     std::clog << "Work time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(work_duration).count() << '\n';
-    std::clog << "Ops/s per thread: " << std::fixed << std::setprecision(2)
+    std::clog << "Throughput per thread: " << std::fixed << std::setprecision(2)
               << static_cast<double>(settings.num_threads *
                                      settings.num_operations) /
                      std::chrono::duration<double>(work_duration).count()
               << '\n';
-
-#ifdef QUALITY_MODE
-    std::cout << settings.num_threads << '\n';
-    for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& [tick, key] : thread_data[t].push_log) {
-            std::cout << "i " << t << ' ' << tick << ' ' << key << '\n';
-        }
-    }
-
-    for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& [tick, value] : thread_data[t].pop_log) {
-            std::cout << "d " << t << ' ' << tick << ' ' << get_thread_id(value)
-                      << ' ' << get_elem_id(value) << '\n';
-        }
-    }
-
-    for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& tick : thread_data[t].failed_pop_log) {
-            std::cout << "f " << t << ' ' << tick << '\n';
-        }
-    }
-
-    std::cout << std::flush;
-
-#else
-    std::cout
-        << "prefill,ops_per_thread,threads,pop_prob,min_key,max_key,sleep,"
-           "seed,min_ops,max_ops,failed_pops,prefill_time,work_time,"
-           "throughput\n"
-        << settings.prefill_size << ',' << settings.num_operations << ','
-        << settings.num_threads << ',' << settings.pop_prob << ','
-        << settings.min_key << ',' << settings.max_key << ','
-#ifdef QUALITY_MODE
-        << settings.sleep_between_operations.count() << ','
-#else
-        << 0 << ','
+#ifdef USE_PAPI
+    std::clog << "Avg cache accesses: " << avg_cache_accesses << '\n';
+    std::clog << "Avg cache misses: " << avg_cache_misses << '\n';
 #endif
-        << settings.seed << ',' << min_thread->num_ops << ','
-        << max_thread->num_ops << ',' << total_failed_pops << ',' << std::fixed
-        << std::setprecision(2)
-        << std::chrono::duration<double>(prefill_duration).count() << ','
-        << std::fixed << std::setprecision(2)
-        << std::chrono::duration<double>(work_duration).count() << ','
-        << std::fixed << std::setprecision(2)
-        << static_cast<double>(settings.num_threads * settings.num_operations) /
-               std::chrono::duration<double>(work_duration).count()
-        << std::endl;
-#endif
+
+    std::cout << "prefill,ops_per_thread,threads,pop_prob,min_key,max_key,"
+                 "seed,min_ops,max_ops,failed_pops,prefill_time,work_time,"
+                 "throughput\n"
+              << settings.prefill_size << ',' << settings.num_operations << ','
+              << settings.num_threads << ',' << settings.pop_prob << ','
+              << settings.min_key << ',' << settings.max_key << ','
+              << settings.seed << ',' << min_thread->num_ops << ','
+              << max_thread->num_ops << ',' << total_failed_pops << ','
+              << std::fixed << std::setprecision(2)
+              << std::chrono::duration<double>(prefill_duration).count() << ','
+              << std::fixed << std::setprecision(2)
+              << std::chrono::duration<double>(work_duration).count() << ','
+              << std::fixed << std::setprecision(2)
+              << static_cast<double>(settings.num_threads *
+                                     settings.num_operations) /
+                     std::chrono::duration<double>(work_duration).count()
+              << std::endl;
+
     ::operator delete[](keys, std::align_val_t{L1_CACHE_LINESIZE});
     ::operator delete[](prefill_keys, std::align_val_t{L1_CACHE_LINESIZE});
     delete[] thread_data;

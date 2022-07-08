@@ -21,7 +21,7 @@ void linden_pq_deleter::operator()(linden_pq_t* p) {
 
 namespace wrapper {
 
-Linden::Linden(std::size_t /* capacity */, unsigned int /* num_threads */) {
+Linden::Linden(unsigned int /* num_threads */) {
     _init_gc_subsystem();
     pq_.reset(static_cast<linden_pq_t*>(pq_init(32)));
 }

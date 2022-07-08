@@ -35,7 +35,7 @@ class TBBQueue {
     pq_type pq_;
 
    public:
-    TBBQueue(std::size_t /* capacity */, unsigned int /* num_threads */) {}
+    TBBQueue(unsigned int /* num_threads */) {}
 
     Handle get_handle() {
         auto h = Handle{};

@@ -18,7 +18,7 @@ namespace wrapper {
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 Capq<remove_min_relax, put_relax, catree_adapt>::Capq(
-    std::size_t /* capacity */, unsigned int /* num_threads */) {
+    unsigned int /* num_threads */) {
     _init_gc_subsystem();
     pq_.reset(capq_new());
 }

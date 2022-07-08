@@ -22,10 +22,10 @@ void thread_data_deleter::operator()(thread_data_t* p) { delete p; }
 
 namespace wrapper {
 
-Spraylist::Spraylist(std::size_t capacity, unsigned int num_threads) : num_threads_(num_threads + 1) {
+Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads + 1) {
   ssalloc_init(num_threads_);
   seeds = seed_rand();
-  *levelmax = floor_log_2(capacity);
+  *levelmax = floor_log_2(1'000'000);
   pq_.reset(sl_set_new());
   thread_data_ = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
   thread_data_->seed = rand();

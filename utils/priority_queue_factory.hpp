@@ -62,7 +62,7 @@ struct has_config<PriorityQueue,
 template <typename PriorityQueue>
 static constexpr bool has_config_v = has_config<PriorityQueue>::value;
 
-template <typename KeyType, typename ValueType>
+template <typename KeyType, typename ValueType, bool Min = true>
 struct PriorityQueueFactoryBase {
 #if defined PQ_MQ
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>>;
@@ -81,14 +81,27 @@ struct PriorityQueueFactoryBase {
 #endif
 };
 
+template <typename KeyType, typename ValueType>
+struct PriorityQueueFactoryBase<KeyType, ValueType, false> {
+#if defined PQ_MQ
+    using type = multiqueue::MultiQueue<KeyType, ValueType>;
+#elif defined PQ_MF
+    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
+#elif defined PQ_TBB_Q
+    using type = wrapper::TBBQueue<KeyType, ValueType>;
+#elif defined PQ_TBB_PQ
+    using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
+#endif
+};
+
 template <>
-struct PriorityQueueFactoryBase<unsigned long, unsigned long> {
+struct PriorityQueueFactoryBase<unsigned long, unsigned long, true> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>>;
 #elif defined PQ_MF
-    using type = multififo::MultiFifo<std::pair<unsigned long, unsigned long>>;
+    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ
     using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_KLSM256
@@ -108,14 +121,29 @@ struct PriorityQueueFactoryBase<unsigned long, unsigned long> {
 #endif
 };
 
+template <>
+struct PriorityQueueFactoryBase<unsigned long, unsigned long, false> {
+    using KeyType = unsigned long;
+    using ValueType = unsigned long;
+#if defined PQ_MQ
+    using type = multiqueue::MultiQueue<KeyType, ValueType>;
+#elif defined PQ_MF
+    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
+#elif defined PQ_TBB_Q
+    using type = wrapper::TBBQueue<KeyType, ValueType>;
+#elif defined PQ_TBB_PQ
+    using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
+#endif
+};
+
 }  // namespace detail
 
-template <typename KeyType, typename ValueType>
+template <typename KeyType, typename ValueType, bool Min>
 struct PriorityQueueFactory
-    : detail::PriorityQueueFactoryBase<KeyType, ValueType> {
+    : detail::PriorityQueueFactoryBase<KeyType, ValueType, Min> {
     using type =
-        typename detail::PriorityQueueFactoryBase<KeyType, ValueType>::type;
-    static type create(std::size_t initial_capacity, unsigned int num_threads,
+        typename detail::PriorityQueueFactoryBase<KeyType, ValueType, Min>::type;
+    static type create(unsigned int num_threads,
                        PriorityQueueConfig const& params = {}) {
         if constexpr (detail::has_config_v<type>) {
             typename type::config_type config{};
@@ -130,9 +158,9 @@ struct PriorityQueueFactory
                 config.stick_policy_config.stickiness = *params.stickiness;
             }
 #endif
-            return type(initial_capacity, num_threads, config);
+            return type(num_threads, config);
         } else {
-            return type(initial_capacity, num_threads);
+            return type(num_threads);
         }
     }
 };

@@ -44,7 +44,7 @@ class Linden {
     alignas(64) std::unique_ptr<linden_pq_t, linden_pq_deleter> pq_;
 
    public:
-    Linden(std::size_t /* capacity */, unsigned int num_threads);
+    Linden(unsigned int num_threads);
 
     Handle get_handle();
 

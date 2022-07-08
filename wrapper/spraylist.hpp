@@ -50,7 +50,7 @@ class Spraylist {
     std::unique_ptr<thread_data_t, thread_data_deleter> thread_data_;
 
    public:
-    explicit Spraylist(std::size_t /* capacity */, unsigned int num_threads);
+    explicit Spraylist(unsigned int num_threads);
 
     Handle get_handle();
 
