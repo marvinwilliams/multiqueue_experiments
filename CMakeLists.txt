@@ -97,10 +97,9 @@ if(MULTIQUEUE_EXP_TSAN)
 endif()
 
 add_library(quality INTERFACE)
-target_sources(quality INTERFACE stress_test.cpp)
+target_sources(quality INTERFACE quality.cpp)
 target_compile_features(quality INTERFACE cxx_std_17)
 target_link_libraries(quality INTERFACE thread_coordination benchmark_base)
-target_compile_definitions(quality INTERFACE QUALITY_MODE)
 
 add_library(throughput INTERFACE)
 target_sources(throughput INTERFACE throughput.cpp)

@@ -182,7 +182,7 @@ struct Settings {
     std::filesystem::path instance_file;
     unsigned int num_threads = 4;
     std::uint64_t seed = 1;
-    util::PriorityQueueParameters pq_params;
+    util::PriorityQueueParameters config;
 };
 
 #ifdef COUNT_STATS

@@ -38,7 +38,7 @@ struct Settings {
     std::size_t num_operations = 10'000'000;
     unsigned int num_threads = 4;
     std::uint64_t seed = 1;
-    util::PriorityQueueParameters pq_params;
+    util::PriorityQueueParameters config;
     key_type min_key = 1;
     key_type max_key = (1ul << 32) - 2;
     double split = 0.5;

@@ -54,7 +54,7 @@ struct Settings {
     unsigned int num_threads = 4;
     std::uint64_t seed = 1;
     node_type starting_node = 0;
-    util::PriorityQueueParameters pq_params;
+    util::PriorityQueueParameters config;
 };
 
 #ifdef COUNT_STATS
