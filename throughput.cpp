@@ -10,8 +10,10 @@
 #include "external/cxxopts.hpp"
 
 #ifdef USE_PAPI
+extern "C" {
 #include <papi.h>
 #include <pthread.h>
+}
 #endif
 
 #include <atomic>
@@ -54,7 +56,7 @@ struct alignas(L1_CACHE_LINESIZE) ThreadData {
     unsigned int num_ops = 0;
     unsigned int num_failed_pops = 0;
 #ifdef USE_PAPI
-    long long cache_accesses;
+    long long cache_stats[2];
 #endif
 };
 
@@ -122,7 +124,13 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
         std::abort();
     }
     if (int ret = PAPI_add_event(event_set, PAPI_L1_DCA); ret != PAPI_OK) {
-        ctx.write(std::cerr) << "Failed to add PAPI_L1_DCA to event set";
+        ctx.write(std::cerr) << "Failed to count cache accesses\n";
+        std::abort();
+    }
+    if (int ret =
+            PAPI_add_named_event(event_set, "perf::L1-DCACHE-LOAD-MISSES");
+        ret != PAPI_OK) {
+        ctx.write(std::cerr) << "Failed to count cache misses\n";
         std::abort();
     }
     if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
@@ -134,6 +142,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
         duration, keys, keys + settings.num_threads * settings.num_operations,
         [&, id = ctx.get_id()](key_type* begin, key_type* end) {
             for (auto it = begin; it != end; ++it) {
+#ifndef NULL_WORK
                 if (*it == PopOp) {
                     PriorityQueue::value_type retval;
                     // Let retval escape
@@ -146,12 +155,19 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
                 } else {
                     handle.push({*it, *it});
                 }
+#else
+                key_type key;
+                // Let retval escape
+                asm volatile("" ::"g"(&key));
+                key = *it;
+                // "Use" memory to force write to retval
+                asm volatile("" ::: "memory");
+#endif
             }
             thread_data[id].num_ops += static_cast<unsigned int>(end - begin);
         });
 #ifdef USE_PAPI
-    if (int ret =
-            PAPI_stop(event_set, &thread_data[ctx.get_id()].cache_accesses);
+    if (int ret = PAPI_stop(event_set, thread_data[ctx.get_id()].cache_stats);
         ret != PAPI_OK) {
         ctx.write(std::cerr) << "Failed to stop counters\n";
         std::abort();
@@ -287,6 +303,28 @@ int main(int argc, char* argv[]) {
               << "Seed: " << settings.seed;
     std::clog << "\n\n";
 
+#ifdef USE_PAPI
+    if (int ret = PAPI_library_init(PAPI_VER_CURRENT);
+        ret != PAPI_VER_CURRENT) {
+        std::cerr << "Error initializing PAPI\n";
+        return 1;
+    }
+    if (int ret = PAPI_thread_init((unsigned long (*)(void))(pthread_self));
+        ret != PAPI_OK) {
+        std::cerr << "Error initializing threads for PAPI\n";
+        return 1;
+    }
+    if (int ret = PAPI_query_event(PAPI_L1_DCA); ret != PAPI_OK) {
+        std::cerr << "Cannot measure cache accesses\n";
+        return 1;
+    }
+    if (int ret = PAPI_query_named_event("perf::L1-DCACHE-LOAD-MISSES");
+        ret != PAPI_OK) {
+        std::cerr << "Cannot measure cache misses\n";
+        return 1;
+    }
+#endif
+
     xoroshiro256starstar rng(settings.seed);
 
     settings.pq_config.seed = rng();
@@ -313,23 +351,6 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-#ifdef USE_PAPI
-    if (int ret = PAPI_library_init(PAPI_VER_CURRENT);
-        ret != PAPI_VER_CURRENT) {
-        std::cerr << "Error initializing PAPI\n";
-        return 1;
-    }
-    if (int ret = PAPI_thread_init((unsigned long (*)(void))(pthread_self));
-        ret != PAPI_OK) {
-        std::cerr << "Error initializing threads for PAPI\n";
-        return 1;
-    }
-    if (int ret = PAPI_query_event(PAPI_L1_DCA); ret != PAPI_OK) {
-        std::cerr << "PAPI_L1_DCA not available\n";
-        return 1;
-    }
-#endif
-
     std::clog << "Prefilling... " << std::flush;
     std::chrono::steady_clock::duration prefill_duration;
     std::chrono::steady_clock::duration work_duration;
@@ -349,12 +370,16 @@ int main(int argc, char* argv[]) {
                                 return lhs.num_ops < rhs.num_ops;
                             });
 #ifdef USE_PAPI
-    auto avg_cache_accesses = std::accumulate(
-        thread_data, thread_data + settings.num_threads, .0,
-        [](double avg, auto const& data) {
-            return avg + static_cast<double>(data.cache_accesses) /
-                             static_cast<double>(settings.num_threads *
-                                                 settings.num_operations);
+    auto avg_cache_stats = std::accumulate(
+        thread_data, thread_data + settings.num_threads,
+        std::pair<double, double>{.0, .0}, [](auto avg, auto const& data) {
+            return std::pair<double, double>{
+                avg.first + static_cast<double>(data.cache_stats[0]) /
+                                static_cast<double>(settings.num_threads *
+                                                    settings.num_operations),
+                avg.second + static_cast<double>(data.cache_stats[1]) /
+                                 static_cast<double>(settings.num_threads *
+                                                     settings.num_operations)};
         });
 #endif
     std::clog << "Most operations: " << max_thread->num_ops << '\n';
@@ -371,14 +396,15 @@ int main(int argc, char* argv[]) {
                      std::chrono::duration<double>(work_duration).count()
               << '\n';
 #ifdef USE_PAPI
-    std::clog << "Cache accesses per op: " << avg_cache_accesses << '\n';
+    std::clog << "Cache accesses/misses per op: " << avg_cache_stats.first
+              << '/' << avg_cache_stats.second << '\n';
 #endif
 
     std::cout << "prefill,ops_per_thread,threads,pop_prob,min_key,max_key,"
                  "seed,min_ops,max_ops,failed_pops,prefill_time,work_time,"
                  "throughput"
 #ifdef USE_PAPI
-              << ",cache_accesses_per_op"
+              << ",cache_accesses_per_op,cache_misses_per_op"
 #endif
               << '\n';
     std::cout << settings.prefill_size << ',' << settings.num_operations << ','
@@ -395,7 +421,9 @@ int main(int argc, char* argv[]) {
                                      settings.num_operations) /
                      std::chrono::duration<double>(work_duration).count()
 #ifdef USE_PAPI
-              << ',' << std::fixed << std::setprecision(2) << avg_cache_accesses
+              << ',' << std::fixed << std::setprecision(2)
+              << avg_cache_stats.first << ',' << std::fixed
+              << std::setprecision(2) << avg_cache_stats.second
 #endif
               << std::endl;
 
