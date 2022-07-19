@@ -6,8 +6,8 @@
 
 #include <pthread.h>
 
-#include <chrono>
 #include <atomic>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <mutex>
@@ -105,17 +105,18 @@ class Context {
 
     template <typename Iter, typename Work>
     void execute_synchronized_blockwise(Iter begin, Iter end, Work work) {
-        static constexpr std::ptrdiff_t block_size = 4096;
+        static constexpr std::size_t block_size = 1 << 12;
 
+        auto n = static_cast<std::size_t>(end - begin);
         shared_data_.barrier.wait();
-        Iter block_begin = begin + shared_data_.index.fetch_add(
-                                       block_size, std::memory_order_relaxed);
-        while (block_begin < end) {
-            Iter block_end =
-                block_begin + block_size < end ? block_begin + block_size : end;
-            work(block_begin, block_end);
-            block_begin = begin + shared_data_.index.fetch_add(
-                                      block_size, std::memory_order_relaxed);
+        while (true) {
+            std::size_t block_begin = shared_data_.index.fetch_add(
+                block_size, std::memory_order_relaxed);
+            if (block_begin >= n) {
+                break;
+            }
+            std::size_t block_end = std::min(block_begin + block_size, n);
+            work(begin + block_begin, begin + block_end);
         }
         shared_data_.barrier.wait(
             [this] { shared_data_.index.store(0, std::memory_order_relaxed); });
@@ -125,19 +126,20 @@ class Context {
     void execute_synchronized_blockwise_timed(
         std::chrono::steady_clock::duration& duration, Iter begin, Iter end,
         Work work) {
-        static constexpr std::ptrdiff_t block_size = 4096;
+        static constexpr std::ptrdiff_t block_size = 1 << 12;
 
+        auto n = static_cast<std::size_t>(end - begin);
         shared_data_.barrier.wait([this] {
             shared_data_.timestamp = std::chrono::steady_clock::now();
         });
-        Iter block_begin = begin + shared_data_.index.fetch_add(
-                                       block_size, std::memory_order_relaxed);
-        while (block_begin < end) {
-            Iter block_end =
-                block_begin + block_size < end ? block_begin + block_size : end;
-            work(block_begin, block_end);
-            block_begin = begin + shared_data_.index.fetch_add(
-                                      block_size, std::memory_order_relaxed);
+        while (true) {
+            std::size_t block_begin = shared_data_.index.fetch_add(
+                block_size, std::memory_order_relaxed);
+            if (block_begin >= n) {
+                break;
+            }
+            std::size_t block_end = std::min(block_begin + block_size, n);
+            work(begin + block_begin, begin + block_end);
         }
         shared_data_.barrier.wait([this, &duration] {
             duration =

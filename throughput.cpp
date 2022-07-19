@@ -51,42 +51,49 @@ struct Settings {
     double pop_prob = 0.5;
 };
 
-struct alignas(L1_CACHE_LINESIZE) ThreadData {
+struct ThreadData {
     xoroshiro256starstar rng;
+};
+
+struct alignas(2 * L1_CACHE_LINESIZE) WorkStats {
     unsigned int num_ops = 0;
     unsigned int num_failed_pops = 0;
 #ifdef USE_PAPI
-    long long cache_stats[2];
+    long long cache_accesses;
+    long long cache_misses;
 #endif
 };
 
 static Settings settings;
-alignas(L1_CACHE_LINESIZE) static ThreadData* thread_data;
+alignas(L1_CACHE_LINESIZE) static WorkStats* work_stats;
 alignas(L1_CACHE_LINESIZE) static key_type* prefill_keys;
 alignas(L1_CACHE_LINESIZE) static key_type* keys;
+static std::chrono::steady_clock::duration prefill_time;
+static std::chrono::steady_clock::duration work_time;
 
-void generate_prefill_keys(thread_coordination::Context& ctx) {
-    auto dist = std::uniform_int_distribution<key_type>(settings.min_key,
-                                                        settings.max_key);
+template <typename Generator>
+void generate_prefill_keys(thread_coordination::Context& ctx, Generator& g) {
     ctx.execute_synchronized_blockwise(
         prefill_keys, prefill_keys + settings.prefill_size,
-        [id = ctx.get_id(), &dist](key_type* begin, key_type* end) {
-            std::generate(begin, end,
-                          [id, &dist]() { return dist(thread_data[id].rng); });
+        [&g](key_type* begin, key_type* end) {
+            std::generate(begin, end, [&g]() {
+                auto key_dist = std::uniform_int_distribution<key_type>(
+                    settings.min_key, settings.max_key);
+                return key_dist(g);
+            });
         });
 }
 
-void generate_keys(thread_coordination::Context& ctx) {
-    auto dist = std::uniform_int_distribution<key_type>(settings.min_key,
-                                                        settings.max_key);
-    auto pop_dist = std::uniform_real_distribution<>();
+template <typename Generator>
+void generate_keys(thread_coordination::Context& ctx, Generator& g) {
     ctx.execute_synchronized_blockwise(
         keys, keys + settings.num_threads * settings.num_operations,
-        [id = ctx.get_id(), &dist, &pop_dist](key_type* begin, key_type* end) {
-            std::generate(begin, end, [id, &dist, &pop_dist]() {
-                return pop_dist(thread_data[id].rng) < settings.pop_prob
-                           ? PopOp
-                           : dist(thread_data[id].rng);
+        [&g](key_type* begin, key_type* end) {
+            std::generate(begin, end, [&g]() {
+                auto key_dist = std::uniform_int_distribution<key_type>(
+                    settings.min_key, settings.max_key);
+                auto pop_dist = std::uniform_real_distribution<>();
+                return pop_dist(g) < settings.pop_prob ? PopOp : key_dist(g);
             });
         });
 }
@@ -99,20 +106,18 @@ bool check_operations() {
            pop_ops;
 }
 
-void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
-             std::chrono::steady_clock::duration& duration) {
+void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
     ctx.execute_synchronized_blockwise_timed(
-        duration, prefill_keys, prefill_keys + settings.prefill_size,
-        [&handle, id = ctx.get_id()](key_type* begin, key_type* end) {
+        prefill_time, prefill_keys, prefill_keys + settings.prefill_size,
+        [&handle](key_type* begin, key_type* end) {
             for (auto it = begin; it != end; ++it) {
-                assert(*it < PopOp);
+                assert(*it != PopOp);
                 handle.push({*it, *it});
             };
         });
 }
 
-void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
-          std::chrono::steady_clock::duration& duration) {
+void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
 #ifdef USE_PAPI
     if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
         ctx.write(std::cerr) << "Failed to register thread to PAPI\n";
@@ -138,9 +143,11 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
         std::abort();
     }
 #endif
+    unsigned int num_ops = 0;
+    unsigned int num_failed_pops = 0;
     ctx.execute_synchronized_blockwise_timed(
-        duration, keys, keys + settings.num_threads * settings.num_operations,
-        [&, id = ctx.get_id()](key_type* begin, key_type* end) {
+        work_time, keys, keys + settings.num_threads * settings.num_operations,
+        [&handle, &num_ops, &num_failed_pops](key_type* begin, key_type* end) {
             for (auto it = begin; it != end; ++it) {
 #ifndef NULL_WORK
                 if (*it == PopOp) {
@@ -148,7 +155,7 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
                     // Let retval escape
                     asm volatile("" ::"g"(&retval));
                     while (!handle.try_pop(retval)) {
-                        ++thread_data[id].num_failed_pops;
+                        ++num_failed_pops;
                     }
                     // "Use" memory to force write to retval
                     asm volatile("" ::: "memory");
@@ -164,21 +171,28 @@ void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle,
                 asm volatile("" ::: "memory");
 #endif
             }
-            thread_data[id].num_ops += static_cast<unsigned int>(end - begin);
+            num_ops += static_cast<unsigned int>(end - begin);
         });
 #ifdef USE_PAPI
-    if (int ret = PAPI_stop(event_set, thread_data[ctx.get_id()].cache_stats);
-        ret != PAPI_OK) {
-        ctx.write(std::cerr) << "Failed to stop counters\n";
-        std::abort();
+    {
+        long long values[2];
+        if (int ret = PAPI_stop(event_set, values); ret != PAPI_OK) {
+            ctx.write(std::cerr) << "Failed to stop counters\n";
+            std::abort();
+        }
+        work_stats[ctx.get_id()].cache_accesses = values[0];
+        work_stats[ctx.get_id()].cache_misses = values[1];
     }
 #endif
+    work_stats[ctx.get_id()].num_ops = num_ops;
+    work_stats[ctx.get_id()].num_failed_pops = num_failed_pops;
 }
 
 struct GenerateTask {
-    static void run(thread_coordination::Context ctx) {
-        generate_prefill_keys(ctx);
-        generate_keys(ctx);
+    static void run(thread_coordination::Context ctx, std::uint64_t* seeds) {
+        xoroshiro256starstar rng(seeds[ctx.get_id()]);
+        generate_prefill_keys(ctx, rng);
+        generate_keys(ctx, rng);
     }
 
     static threading::thread_config get_config(unsigned int id) {
@@ -190,17 +204,15 @@ struct GenerateTask {
 };
 
 struct WorkTask {
-    static void run(thread_coordination::Context ctx, PriorityQueue& pq,
-                    std::chrono::steady_clock::duration& prefill_duration,
-                    std::chrono::steady_clock::duration& work_duration) {
+    static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
         PriorityQueue::Handle handle = pq.get_handle();
 
-        prefill(ctx, handle, prefill_duration);
+        prefill(ctx, handle);
 
         if (ctx.get_id() == 0) {
             std::clog << "done\nWorking..." << std::flush;
         }
-        work(ctx, handle, work_duration);
+        work(ctx, handle);
     }
 
     static threading::thread_config get_config(unsigned int id) {
@@ -331,10 +343,7 @@ int main(int argc, char* argv[]) {
     auto pq = util::PriorityQueueFactory<key_type, value_type, true>::create(
         settings.num_threads, settings.pq_config);
 
-    thread_data = ::new ThreadData[settings.num_threads];
-    for (std::size_t i = 0; i < settings.num_threads; ++i) {
-        thread_data[i].rng.seed(rng());
-    }
+    work_stats = ::new WorkStats[settings.num_threads];
 
     prefill_keys = ::new (std::align_val_t{L1_CACHE_LINESIZE})
         key_type[settings.prefill_size];
@@ -342,7 +351,15 @@ int main(int argc, char* argv[]) {
     keys = ::new (std::align_val_t{L1_CACHE_LINESIZE})
         key_type[settings.num_threads * settings.num_operations];
     std::clog << "Generating keys..." << std::flush;
-    thread_coordination::run_task<GenerateTask>(settings.num_threads);
+    {
+        auto thread_seeds =
+            std::make_unique<std::uint64_t[]>(settings.num_threads);
+        for (std::size_t i = 0; i < settings.num_threads; ++i) {
+            thread_seeds[i] = rng();
+        }
+        thread_coordination::run_task<GenerateTask>(settings.num_threads,
+                                                    thread_seeds.get());
+    }
     std::clog << "done\n";
 
     if (!check_operations()) {
@@ -352,52 +369,49 @@ int main(int argc, char* argv[]) {
     }
 
     std::clog << "Prefilling... " << std::flush;
-    std::chrono::steady_clock::duration prefill_duration;
-    std::chrono::steady_clock::duration work_duration;
-    thread_coordination::run_task<WorkTask>(settings.num_threads, std::ref(pq),
-                                            std::ref(prefill_duration),
-                                            std::ref(work_duration));
+    thread_coordination::run_task<WorkTask>(settings.num_threads, std::ref(pq));
     std::clog << "done\n\n";
 
     unsigned int total_failed_pops =
-        std::accumulate(thread_data, thread_data + settings.num_threads, 0u,
-                        [](unsigned int sum, auto const& data) {
-                            return sum + data.num_failed_pops;
+        std::accumulate(work_stats, work_stats + settings.num_threads, 0u,
+                        [](unsigned int sum, auto const& s) {
+                            return sum + s.num_failed_pops;
                         });
     auto [min_thread, max_thread] =
-        std::minmax_element(thread_data, thread_data + settings.num_threads,
+        std::minmax_element(work_stats, work_stats + settings.num_threads,
                             [](auto const& lhs, auto const& rhs) {
                                 return lhs.num_ops < rhs.num_ops;
                             });
 #ifdef USE_PAPI
-    auto avg_cache_stats = std::accumulate(
-        thread_data, thread_data + settings.num_threads,
-        std::pair<double, double>{.0, .0}, [](auto avg, auto const& data) {
-            return std::pair<double, double>{
-                avg.first + static_cast<double>(data.cache_stats[0]) /
-                                static_cast<double>(settings.num_threads *
-                                                    settings.num_operations),
-                avg.second + static_cast<double>(data.cache_stats[1]) /
-                                 static_cast<double>(settings.num_threads *
-                                                     settings.num_operations)};
+    auto avg_cache_accesses = std::accumulate(
+        work_stats, work_stats + settings.num_threads, .0,
+        [](auto avg, auto const& s) {
+            return avg + static_cast<double>(s.cache_accesses) /
+                             static_cast<double>(settings.num_threads *
+                                                 settings.num_operations);
+        });
+    auto avg_cache_misses = std::accumulate(
+        work_stats, work_stats + settings.num_threads, .0,
+        [](auto avg, auto const& s) {
+            return avg + static_cast<double>(s.cache_misses) /
+                             static_cast<double>(settings.num_threads *
+                                                 settings.num_operations);
         });
 #endif
     std::clog << "Most operations: " << max_thread->num_ops << '\n';
     std::clog << "Least operations: " << min_thread->num_ops << '\n';
     std::clog << "Failed pops: " << total_failed_pops << '\n';
     std::clog << "Prefill time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(prefill_duration).count()
-              << '\n';
+              << std::chrono::duration<double>(prefill_time).count() << '\n';
     std::clog << "Work time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(work_duration).count() << '\n';
+              << std::chrono::duration<double>(work_time).count() << '\n';
     std::clog << "Throughput per thread: " << std::fixed << std::setprecision(2)
-              << static_cast<double>(settings.num_threads *
-                                     settings.num_operations) /
-                     std::chrono::duration<double>(work_duration).count()
+              << static_cast<double>(settings.num_operations) /
+                     std::chrono::duration<double>(work_time).count()
               << '\n';
 #ifdef USE_PAPI
-    std::clog << "Cache accesses/misses per op: " << avg_cache_stats.first
-              << '/' << avg_cache_stats.second << '\n';
+    std::clog << "Cache accesses/misses per op: " << avg_cache_accesses << '/'
+              << avg_cache_misses << '\n';
 #endif
 
     std::cout << "prefill,ops_per_thread,threads,pop_prob,min_key,max_key,"
@@ -413,13 +427,12 @@ int main(int argc, char* argv[]) {
               << settings.seed << ',' << min_thread->num_ops << ','
               << max_thread->num_ops << ',' << total_failed_pops << ','
               << std::fixed << std::setprecision(2)
-              << std::chrono::duration<double>(prefill_duration).count() << ','
+              << std::chrono::duration<double>(prefill_time).count() << ','
               << std::fixed << std::setprecision(2)
-              << std::chrono::duration<double>(work_duration).count() << ','
+              << std::chrono::duration<double>(work_time).count() << ','
               << std::fixed << std::setprecision(2)
-              << static_cast<double>(settings.num_threads *
-                                     settings.num_operations) /
-                     std::chrono::duration<double>(work_duration).count()
+              << static_cast<double>(settings.num_operations) /
+                     std::chrono::duration<double>(work_time).count()
 #ifdef USE_PAPI
               << ',' << std::fixed << std::setprecision(2)
               << avg_cache_stats.first << ',' << std::fixed
@@ -429,6 +442,6 @@ int main(int argc, char* argv[]) {
 
     ::operator delete[](keys, std::align_val_t{L1_CACHE_LINESIZE});
     ::operator delete[](prefill_keys, std::align_val_t{L1_CACHE_LINESIZE});
-    delete[] thread_data;
+    delete[] work_stats;
     return 0;
 }
