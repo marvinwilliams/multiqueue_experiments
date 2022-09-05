@@ -36,7 +36,10 @@ class Spraylist {
         bool try_pop(value_type& retval);
     };
 
-    static constexpr key_type min_valid_key = std::numeric_limits<key_type>::min();
+    using handle_type = Handle;
+
+    static constexpr key_type min_valid_key =
+        std::numeric_limits<key_type>::min();
     // Use INT_MAX_32
     static constexpr key_type max_valid_key =
         std::numeric_limits<std::uint32_t>::max() - 1ul;

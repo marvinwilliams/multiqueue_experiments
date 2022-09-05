@@ -4,8 +4,8 @@
 
 // Adapted from klsm
 
-#include <algorithm>
 #include <stdio.h>
+#include <algorithm>
 
 #include "k_lsm/k_lsm.h"
 
@@ -41,12 +41,13 @@ class Klsm {
         }
     };
 
+    using handle_type = Handle;
+
    private:
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    Klsm(unsigned int /* num_threads */)
-        : pq_(new pq_type) {}
+    Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {}
 
     Handle get_handle() { return Handle{pq_.get()}; }
 

@@ -37,6 +37,7 @@ using value_type = unsigned long;
 
 using PriorityQueue =
     typename util::PriorityQueueFactory<key_type, value_type, true>::type;
+using Handle = typename PriorityQueue::handle_type;
 static constexpr key_type PopOp =
     static_cast<value_type>(std::numeric_limits<std::uint32_t>::max());
 
@@ -106,18 +107,21 @@ bool check_operations() {
            pop_ops;
 }
 
-void prefill(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
-    ctx.execute_synchronized_blockwise_timed(
-        prefill_time, prefill_keys, prefill_keys + settings.prefill_size,
+void prefill(thread_coordination::Context& ctx, Handle& handle) {
+    std::size_t num_prefill_per_thread =
+        settings.prefill_size / settings.num_threads;
+    ctx.execute_synchronized_timed(
+        prefill_time,
         [&handle](key_type* begin, key_type* end) {
             for (auto it = begin; it != end; ++it) {
-                assert(*it != PopOp);
                 handle.push({*it, *it});
-            };
-        });
+            }
+        },
+        prefill_keys + ctx.get_id() * num_prefill_per_thread,
+        prefill_keys + (ctx.get_id() + 1) * num_prefill_per_thread);
 }
 
-void work(thread_coordination::Context& ctx, PriorityQueue::Handle& handle) {
+void work(thread_coordination::Context& ctx, Handle& handle) {
 #ifdef USE_PAPI
     if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
         ctx.write(std::cerr) << "Failed to register thread to PAPI\n";
@@ -205,7 +209,7 @@ struct GenerateTask {
 
 struct WorkTask {
     static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
-        PriorityQueue::Handle handle = pq.get_handle();
+        Handle handle = pq.get_handle();
 
         prefill(ctx, handle);
 

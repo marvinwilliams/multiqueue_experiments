@@ -12,8 +12,10 @@
 #define UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 
 #if defined PQ_MQ
+#include "multiqueue_build_config.hpp"
 #include "multiqueue/multiqueue.hpp"
 #elif defined PQ_MF
+#include "multiqueue/multiqueue_build_config.hpp"
 #include "multififo/multififo.hpp"
 #elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
@@ -65,7 +67,7 @@ static constexpr bool has_config_v = has_config<PriorityQueue>::value;
 template <typename KeyType, typename ValueType, bool Min = true>
 struct PriorityQueueFactoryBase {
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_KLSM256
@@ -84,7 +86,7 @@ struct PriorityQueueFactoryBase {
 template <typename KeyType, typename ValueType>
 struct PriorityQueueFactoryBase<KeyType, ValueType, false> {
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -99,7 +101,7 @@ struct PriorityQueueFactoryBase<unsigned long, unsigned long, true> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ
@@ -126,7 +128,7 @@ struct PriorityQueueFactoryBase<unsigned long, unsigned long, false> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -155,7 +157,7 @@ struct PriorityQueueFactory
             }
 #ifdef MQ_HAS_STICKINESS
             if (params.stickiness) {
-                config.stick_policy_config.stickiness = *params.stickiness;
+                config.stickiness = *params.stickiness;
             }
 #endif
             return type(num_threads, config);

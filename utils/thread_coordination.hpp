@@ -105,7 +105,7 @@ class Context {
 
     template <typename Iter, typename Work>
     void execute_synchronized_blockwise(Iter begin, Iter end, Work work) {
-        static constexpr std::size_t block_size = 1 << 12;
+        static constexpr std::size_t block_size = 1 << 8;
 
         auto n = static_cast<std::size_t>(end - begin);
         shared_data_.barrier.wait();
@@ -126,7 +126,7 @@ class Context {
     void execute_synchronized_blockwise_timed(
         std::chrono::steady_clock::duration& duration, Iter begin, Iter end,
         Work work) {
-        static constexpr std::ptrdiff_t block_size = 1 << 12;
+        static constexpr std::size_t block_size = 1 << 8;
 
         auto n = static_cast<std::size_t>(end - begin);
         shared_data_.barrier.wait([this] {
@@ -146,6 +146,28 @@ class Context {
                 std::chrono::steady_clock::now() - shared_data_.timestamp;
             shared_data_.index.store(0, std::memory_order_relaxed);
         });
+    }
+};
+
+struct TaskHandle {
+    detail::SharedData shared_data;
+    std::vector<threading::pthread> threads;
+    unsigned int num_threads;
+    explicit TaskHandle(unsigned int n)
+        : shared_data(n), num_threads{n} {}
+
+    template <typename Task, typename... Args>
+    void run_task(Args const&... args) {
+        threads.clear();
+        for (unsigned int i = 0; i < num_threads; ++i) {
+            Context ctx{shared_data, num_threads, i};
+            threads.emplace_back(Task::get_config(i), Task::run, ctx, args...);
+        }
+    }
+    void join() {
+        for (auto& t : threads) {
+            t.join();
+        }
     }
 };
 

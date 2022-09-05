@@ -36,6 +36,8 @@ class Capq {
     bool try_pop(value_type& retval);
   };
 
+  using handle_type = Handle;
+
   static constexpr key_type min_valid_key =
       std::numeric_limits<key_type>::min();
   static constexpr key_type max_valid_key =
