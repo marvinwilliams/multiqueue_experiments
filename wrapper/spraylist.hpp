@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <limits>
 #include <memory>
-#include <string>
+#include <ostream>
 #include <utility>
 
 typedef struct sl_intset sl_intset_t;
@@ -60,7 +60,10 @@ class Spraylist {
     void push(value_type const& value);
     bool try_pop(value_type& retval);
 
-    static std::string description() { return "spraylist"; }
+    static std::ostream& describe(std::ostream& out) {
+        out << "spraylist\n";
+        return out;
+    }
 };
 
 }  // namespace wrapper

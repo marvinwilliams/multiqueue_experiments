@@ -4,15 +4,13 @@
 
 // Adapted from klsm
 
-#include <stdio.h>
-#include <algorithm>
-
 #include "k_lsm/k_lsm.h"
 
+#include <stdio.h>
+#include <algorithm>
 #include <limits>
 #include <memory>
-#include <sstream>
-#include <string>
+#include <ostream>
 #include <utility>
 
 namespace wrapper {
@@ -58,11 +56,10 @@ class Klsm {
         return pq_->delete_min(retval.first, retval.second);
     }
 
-    static std::string description() {
-        std::stringstream ss;
-        ss << "klsm\n";
-        ss << "Relaxation: " << Relaxation;
-        return ss.str();
+    static std::ostream& describe(std::ostream& out) {
+        out << "klsm\n";
+        out << "Relaxation: " << Relaxation << '\n';
+        return out;
     }
 };
 

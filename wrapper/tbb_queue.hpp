@@ -4,7 +4,7 @@
 
 #include <tbb/concurrent_queue.h>
 
-#include <string>
+#include <ostream>
 #include <utility>
 
 namespace wrapper {
@@ -46,7 +46,10 @@ class TBBQueue {
     void push(value_type const& value) { pq_.push(value); }
     bool try_pop(value_type& retval) { return pq_.try_pop(retval); }
 
-    static std::string description() { return "TBBQueue"; }
+    static std::ostream& describe(std::ostream& out) {
+        out << "TBBQueue\n";
+        return out;
+    }
 };
 
 }  // namespace wrapper

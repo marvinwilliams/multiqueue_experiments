@@ -8,14 +8,14 @@
 *******************************************************************************
 **/
 #pragma once
-#ifndef UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
-#define UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED
 
 #if defined PQ_MQ
-#include "multiqueue_build_config.hpp"
+#include "multiqueue/buffered_pq.hpp"
+#include "multiqueue/config.hpp"
+#include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue.hpp"
+#include "multiqueue/stick_policy.hpp"
 #elif defined PQ_MF
-#include "multiqueue/multiqueue_build_config.hpp"
 #include "multififo/multififo.hpp"
 #elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
@@ -33,11 +33,12 @@
 #error No valid PQ specified
 #endif
 
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
-#include <sstream>
-#include <string>
+#include <ostream>
+#include <queue>
 #include <type_traits>
 #include <utility>
 
@@ -45,29 +46,69 @@ namespace util {
 
 struct PriorityQueueConfig {
     std::optional<std::uint64_t> seed;
-    std::optional<std::size_t> c;
-#ifdef MQ_HAS_STICKINESS
+    std::optional<unsigned int> c;
     std::optional<unsigned int> stickiness;
-#endif
 };
 
 namespace detail {
 
-template <typename PriorityQueue, typename = void>
-struct has_config : std::false_type {};
+#if defined PQ_MQ
+static constexpr ::multiqueue::StickPolicy stick_policy =
+#ifdef MQ_STICK_POLICY_NONE
+    multiqueue::StickPolicy::None
+#elif defined MQ_STICK_POLICY_RANDOM
+    multiqueue::StickPolicy::Random
+#elif defined MQ_STICK_POLICY_RANDOM_STRICT
+    multiqueue::StickPolicy::RandomStrict
+#elif defined MQ_STICK_POLICY_SWAPPING
+    multiqueue::StickPolicy::Swapping
+#elif defined MQ_STICK_POLICY_PERMUTATION
+    multiqueue::StickPolicy::Permutation
+#else
+    multiqueue::StickPolicy::None
+#endif
+    ;
 
-template <typename PriorityQueue>
-struct has_config<PriorityQueue,
-                  std::void_t<typename PriorityQueue::config_type>>
-    : std::true_type {};
-
-template <typename PriorityQueue>
-static constexpr bool has_config_v = has_config<PriorityQueue>::value;
+template <typename T, typename Compare>
+using InnerPriorityQueue =
+#ifndef MQ_DISABLE_BUFFERING
+    multiqueue::BufferedPQ<
+#ifdef MQ_INSERTION_BUFFERSIZE
+        MQ_INSERTION_BUFFERSIZE
+#else
+        64
+#endif
+        ,
+#ifdef MQ_DELETION_BUFFERSIZE
+        MQ_DELETION_BUFFERSIZE
+#else
+        64
+#endif
+        ,
+#endif
+#ifdef MQ_PQ_STD
+        std::priority_queue<T, std::vector<T>, Compare>
+#else
+    multiqueue::Heap<T, Compare,
+#ifdef MQ_HEAP_ARITY
+                     MQ_HEAP_ARITY
+#else
+                     8
+#endif
+                     >
+#endif
+#ifndef MQ_DISABLE_BUFFERING
+        >
+#endif
+    ;
+#endif
 
 template <typename KeyType, typename ValueType, bool Min = true>
-struct PriorityQueueFactoryBase {
+struct PriorityQueueTypeFactory {
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, InnerPriorityQueue>;
+    using type =
+        multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>,
+                               stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_KLSM256
@@ -84,9 +125,10 @@ struct PriorityQueueFactoryBase {
 };
 
 template <typename KeyType, typename ValueType>
-struct PriorityQueueFactoryBase<KeyType, ValueType, false> {
+struct PriorityQueueTypeFactory<KeyType, ValueType, false> {
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>,
+                                        stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -97,11 +139,13 @@ struct PriorityQueueFactoryBase<KeyType, ValueType, false> {
 };
 
 template <>
-struct PriorityQueueFactoryBase<unsigned long, unsigned long, true> {
+struct PriorityQueueTypeFactory<unsigned long, unsigned long, true> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, InnerPriorityQueue>;
+    using type =
+        multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>,
+                               stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ
@@ -124,11 +168,12 @@ struct PriorityQueueFactoryBase<unsigned long, unsigned long, true> {
 };
 
 template <>
-struct PriorityQueueFactoryBase<unsigned long, unsigned long, false> {
+struct PriorityQueueTypeFactory<unsigned long, unsigned long, false> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>,
+                                        stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -138,35 +183,70 @@ struct PriorityQueueFactoryBase<unsigned long, unsigned long, false> {
 #endif
 };
 
+template <typename T>
+struct DescribeType {};
+
+template <typename T, typename Container, typename Compare>
+std::ostream &describe_type(
+    std::ostream &out,
+    DescribeType<std::priority_queue<T, Container, Compare>>) {
+    out << "std::priority_queue\n";
+    return out;
+}
+
+template <std::size_t I, std::size_t D, typename PQ>
+std::ostream &describe_type(std::ostream &out,
+                            DescribeType<multiqueue::BufferedPQ<I, D, PQ>>) {
+    out << "Buffered PQ\n";
+    out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
+    out << "Inner PQ type: ";
+    describe_type(out, DescribeType<PQ>{});
+    return out;
+}
+
+template <typename T, typename Compare, unsigned int Degree, typename Container>
+std::ostream &describe_type(
+    std::ostream &out,
+    DescribeType<multiqueue::Heap<T, Compare, Degree, Container>>) {
+    out << "Heap\n";
+    out << "Degree: " << Degree << '\n';
+    return out;
+}
+
 }  // namespace detail
 
 template <typename KeyType, typename ValueType, bool Min>
-struct PriorityQueueFactory
-    : detail::PriorityQueueFactoryBase<KeyType, ValueType, Min> {
-    using type =
-        typename detail::PriorityQueueFactoryBase<KeyType, ValueType, Min>::type;
+struct PriorityQueueFactory {
+    using type = typename detail::PriorityQueueTypeFactory<KeyType, ValueType,
+                                                           Min>::type;
     static type create(unsigned int num_threads,
-                       PriorityQueueConfig const& params = {}) {
-        if constexpr (detail::has_config_v<type>) {
-            typename type::config_type config{};
-            if (params.seed) {
-                config.seed = *params.seed;
-            }
-            if (params.c) {
-                config.c = *params.c;
-            }
-#ifdef MQ_HAS_STICKINESS
-            if (params.stickiness) {
-                config.stickiness = *params.stickiness;
-            }
-#endif
-            return type(num_threads, config);
-        } else {
-            return type(num_threads);
+                       PriorityQueueConfig const &params = {}) {
+#ifdef PQ_MQ
+        multiqueue::Config config{};
+        if (params.seed) {
+            config.seed = *params.seed;
         }
+        if (params.c) {
+            config.c = *params.c;
+        }
+        if (params.stickiness) {
+            config.stickiness = *params.stickiness;
+        }
+        return type(num_threads, config);
+#else
+        return type(num_threads);
+#endif
+    }
+
+    static std::ostream &describe(std::ostream &out, type const &pq) {
+        pq.describe(out);
+#ifdef PQ_MQ
+        out << "Inner pq: ";
+        detail::describe_type(
+            out, detail::DescribeType<typename type::inner_pq_type>{});
+#endif
+        return out;
     }
 };
 
 }  // namespace util
-
-#endif  //! UTILS_PRIORITY_QUEUE_FACTORY_HPP_INCLUDED

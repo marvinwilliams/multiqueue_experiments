@@ -6,7 +6,7 @@
 
 #include <limits>
 #include <memory>
-#include <string>
+#include <ostream>
 #include <utility>
 
 struct linden_pq_t;
@@ -54,7 +54,10 @@ class Linden {
     void push(value_type const& value);
     bool try_pop(value_type& retval);
 
-    static std::string description() { return "linden"; }
+    static std::ostream& describe(std::ostream& out) {
+        out << "linden\n";
+        return out;
+    }
 };
 
 }  // namespace wrapper

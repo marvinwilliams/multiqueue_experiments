@@ -4,7 +4,7 @@
 
 #include <tbb/concurrent_priority_queue.h>
 
-#include <string>
+#include <ostream>
 #include <utility>
 
 namespace wrapper {
@@ -43,7 +43,7 @@ class TBBPriorityQueue {
         bool try_pop(value_type& retval) { return pq_->try_pop(retval); }
     };
 
-  using handle_type = Handle;
+    using handle_type = Handle;
 
    private:
     pq_type pq_;
@@ -61,7 +61,10 @@ class TBBPriorityQueue {
     void push(value_type const& value) { pq_.push(value); }
     bool try_pop(value_type& retval) { return pq_.try_pop(retval); }
 
-    static std::string description() { return "TBBPriorityQueue"; }
+    static std::ostream& describe(std::ostream& out) {
+        out << "TBBPriorityQueue\n";
+        return out;
+    }
 };
 
 }  // namespace wrapper

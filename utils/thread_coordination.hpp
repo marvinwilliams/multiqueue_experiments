@@ -48,6 +48,7 @@ struct SharedData {
     utils::barrier barrier;
     alignas(L1_CACHE_LINESIZE) std::atomic_size_t index{0};
     std::chrono::steady_clock::time_point timestamp;
+    std::mutex mutex;
     std::mutex write_mutex;
 
     SharedData(unsigned int num_threads) : barrier{num_threads} {}
@@ -147,14 +148,19 @@ class Context {
             shared_data_.index.store(0, std::memory_order_relaxed);
         });
     }
+
+    template <typename Func>
+    auto execute_exclusive(Func f) {
+        std::scoped_lock l{shared_data_.mutex};
+        return f();
+    }
 };
 
 struct TaskHandle {
     detail::SharedData shared_data;
     std::vector<threading::pthread> threads;
     unsigned int num_threads;
-    explicit TaskHandle(unsigned int n)
-        : shared_data(n), num_threads{n} {}
+    explicit TaskHandle(unsigned int n) : shared_data(n), num_threads{n} {}
 
     template <typename Task, typename... Args>
     void run_task(Args const&... args) {
