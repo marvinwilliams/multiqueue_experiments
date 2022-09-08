@@ -252,8 +252,6 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
-    std::cout << std::numeric_limits<value_type>::digits << ' '
-              << sizeof(unsigned long) << '\n';
     std::cout << "Build config\n";
 #ifndef NDEBUG
     std::cout << "DEBUG: enabled\n";
@@ -356,7 +354,7 @@ int main(int argc, char* argv[]) {
               << "Operations: " << settings.num_operations << '\n'
               << "Threads: " << settings.num_threads << '\n'
               << "Sleep between operations: "
-              << settings.sleep_between_operations.count() << " us\n\t"
+              << settings.sleep_between_operations.count() << " us\n"
               << "Pop probability: " << std::fixed << settings.pop_prob << '\n'
               << "Min key: " << settings.min_key << '\n'
               << "Max key: " << settings.max_key << '\n'
@@ -441,16 +439,17 @@ int main(int argc, char* argv[]) {
             std::cerr << "Could not open file to write out results\n";
             return 1;
         }
-        out << "prefill,ops,threads,pop_prob,min_key,max_key,"
+        out << "prefill,ops,threads,sleep,pop_prob,min_key,max_key,"
                "seed,min_thread_ops,max_thread_ops,failed_pops,prefill_time,"
                "work_time"
             << '\n';
         out << settings.prefill_size << ',' << settings.num_operations << ','
-            << settings.num_threads << ',' << settings.pop_prob << ','
-            << settings.min_key << ',' << settings.max_key << ','
-            << settings.seed << ',' << min_thread->num_ops << ','
-            << max_thread->num_ops << ',' << total_failed_pops << ','
-            << std::fixed << std::setprecision(2)
+            << settings.num_threads << ','
+            << settings.sleep_between_operations.count() << ','
+            << settings.pop_prob << ',' << settings.min_key << ','
+            << settings.max_key << ',' << settings.seed << ','
+            << min_thread->num_ops << ',' << max_thread->num_ops << ','
+            << total_failed_pops << ',' << std::fixed << std::setprecision(2)
             << std::chrono::duration<double>(prefill_time).count() << ','
             << std::fixed << std::setprecision(2)
             << std::chrono::duration<double>(work_time).count() << std::endl;
