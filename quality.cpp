@@ -64,23 +64,21 @@ struct Settings {
     double pop_prob = 0.5;
 };
 
-static constexpr unsigned int bits_for_thread_id = 8;
-static constexpr value_type value_mask =
-    (static_cast<value_type>(1)
-     << (std::numeric_limits<value_type>::digits - bits_for_thread_id)) -
-    1;
+static constexpr unsigned int bits_for_value =
+    std::numeric_limits<value_type>::digits - 8;
+static constexpr value_type value_mask = (value_type{1} << bits_for_value) - 1;
 
 static constexpr value_type to_value(unsigned int thread_id,
                                      value_type elem_id) noexcept {
-    return (static_cast<value_type>(thread_id)
-            << (std::numeric_limits<value_type>::digits - bits_for_thread_id)) |
-           (elem_id & value_mask);
+    assert(static_cast<value_type>(thread_id) <
+           (value_type{1} << (std::numeric_limits<value_type>::digits -
+                              bits_for_value)));
+    assert(elem_id < (value_type{1} << bits_for_value));
+    return (value_type{thread_id} << (bits_for_value)) | (elem_id & value_mask);
 }
 
 static constexpr unsigned int get_thread_id(value_type value) noexcept {
-    return static_cast<unsigned int>(
-        value >>
-        (std::numeric_limits<value_type>::digits - bits_for_thread_id));
+    return static_cast<unsigned int>(value >> bits_for_value);
 }
 
 static constexpr value_type get_elem_id(value_type value) noexcept {
@@ -138,13 +136,12 @@ struct Task {
     static void generate_keys(thread_coordination::Context& ctx, Generator& g) {
         auto key_dist = std::uniform_int_distribution<key_type>(
             settings.min_key, settings.max_key);
-        auto pop_dist = std::uniform_real_distribution<>();
+        auto pop_dist = std::bernoulli_distribution(settings.pop_prob);
         ctx.execute_synchronized_blockwise(
             keys, keys + settings.num_operations,
             [&](key_type* begin, key_type* end) {
                 std::generate(begin, end, [&]() {
-                    return pop_dist(g) < settings.pop_prob ? PopOp
-                                                           : key_dist(g);
+                    return pop_dist(g) ? PopOp : key_dist(g);
                 });
             });
     }
@@ -155,7 +152,9 @@ struct Task {
             std::size_t prefill_by_thread =
                 settings.prefill_size / settings.num_threads;
             for (std::size_t i = 0; i < prefill_by_thread; ++i) {
-                handle.push({prefill_keys[id][i], prefill_keys[id][i]});
+                value_type value =
+                    to_value(id, thread_data[id].push_log.size());
+                handle.push({prefill_keys[id][i], value});
                 thread_data[id].push_log.push_back({0, prefill_keys[id][i]});
             }
         });
@@ -253,6 +252,8 @@ struct Task {
 };
 
 int main(int argc, char* argv[]) {
+    std::cout << std::numeric_limits<value_type>::digits << ' '
+              << sizeof(unsigned long) << '\n';
     std::cout << "Build config\n";
 #ifndef NDEBUG
     std::cout << "DEBUG: enabled\n";
@@ -362,7 +363,9 @@ int main(int argc, char* argv[]) {
               << "Seed: " << settings.seed << '\n';
     std::cout << '\n';
 
-    if (settings.num_threads > (1 << bits_for_thread_id) - 1) {
+    if (static_cast<value_type>(settings.num_threads) >
+        (value_type{1} << (std::numeric_limits<value_type>::digits -
+                           bits_for_value))) {
         std::cerr << "Too many threads!" << std::endl;
         return 1;
     }
@@ -450,8 +453,7 @@ int main(int argc, char* argv[]) {
             << std::fixed << std::setprecision(2)
             << std::chrono::duration<double>(prefill_time).count() << ','
             << std::fixed << std::setprecision(2)
-            << std::chrono::duration<double>(work_time).count()
-            << std::endl;
+            << std::chrono::duration<double>(work_time).count() << std::endl;
     }
 
     for (unsigned int i = 0; i < settings.num_threads; ++i) {

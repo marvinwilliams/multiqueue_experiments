@@ -106,7 +106,7 @@ class Context {
 
     template <typename Iter, typename Work>
     void execute_synchronized_blockwise(Iter begin, Iter end, Work work) {
-        static constexpr std::size_t block_size = 1 << 8;
+        static constexpr std::size_t block_size = 1 << 12;
 
         auto n = static_cast<std::size_t>(end - begin);
         shared_data_.barrier.wait();
@@ -127,7 +127,7 @@ class Context {
     void execute_synchronized_blockwise_timed(
         std::chrono::steady_clock::duration& duration, Iter begin, Iter end,
         Work work) {
-        static constexpr std::size_t block_size = 1 << 8;
+        static constexpr std::size_t block_size = 1 << 12;
 
         auto n = static_cast<std::size_t>(end - begin);
         shared_data_.barrier.wait([this] {

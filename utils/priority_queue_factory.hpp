@@ -62,6 +62,10 @@ static constexpr ::multiqueue::StickPolicy stick_policy =
     multiqueue::StickPolicy::RandomStrict
 #elif defined MQ_STICK_POLICY_SWAPPING
     multiqueue::StickPolicy::Swapping
+#elif defined MQ_STICK_POLICY_SWAPPING_LAZY
+    multiqueue::StickPolicy::SwappingLazy
+#elif defined MQ_STICK_POLICY_SWAPPING_BLOCKING
+    multiqueue::StickPolicy::SwappingBlocking
 #elif defined MQ_STICK_POLICY_PERMUTATION
     multiqueue::StickPolicy::Permutation
 #else
