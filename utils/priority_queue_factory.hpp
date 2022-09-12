@@ -198,6 +198,7 @@ std::ostream &describe_type(
     return out;
 }
 
+#ifdef PQ_MQ
 template <std::size_t I, std::size_t D, typename PQ>
 std::ostream &describe_type(std::ostream &out,
                             DescribeType<multiqueue::BufferedPQ<I, D, PQ>>) {
@@ -216,7 +217,7 @@ std::ostream &describe_type(
     out << "Degree: " << Degree << '\n';
     return out;
 }
-
+#endif
 }  // namespace detail
 
 template <typename KeyType, typename ValueType, bool Min>
