@@ -31,7 +31,7 @@ class ScopedOutput {
     out_type& out_;
 
    public:
-    explicit ScopedOutput(std::mutex& mutex, out_type& out, unsigned int id)
+    explicit ScopedOutput(std::mutex& mutex, out_type& out, int id)
         : out_{out} {
         l_ = std::unique_lock{mutex};
         out_ << "[Thread " << id << "] ";
@@ -51,23 +51,23 @@ struct SharedData {
     std::mutex mutex;
     std::mutex write_mutex;
 
-    SharedData(unsigned int num_threads) : barrier{num_threads} {}
+    SharedData(int num_threads) : barrier{num_threads} {}
 };
 
 }  // namespace detail
 
 class Context {
     detail::SharedData& shared_data_;
-    unsigned int num_threads_;
-    unsigned int id_;
+    int num_threads_;
+    int id_;
 
    public:
-    Context(detail::SharedData& sd, unsigned int nt, unsigned int id)
-        : shared_data_{sd}, num_threads_{nt}, id_{id} {}
+    Context(detail::SharedData& sd, int n, int id)
+        : shared_data_{sd}, num_threads_{n}, id_{id} {}
 
-    unsigned int get_num_threads() const noexcept { return num_threads_; };
+    [[nodiscard]] int get_num_threads() const noexcept { return num_threads_; };
 
-    unsigned int get_id() const noexcept { return id_; }
+    [[nodiscard]] int get_id() const noexcept { return id_; }
 
     template <class CharT, class Traits>
     detail::ScopedOutput<CharT, Traits> write(
@@ -159,13 +159,13 @@ class Context {
 struct TaskHandle {
     detail::SharedData shared_data;
     std::vector<threading::pthread> threads;
-    unsigned int num_threads;
-    explicit TaskHandle(unsigned int n) : shared_data(n), num_threads{n} {}
+    int num_threads;
+    explicit TaskHandle(int n) : shared_data(n), num_threads{n} {}
 
     template <typename Task, typename... Args>
     void run_task(Args const&... args) {
         threads.clear();
-        for (unsigned int i = 0; i < num_threads; ++i) {
+        for (int i = 0; i < num_threads; ++i) {
             Context ctx{shared_data, num_threads, i};
             threads.emplace_back(Task::get_config(i), Task::run, ctx, args...);
         }
@@ -178,10 +178,10 @@ struct TaskHandle {
 };
 
 template <typename Task, typename... Args>
-void run_task(unsigned int num_threads, Args const&... args) {
+void run_task(int num_threads, Args const&... args) {
     auto shared_data = detail::SharedData(num_threads);
     std::vector<threading::pthread> threads;
-    for (unsigned int i = 0; i < num_threads; ++i) {
+    for (int i = 0; i < num_threads; ++i) {
         Context ctx{shared_data, num_threads, i};
         threads.emplace_back(Task::get_config(i), Task::run, ctx, args...);
     }

@@ -11,6 +11,7 @@
 
 #if defined PQ_MQ
 #include "multiqueue/buffered_pq.hpp"
+#include "multiqueue/build_config.hpp"
 #include "multiqueue/config.hpp"
 #include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue.hpp"
@@ -46,8 +47,8 @@ namespace util {
 
 struct PriorityQueueConfig {
     std::optional<std::uint64_t> seed;
-    std::optional<unsigned int> c;
-    std::optional<unsigned int> stickiness;
+    std::optional<int> c;
+    std::optional<int> stickiness;
 };
 
 namespace detail {
@@ -77,31 +78,30 @@ template <typename T, typename Compare>
 using InnerPriorityQueue =
 #ifndef MQ_DISABLE_BUFFERING
     multiqueue::BufferedPQ<
+#endif
+#ifdef MQ_PQ_STD
+        std::priority_queue<T, std::vector<T>, Compare>
+#else
+    multiqueue::Heap<T, Compare
+#ifdef MQ_HEAP_ARITY
+                     ,
+                     MQ_HEAP_ARITY
+#endif
+                     >
+#endif
+#ifndef MQ_DISABLE_BUFFERING
+        ,
 #ifdef MQ_INSERTION_BUFFERSIZE
         MQ_INSERTION_BUFFERSIZE
 #else
-        64
+        multiqueue::BuildConfiguration::DefaultInsertionBuffersize
 #endif
         ,
 #ifdef MQ_DELETION_BUFFERSIZE
         MQ_DELETION_BUFFERSIZE
 #else
-        64
+        multiqueue::BuildConfiguration::DefaultDeletionBuffersize
 #endif
-        ,
-#endif
-#ifdef MQ_PQ_STD
-        std::priority_queue<T, std::vector<T>, Compare>
-#else
-    multiqueue::Heap<T, Compare,
-#ifdef MQ_HEAP_ARITY
-                     MQ_HEAP_ARITY
-#else
-                     8
-#endif
-                     >
-#endif
-#ifndef MQ_DISABLE_BUFFERING
         >
 #endif
     ;
@@ -110,9 +110,7 @@ using InnerPriorityQueue =
 template <typename KeyType, typename ValueType, bool Min = true>
 struct PriorityQueueTypeFactory {
 #if defined PQ_MQ
-    using type =
-        multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>,
-                               stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_KLSM256
@@ -131,8 +129,7 @@ struct PriorityQueueTypeFactory {
 template <typename KeyType, typename ValueType>
 struct PriorityQueueTypeFactory<KeyType, ValueType, false> {
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>,
-                                        stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -147,9 +144,7 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, true> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type =
-        multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>,
-                               stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ
@@ -176,8 +171,7 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, false> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>,
-                                        stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<>, stick_policy, InnerPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -191,17 +185,14 @@ template <typename T>
 struct DescribeType {};
 
 template <typename T, typename Container, typename Compare>
-std::ostream &describe_type(
-    std::ostream &out,
-    DescribeType<std::priority_queue<T, Container, Compare>>) {
+std::ostream &describe_type(std::ostream &out, DescribeType<std::priority_queue<T, Container, Compare>> /*unused*/) {
     out << "std::priority_queue\n";
     return out;
 }
 
 #ifdef PQ_MQ
-template <std::size_t I, std::size_t D, typename PQ>
-std::ostream &describe_type(std::ostream &out,
-                            DescribeType<multiqueue::BufferedPQ<I, D, PQ>>) {
+template <typename PQ, std::size_t I, std::size_t D>
+std::ostream &describe_type(std::ostream &out, DescribeType<multiqueue::BufferedPQ<PQ, I, D>> /*unused*/) {
     out << "Buffered PQ\n";
     out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
     out << "Inner PQ type: ";
@@ -210,9 +201,8 @@ std::ostream &describe_type(std::ostream &out,
 }
 
 template <typename T, typename Compare, unsigned int Degree, typename Container>
-std::ostream &describe_type(
-    std::ostream &out,
-    DescribeType<multiqueue::Heap<T, Compare, Degree, Container>>) {
+std::ostream &describe_type(std::ostream &out,
+                            DescribeType<multiqueue::Heap<T, Compare, Degree, Container>> /*unused*/) {
     out << "Heap\n";
     out << "Degree: " << Degree << '\n';
     return out;
@@ -222,10 +212,8 @@ std::ostream &describe_type(
 
 template <typename KeyType, typename ValueType, bool Min>
 struct PriorityQueueFactory {
-    using type = typename detail::PriorityQueueTypeFactory<KeyType, ValueType,
-                                                           Min>::type;
-    static type create(unsigned int num_threads,
-                       PriorityQueueConfig const &params = {}) {
+    using type = typename detail::PriorityQueueTypeFactory<KeyType, ValueType, Min>::type;
+    static type create(unsigned int num_threads, PriorityQueueConfig const &params = {}) {
 #ifdef PQ_MQ
         multiqueue::Config config{};
         if (params.seed) {
@@ -247,8 +235,7 @@ struct PriorityQueueFactory {
         pq.describe(out);
 #ifdef PQ_MQ
         out << "Inner pq: ";
-        detail::describe_type(
-            out, detail::DescribeType<typename type::inner_pq_type>{});
+        detail::describe_type(out, detail::DescribeType<typename type::inner_pq_type>{});
 #endif
         return out;
     }
