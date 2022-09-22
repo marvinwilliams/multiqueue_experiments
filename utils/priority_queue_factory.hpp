@@ -12,7 +12,6 @@
 #if defined PQ_MQ
 #include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/build_config.hpp"
-#include "multiqueue/config.hpp"
 #include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue.hpp"
 #include "multiqueue/stick_policy.hpp"
@@ -44,12 +43,6 @@
 #include <utility>
 
 namespace util {
-
-struct PriorityQueueConfig {
-    std::optional<std::uint64_t> seed;
-    std::optional<int> c;
-    std::optional<int> stickiness;
-};
 
 namespace detail {
 
@@ -185,60 +178,37 @@ template <typename T>
 struct DescribeType {};
 
 template <typename T, typename Container, typename Compare>
-std::ostream &describe_type(std::ostream &out, DescribeType<std::priority_queue<T, Container, Compare>> /*unused*/) {
+void describe_type(std::ostream &out, DescribeType<std::priority_queue<T, Container, Compare>> /*unused*/) {
     out << "std::priority_queue\n";
-    return out;
 }
 
 #ifdef PQ_MQ
 template <typename PQ, std::size_t I, std::size_t D>
-std::ostream &describe_type(std::ostream &out, DescribeType<multiqueue::BufferedPQ<PQ, I, D>> /*unused*/) {
+void describe_type(std::ostream &out, DescribeType<multiqueue::BufferedPQ<PQ, I, D>> /*unused*/) {
     out << "Buffered PQ\n";
     out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
     out << "Inner PQ type: ";
     describe_type(out, DescribeType<PQ>{});
-    return out;
 }
 
 template <typename T, typename Compare, unsigned int Degree, typename Container>
-std::ostream &describe_type(std::ostream &out,
-                            DescribeType<multiqueue::Heap<T, Compare, Degree, Container>> /*unused*/) {
+void describe_type(std::ostream &out, DescribeType<multiqueue::Heap<T, Compare, Degree, Container>> /*unused*/) {
     out << "Heap\n";
     out << "Degree: " << Degree << '\n';
-    return out;
 }
 #endif
 }  // namespace detail
 
 template <typename KeyType, typename ValueType, bool Min>
-struct PriorityQueueFactory {
-    using type = typename detail::PriorityQueueTypeFactory<KeyType, ValueType, Min>::type;
-    static type create(unsigned int num_threads, PriorityQueueConfig const &params = {}) {
-#ifdef PQ_MQ
-        multiqueue::Config config{};
-        if (params.seed) {
-            config.seed = *params.seed;
-        }
-        if (params.c) {
-            config.c = *params.c;
-        }
-        if (params.stickiness) {
-            config.stickiness = *params.stickiness;
-        }
-        return type(num_threads, config);
-#else
-        return type(num_threads);
-#endif
-    }
+using priority_queue_type = typename detail::PriorityQueueTypeFactory<KeyType, ValueType, Min>::type;
 
-    static std::ostream &describe(std::ostream &out, type const &pq) {
-        pq.describe(out);
+template <typename PriorityQueue>
+void describe(std::ostream &out, PriorityQueue const &pq) {
+    pq.describe(out);
 #ifdef PQ_MQ
-        out << "Inner pq: ";
-        detail::describe_type(out, detail::DescribeType<typename type::inner_pq_type>{});
+    out << "Inner pq: ";
+    detail::describe_type(out, detail::DescribeType<typename PriorityQueue::inner_pq_type>{});
 #endif
-        return out;
-    }
-};
+}
 
 }  // namespace util

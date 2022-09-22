@@ -16,107 +16,38 @@
 namespace threading {
 
 namespace scheduling {
-namespace detail {
-
-template <bool>
-struct WithNice {
-    static constexpr bool has_nice = false;
+struct Default {
+    static constexpr int PolicyId = SCHED_OTHER;
+    static constexpr int priority = 0;
 };
 
-template <>
-struct WithNice<true> {
-    static constexpr bool has_nice = true;
-    int nice = 0;
-};
+struct Fifo {
+    static constexpr int PolicyId = SCHED_FIFO;
 
-template <bool>
-struct WithPriority {
-    static constexpr bool has_priority = false;
-};
+    int priority = 0;
 
-template <>
-struct WithPriority<true> {
-    static constexpr bool has_priority = true;
-    int priority = 1;
-};
-
-template <bool with_nice, bool with_priority>
-struct PolicyBase : WithNice<with_nice>, WithPriority<with_priority> {};
-
-}  // namespace detail
-
-struct Normal : detail::PolicyBase<true, false> {
-    static constexpr int id = SCHED_OTHER;
-    constexpr explicit Normal(int n = 0) noexcept {
-        nice = n;
+    constexpr explicit Fifo(int prio = sched_get_priority_min(PolicyId)) noexcept : priority{prio} {
     }
 };
 
-struct Idle : detail::PolicyBase<true, false> {
-    static constexpr int id = SCHED_IDLE;
-    constexpr explicit Idle(int n = 0) noexcept {
-        nice = n;
+struct RoundRobin {
+    static constexpr int PolicyId = SCHED_RR;
+
+    int priority = 0;
+
+    constexpr explicit RoundRobin(int prio = sched_get_priority_min(PolicyId)) noexcept : priority{prio} {
     }
 };
 
-struct Fifo : detail::PolicyBase<false, true> {
-    static constexpr int id = SCHED_FIFO;
-    constexpr explicit Fifo(int p = sched_get_priority_min(id)) noexcept {
-        priority = p;
-    }
-};
-
-struct RoundRobin : detail::PolicyBase<false, true> {
-    static constexpr int id = SCHED_RR;
-    constexpr explicit RoundRobin(int p = sched_get_priority_min(id)) noexcept {
-        priority = p;
-    }
-};
-
-using Policy = std::variant<scheduling::Normal, scheduling::Idle, scheduling::Fifo, scheduling::RoundRobin>;
-
-inline void check_policy(Policy const &policy) {
-    std::visit(
-        [](auto &&p) {
-            // p.has_nice is not constexpr
-            using policy_type = std::decay_t<decltype(p)>;
-            if constexpr (policy_type::has_nice) {
-                if (p.nice < -20 || p.nice > 19) {
-                    throw std::domain_error{"Niceness out of range"};
-                }
-            }
-            if constexpr (policy_type::has_priority) {
-                if (p.priority < sched_get_priority_min(p.id) || p.priority > sched_get_priority_max(p.id)) {
-                    throw std::domain_error{"Priority out of range"};
-                }
-            }
-        },
-        policy);
-}
+using Policy = std::variant<scheduling::Default, scheduling::Fifo, scheduling::RoundRobin>;
 
 }  // namespace scheduling
 
 struct thread_config {
     static constexpr auto cpu_setsize = CPU_SETSIZE;
     std::bitset<cpu_setsize> cpu_set;
-    std::optional<scheduling::Policy> policy = std::nullopt;
+    std::optional<scheduling::Policy> scheduling;
     bool detached = false;
-
-    thread_config() noexcept {
-        cpu_set.set();
-    }
-
-    void check() const {
-        if (cpu_set.none()) {
-            throw std::domain_error{"Empty cpu set"};
-        }
-        if (policy) {
-            if (std::holds_alternative<scheduling::Idle>(*policy)) {
-                throw std::domain_error{"Not possible to schedule idle thread"};
-            }
-            scheduling::check_policy(*policy);
-        }
-    }
 };
 
 struct invoker_base {
@@ -154,8 +85,8 @@ class pthread {
     std::optional<pthread_t> thread_handle_ = std::nullopt;
     bool detached_ = false;
 
-    static void init_attr_with_config(pthread_attr_t *attr, sched_param *sched_param_ptr, cpu_set_t *cpu_set_ptr,
-                                      thread_config const &config);
+    static void init_attr_scheduling(pthread_attr_t &attr, scheduling::Policy policy);
+    static void init_attr(pthread_attr_t &attr, thread_config const &config);
 
    public:
     pthread() noexcept = default;
@@ -174,14 +105,12 @@ class pthread {
     pthread(thread_config const &config, Callable &&f, Args &&...args) : detached_(config.detached) {
         static_assert(std::is_invocable_v<std::decay_t<Callable>, std::decay_t<Args>...>,
                       "pthread arguments must be invocable after conversion to rvalues");
-        using invoker_t = invoker<std::decay_t<Callable>, std::decay_t<Args>...>;
+        using invoker_type = invoker<std::decay_t<Callable>, std::decay_t<Args>...>;
         auto invoker_ptr =
-            std::unique_ptr<invoker_base>{new invoker_t(std::forward<Callable>(f), {std::forward<Args>(args)...})};
+            std::unique_ptr<invoker_base>{new invoker_type(std::forward<Callable>(f), {std::forward<Args>(args)...})};
         thread_handle_ = pthread_t{};
         pthread_attr_t attr;
-        sched_param param{};
-        cpu_set_t set;
-        init_attr_with_config(&attr, &param, &set, config);
+        init_attr(attr, config);
 
         int rc = pthread_create(&(*thread_handle_), &attr, trampoline, invoker_ptr.get());
         pthread_attr_destroy(&attr);
@@ -196,9 +125,9 @@ class pthread {
     explicit pthread(Callable &&f, Args &&...args) {
         static_assert(std::is_invocable_v<std::decay_t<Callable>, std::decay_t<Args>...>,
                       "pthread arguments must be invocable after conversion to rvalues");
-        using invoker_t = invoker<std::decay_t<Callable>, std::decay_t<Args>...>;
+        using invoker_type = invoker<std::decay_t<Callable>, std::decay_t<Args>...>;
         auto invoker_ptr =
-            std::unique_ptr<invoker_base>{new invoker_t(std::forward<Callable>(f), {std::forward<Args>(args)...})};
+            std::unique_ptr<invoker_base>{new invoker_type(std::forward<Callable>(f), {std::forward<Args>(args)...})};
         thread_handle_ = pthread_t{};
         int rc = pthread_create(&(*thread_handle_), nullptr, trampoline, invoker_ptr.get());
         if (rc != 0) {

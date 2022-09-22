@@ -16,10 +16,12 @@
 #include <vector>
 
 #ifndef L1_CACHE_LINESIZE
-#error L1_CACHE_LINESIZE needs to be defined
+#define L1_CACHE_LINESIZE 64
 #endif
 
 namespace thread_coordination {
+
+using duration_type = std::chrono::steady_clock::duration;
 
 namespace detail {
 template <class CharT, class Traits>
@@ -31,8 +33,7 @@ class ScopedOutput {
     out_type& out_;
 
    public:
-    explicit ScopedOutput(std::mutex& mutex, out_type& out, int id)
-        : out_{out} {
+    explicit ScopedOutput(std::mutex& mutex, out_type& out, int id) : out_{out} {
         l_ = std::unique_lock{mutex};
         out_ << "[Thread " << id << "] ";
     }
@@ -45,97 +46,93 @@ class ScopedOutput {
 };
 
 struct SharedData {
+    using clock_type = std::chrono::steady_clock;
     utils::barrier barrier;
     alignas(L1_CACHE_LINESIZE) std::atomic_size_t index{0};
-    std::chrono::steady_clock::time_point timestamp;
+    clock_type::time_point timestamp;
     std::mutex mutex;
     std::mutex write_mutex;
 
-    SharedData(int num_threads) : barrier{num_threads} {}
+    explicit SharedData(int num_threads) : barrier{num_threads} {
+    }
 };
 
 }  // namespace detail
 
 class Context {
+    friend class TaskHandle;
+    using duration_type = detail::SharedData::clock_type::duration;
+
     detail::SharedData& shared_data_;
     int num_threads_;
     int id_;
 
-   public:
-    Context(detail::SharedData& sd, int n, int id)
-        : shared_data_{sd}, num_threads_{n}, id_{id} {}
-
-    [[nodiscard]] int get_num_threads() const noexcept { return num_threads_; };
-
-    [[nodiscard]] int get_id() const noexcept { return id_; }
-
-    template <class CharT, class Traits>
-    detail::ScopedOutput<CharT, Traits> write(
-        std::basic_ostream<CharT, Traits>& out) const noexcept {
-        return detail::ScopedOutput<CharT, Traits>(shared_data_.write_mutex,
-                                                   out, id_);
+    Context(detail::SharedData& sd, int n, int id) : shared_data_{sd}, num_threads_{n}, id_{id} {
     }
 
-    void synchronize() { shared_data_.barrier.wait(); }
+   public:
+    [[nodiscard]] int get_num_threads() const noexcept {
+        return num_threads_;
+    };
+
+    [[nodiscard]] int get_id() const noexcept {
+        return id_;
+    }
+
+    template <class CharT, class Traits>
+    detail::ScopedOutput<CharT, Traits> write(std::basic_ostream<CharT, Traits>& out) const {
+        return detail::ScopedOutput<CharT, Traits>(shared_data_.write_mutex, out, id_);
+    }
+
+    void synchronize() const {
+        shared_data_.barrier.wait();
+    }
 
     template <typename CompletionFunc>
-    void synchronize(CompletionFunc&& f) {
+    void synchronize(CompletionFunc&& f) const {
         shared_data_.barrier.wait(std::forward<CompletionFunc>(f));
     }
 
     template <typename Work, typename... Args>
-    void execute_synchronized(Work work, Args&&... args) {
+    void execute_synchronized(Work work, Args&&... args) const {
         shared_data_.barrier.wait();
         work(std::forward<Args>(args)...);
         shared_data_.barrier.wait();
     }
 
     template <typename Work, typename... Args>
-    void execute_synchronized_timed(
-        std::chrono::steady_clock::duration& duration, Work work,
-        Args&&... args) {
-        shared_data_.barrier.wait([this] {
-            shared_data_.timestamp = std::chrono::steady_clock::now();
-        });
+    void execute_synchronized_timed(duration_type& duration, Work work, Args&&... args) const {
+        shared_data_.barrier.wait([this] { shared_data_.timestamp = std::chrono::steady_clock::now(); });
         work(std::forward<Args>(args)...);
-        shared_data_.barrier.wait([this, &duration] {
-            duration =
-                std::chrono::steady_clock::now() - shared_data_.timestamp;
-        });
+        shared_data_.barrier.wait(
+            [this, &duration] { duration = std::chrono::steady_clock::now() - shared_data_.timestamp; });
     }
 
     template <typename Iter, typename Work>
-    void execute_synchronized_blockwise(Iter begin, Iter end, Work work) {
+    void execute_synchronized_blockwise(Iter begin, Iter end, Work work) const {
         static constexpr std::size_t block_size = 1 << 12;
 
         auto n = static_cast<std::size_t>(end - begin);
         shared_data_.barrier.wait();
         while (true) {
-            std::size_t block_begin = shared_data_.index.fetch_add(
-                block_size, std::memory_order_relaxed);
+            std::size_t block_begin = shared_data_.index.fetch_add(block_size, std::memory_order_relaxed);
             if (block_begin >= n) {
                 break;
             }
             std::size_t block_end = std::min(block_begin + block_size, n);
             work(begin + block_begin, begin + block_end);
         }
-        shared_data_.barrier.wait(
-            [this] { shared_data_.index.store(0, std::memory_order_relaxed); });
+        shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });
     }
 
     template <typename Iter, typename Work>
-    void execute_synchronized_blockwise_timed(
-        std::chrono::steady_clock::duration& duration, Iter begin, Iter end,
-        Work work) {
+    void execute_synchronized_blockwise_timed(duration_type& duration, Iter begin, Iter end, Work work) const {
         static constexpr std::size_t block_size = 1 << 12;
 
         auto n = static_cast<std::size_t>(end - begin);
-        shared_data_.barrier.wait([this] {
-            shared_data_.timestamp = std::chrono::steady_clock::now();
-        });
+        shared_data_.barrier.wait([this] { shared_data_.timestamp = std::chrono::steady_clock::now(); });
         while (true) {
-            std::size_t block_begin = shared_data_.index.fetch_add(
-                block_size, std::memory_order_relaxed);
+            std::size_t block_begin = shared_data_.index.fetch_add(block_size, std::memory_order_relaxed);
             if (block_begin >= n) {
                 break;
             }
@@ -143,8 +140,7 @@ class Context {
             work(begin + block_begin, begin + block_end);
         }
         shared_data_.barrier.wait([this, &duration] {
-            duration =
-                std::chrono::steady_clock::now() - shared_data_.timestamp;
+            duration = std::chrono::steady_clock::now() - shared_data_.timestamp;
             shared_data_.index.store(0, std::memory_order_relaxed);
         });
     }
@@ -156,39 +152,23 @@ class Context {
     }
 };
 
-struct TaskHandle {
+class TaskHandle {
     detail::SharedData shared_data;
     std::vector<threading::pthread> threads;
-    int num_threads;
-    explicit TaskHandle(int n) : shared_data(n), num_threads{n} {}
 
+   public:
     template <typename Task, typename... Args>
-    void run_task(Args const&... args) {
-        threads.clear();
+    explicit TaskHandle(int num_threads, Args const&... args) : shared_data(num_threads) {
         for (int i = 0; i < num_threads; ++i) {
             Context ctx{shared_data, num_threads, i};
             threads.emplace_back(Task::get_config(i), Task::run, ctx, args...);
         }
     }
+
     void join() {
-        for (auto& t : threads) {
-            t.join();
-        }
+        threads.clear();
     }
 };
-
-template <typename Task, typename... Args>
-void run_task(int num_threads, Args const&... args) {
-    auto shared_data = detail::SharedData(num_threads);
-    std::vector<threading::pthread> threads;
-    for (int i = 0; i < num_threads; ++i) {
-        Context ctx{shared_data, num_threads, i};
-        threads.emplace_back(Task::get_config(i), Task::run, ctx, args...);
-    }
-    for (auto& t : threads) {
-        t.join();
-    }
-}
 
 }  // namespace thread_coordination
 
