@@ -89,8 +89,8 @@ class pthread {
     std::optional<pthread_t> thread_handle_ = std::nullopt;
     bool detached_ = false;
 
-    static void init_attr_scheduling(pthread_attr_t &attr, sched_param &param, scheduling::Policy policy);
-    static void init_attr(pthread_attr_t &attr, sched_param &param, cpu_set_t& set, thread_config const &config);
+    static void init_attr_scheduling(pthread_attr_t &attr, scheduling::Policy policy);
+    static void init_attr(pthread_attr_t &attr, thread_config const &config);
 
     template <typename Callable, typename... Args>
     void start_thread(pthread_attr_t *attr, Callable &&f, Args &&...args) {
@@ -110,9 +110,7 @@ class pthread {
     template <typename Callable, typename... Args>
     pthread(thread_config const &config, Callable &&f, Args &&...args) : detached_(config.detached) {
         pthread_attr_t attr;
-        sched_param param{};
-        cpu_set_t set{};
-        init_attr(attr, param, set, config);
+        init_attr(attr, config);
         try {
             start_thread(&attr, std::forward<Callable>(f), std::forward<Args>(args)...);
             pthread_attr_destroy(&attr);

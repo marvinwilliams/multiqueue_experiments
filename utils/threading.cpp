@@ -36,15 +36,16 @@ pthread::~pthread() noexcept {
     }
 }
 
-void pthread::init_attr_scheduling(pthread_attr_t &attr, sched_param &param, scheduling::Policy policy) {
+void pthread::init_attr_scheduling(pthread_attr_t &attr, scheduling::Policy policy) {
     if (int rc = pthread_attr_setinheritsched(&attr, PTHREAD_EXPLICIT_SCHED)) {
         throw std::system_error{rc, std::system_category(), "Failed to set explicit scheduling for thread: "};
     }
     std::visit(
-        [&attr, &param](auto const &policy) {
+        [&attr](auto const &policy) {
             if (int rc = pthread_attr_setschedpolicy(&attr, policy.PolicyId)) {
                 throw std::system_error{rc, std::system_category(), "Failed to set scheduling policy: "};
             }
+            sched_param param{};
             param.sched_priority = policy.priority;
             if (int rc = pthread_attr_setschedparam(&attr, &param)) {
                 throw std::system_error{rc, std::system_category(), "Failed to set scheduling parameter: "};
@@ -53,7 +54,7 @@ void pthread::init_attr_scheduling(pthread_attr_t &attr, sched_param &param, sch
         policy);
 }
 
-void pthread::init_attr(pthread_attr_t &attr, sched_param &param, cpu_set_t &set, thread_config const &config) {
+void pthread::init_attr(pthread_attr_t &attr, thread_config const &config) {
     if (int rc = pthread_attr_init(&attr)) {
         throw std::system_error{rc, std::system_category(), "Failed to init pthread attribute: "};
     }
@@ -63,17 +64,16 @@ void pthread::init_attr(pthread_attr_t &attr, sched_param &param, cpu_set_t &set
         }
     }
     if (config.scheduling) {
-        init_attr_scheduling(attr, param, *config.scheduling);
+        init_attr_scheduling(attr, *config.scheduling);
     }
     if (!config.cpu_set.none()) {
+        cpu_set_t set{};
         CPU_ZERO(&set);
         for (std::size_t i = 0; i < config.cpu_set.size(); ++i) {
             if (config.cpu_set[i]) {
-                std::cout << i << '\n';
                 CPU_SET(i, &set);
             }
         }
-    std::cout << "end\n";
         if (int rc = pthread_attr_setaffinity_np(&attr, sizeof(cpu_set_t), &set)) {
             throw std::system_error{rc, std::system_category(), "Failed to set thread affinity: "};
         }

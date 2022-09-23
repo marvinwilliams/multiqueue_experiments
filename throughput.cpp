@@ -118,25 +118,20 @@ class Benchmark {
     }
 
 #ifdef USE_PAPI
-    static bool start_performance_counter() {
+    static bool start_performance_counter(int& event_set) {
         if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
-            ctx.write(std::cerr) << "Failed to register thread to PAPI\n";
             return false;
         }
         if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
-            ctx.write(std::cerr) << "Failed to init event set\n";
             return false;
         }
         if (int ret = PAPI_add_event(event_set, PAPI_L1_DCA); ret != PAPI_OK) {
-            ctx.write(std::cerr) << "Failed to count cache accesses\n";
             return false;
         }
         if (int ret = PAPI_add_named_event(event_set, "perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
-            ctx.write(std::cerr) << "Failed to count cache misses\n";
             return false;
         }
         if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
-            ctx.write(std::cerr) << "Failed to start counters\n";
             return false;
         }
         return true;
@@ -147,7 +142,10 @@ class Benchmark {
         std::size_t num_failed_pops = 0;
 #ifdef USE_PAPI
         int event_set = PAPI_NULL;
-        bool papi_started = start_performance_counter();
+        bool papi_started = start_performance_counter(event_set);
+        if (!papi_started) {
+            ctx.write(std::cerr) << "Failed to start counters\n";
+        }
 #endif
         ctx.execute_synchronized_blockwise_timed(data.work_time, data.operations.begin(), data.operations.end(),
                                                  [&handle, &num_failed_pops](auto block_begin, auto block_end) {
@@ -181,7 +179,7 @@ class Benchmark {
     }
 
    public:
-    static void run(thread_coordination::Context ctx, std::promise<result_type>& result, Settings const& settings,
+    static void run(thread_coordination::Context ctx, std::promise<result_type>& promise, Settings const& settings,
                     Data& data, PriorityQueue& pq) {
         std::seed_seq seed{settings.seed, static_cast<std::uint32_t>(ctx.get_id())};
         std::default_random_engine rng(seed);
@@ -189,7 +187,7 @@ class Benchmark {
         auto pop_dist = std::bernoulli_distribution(settings.pop_prob);
 
         if (ctx.get_id() == 0) {
-            std::clog << "Generating workload..." << std::flush;
+            std::clog << "Generating operations..." << std::flush;
         }
 
         // Prefill
@@ -202,13 +200,17 @@ class Benchmark {
         std::generate_n(block_begin, settings.operations_per_thread,
                         [&]() { return pop_dist(rng) ? Operation{} : Operation{key_dist(rng)}; });
 
-        ctx.synchronize([&settings, &data]() {
-            std::clog << "done\n Checking operations..." << std::flush;
+        ctx.synchronize([&settings, &data, &promise]() {
+            std::clog << "done\nChecking operations..." << std::flush;
             std::size_t num_prefill_elements =
                 static_cast<std::size_t>(settings.num_threads) * settings.prefill_per_thread;
             if (!check_operations(num_prefill_elements, data.operations)) {
                 std::cerr << "\nError: Invalid operation sequence, increase prefill or decrease pop probability\n";
                 data.fail = true;
+                result_type result;
+                result.fail = true;
+                promise.set_value(result);
+
             } else {
                 std::clog << "done\nPrefilling..." << std::flush;
             }
@@ -239,10 +241,10 @@ class Benchmark {
 
         if (ctx.get_id() == 0) {
             std::clog << "done\n" << std::endl;
-            result.set_value(result_type{data.fail, data.prefill_time, data.work_time, data.num_failed_pops
+            promise.set_value(result_type{data.fail, data.prefill_time, data.work_time, data.num_failed_pops
 #ifdef USE_PAPI
-                                         ,
-                                         data.cache_accesses, data.cache_misses
+                                          ,
+                                          data.cache_accesses, data.cache_misses
 #endif
             });
         }
@@ -327,7 +329,7 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error initializing PAPI\n";
         return 1;
     }
-    if (int ret = PAPI_thread_init((unsigned long (*)(void))(pthread_self)); ret != PAPI_OK) {
+    if (int ret = PAPI_thread_init((unsigned long (*)())(pthread_self)); ret != PAPI_OK) {
         std::cerr << "Error initializing threads for PAPI\n";
         return 1;
     }
@@ -372,7 +374,7 @@ int main(int argc, char* argv[]) {
     std::cout << "Work time (s): " << std::setprecision(3) << std::chrono::duration<double>(result.work_time).count()
               << '\n';
 #ifdef USE_PAPI
-    std::cout << "Cache accesses/misses: " << cache_accesses << '/' << cache_misses << '\n';
+    std::cout << "Cache accesses/misses: " << result.cache_accesses << '/' << result.cache_misses << '\n';
 #else
     std::cout << "Cache accesses/misses: not measured\n";
 #endif
@@ -392,9 +394,9 @@ int main(int argc, char* argv[]) {
             << std::chrono::duration<double>(result.prefill_time).count() << ',' << std::fixed << std::setprecision(3)
             << std::chrono::duration<double>(result.work_time).count()
 #ifdef USE_PAPI
-            << ',' << cache_accesses << ',' << cache_misses
+            << ',' << result.cache_accesses << ',' << result.cache_misses
 #else
-            << ",0,0"
+            << ",-1,-1"
 #endif
             << std::endl;
     }
