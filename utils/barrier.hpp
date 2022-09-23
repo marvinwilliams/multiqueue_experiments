@@ -25,7 +25,8 @@ class barrier {
 
    public:
     explicit barrier(int num_threads) {
-        if (int rc = pthread_barrier_init(&b_, nullptr, num_threads); rc != 0) {
+        assert(num_threads > 0);
+        if (int rc = pthread_barrier_init(&b_, nullptr, static_cast<unsigned int>(num_threads)); rc != 0) {
             throw std::system_error{rc, std::system_category(), "Failed to create barrier: "};
         }
     }

@@ -15,40 +15,9 @@
 
 namespace threading {
 
-namespace scheduling {
-struct Default {
-    static constexpr int PolicyId = SCHED_OTHER;
-    static constexpr int priority = 0;
-};
+namespace detail {
 
-struct Fifo {
-    static constexpr int PolicyId = SCHED_FIFO;
-
-    int priority = 0;
-
-    constexpr explicit Fifo(int prio = sched_get_priority_min(PolicyId)) noexcept : priority{prio} {
-    }
-};
-
-struct RoundRobin {
-    static constexpr int PolicyId = SCHED_RR;
-
-    int priority = 0;
-
-    constexpr explicit RoundRobin(int prio = sched_get_priority_min(PolicyId)) noexcept : priority{prio} {
-    }
-};
-
-using Policy = std::variant<scheduling::Default, scheduling::Fifo, scheduling::RoundRobin>;
-
-}  // namespace scheduling
-
-struct thread_config {
-    static constexpr auto cpu_setsize = CPU_SETSIZE;
-    std::bitset<cpu_setsize> cpu_set;
-    std::optional<scheduling::Policy> scheduling;
-    bool detached = false;
-};
+extern "C" void *trampoline(void *invoker);
 
 struct invoker_base {
     invoker_base() = default;
@@ -79,16 +48,86 @@ struct invoker : invoker_base {
     }
 };
 
-extern "C" void *trampoline(void *invoker);
+}  // namespace detail
+
+namespace scheduling {
+struct Default {
+    static constexpr int PolicyId = SCHED_OTHER;
+    static constexpr int priority = 0;
+};
+
+struct Fifo {
+    static constexpr int PolicyId = SCHED_FIFO;
+
+    int priority;
+
+    constexpr explicit Fifo(int prio = sched_get_priority_max(PolicyId)) noexcept : priority{prio} {
+    }
+};
+
+struct RoundRobin {
+    static constexpr int PolicyId = SCHED_RR;
+
+    int priority;
+
+    constexpr explicit RoundRobin(int prio = sched_get_priority_max(PolicyId)) noexcept : priority{prio} {
+    }
+};
+
+using Policy = std::variant<scheduling::Default, scheduling::Fifo, scheduling::RoundRobin>;
+
+}  // namespace scheduling
+
+struct thread_config {
+    static constexpr auto cpu_setsize = CPU_SETSIZE;
+    std::bitset<cpu_setsize> cpu_set;
+    std::optional<scheduling::Policy> scheduling;
+    bool detached = false;
+};
 
 class pthread {
     std::optional<pthread_t> thread_handle_ = std::nullopt;
     bool detached_ = false;
 
-    static void init_attr_scheduling(pthread_attr_t &attr, scheduling::Policy policy);
-    static void init_attr(pthread_attr_t &attr, thread_config const &config);
+    static void init_attr_scheduling(pthread_attr_t &attr, sched_param &param, scheduling::Policy policy);
+    static void init_attr(pthread_attr_t &attr, sched_param &param, cpu_set_t& set, thread_config const &config);
+
+    template <typename Callable, typename... Args>
+    void start_thread(pthread_attr_t *attr, Callable &&f, Args &&...args) {
+        static_assert(std::is_invocable_v<std::decay_t<Callable>, std::decay_t<Args>...>,
+                      "pthread arguments must be invocable after conversion to rvalues");
+        using invoker_type = detail::invoker<std::decay_t<Callable>, std::decay_t<Args>...>;
+        auto invoker_ptr = std::unique_ptr<detail::invoker_base>{
+            new invoker_type(std::forward<Callable>(f), {std::forward<Args>(args)...})};
+        thread_handle_ = pthread_t{};
+        if (int rc = pthread_create(&(*thread_handle_), attr, detail::trampoline, invoker_ptr.get())) {
+            throw std::system_error{rc, std::system_category(), "Failed to create thread: "};
+        }
+        (void)invoker_ptr.release();
+    }
 
    public:
+    template <typename Callable, typename... Args>
+    pthread(thread_config const &config, Callable &&f, Args &&...args) : detached_(config.detached) {
+        pthread_attr_t attr;
+        sched_param param{};
+        cpu_set_t set{};
+        init_attr(attr, param, set, config);
+        try {
+            start_thread(&attr, std::forward<Callable>(f), std::forward<Args>(args)...);
+            pthread_attr_destroy(&attr);
+        } catch (std::system_error &e) {
+            pthread_attr_destroy(&attr);
+            throw;
+        }
+    }
+
+    template <typename Callable, typename... Args,
+              typename = std::enable_if_t<!std::is_same_v<std::decay_t<Callable>, thread_config>>>
+    explicit pthread(Callable &&f, Args &&...args) {
+        start_thread(nullptr, std::forward<Callable>(f), std::forward<Args>(args)...);
+    }
+
     pthread() noexcept = default;
 
     pthread(pthread const &) = delete;
@@ -100,41 +139,6 @@ class pthread {
     pthread &operator=(pthread &&other) noexcept;
 
     ~pthread() noexcept;
-
-    template <typename Callable, typename... Args>
-    pthread(thread_config const &config, Callable &&f, Args &&...args) : detached_(config.detached) {
-        static_assert(std::is_invocable_v<std::decay_t<Callable>, std::decay_t<Args>...>,
-                      "pthread arguments must be invocable after conversion to rvalues");
-        using invoker_type = invoker<std::decay_t<Callable>, std::decay_t<Args>...>;
-        auto invoker_ptr =
-            std::unique_ptr<invoker_base>{new invoker_type(std::forward<Callable>(f), {std::forward<Args>(args)...})};
-        thread_handle_ = pthread_t{};
-        pthread_attr_t attr;
-        init_attr(attr, config);
-
-        int rc = pthread_create(&(*thread_handle_), &attr, trampoline, invoker_ptr.get());
-        pthread_attr_destroy(&attr);
-        if (rc != 0) {
-            throw std::system_error{rc, std::system_category(), "Failed to create thread: "};
-        }
-        (void)invoker_ptr.release();
-    }
-
-    template <typename Callable, typename... Args,
-              typename = std::enable_if_t<!std::is_same_v<std::decay_t<Callable>, thread_config>>>
-    explicit pthread(Callable &&f, Args &&...args) {
-        static_assert(std::is_invocable_v<std::decay_t<Callable>, std::decay_t<Args>...>,
-                      "pthread arguments must be invocable after conversion to rvalues");
-        using invoker_type = invoker<std::decay_t<Callable>, std::decay_t<Args>...>;
-        auto invoker_ptr =
-            std::unique_ptr<invoker_base>{new invoker_type(std::forward<Callable>(f), {std::forward<Args>(args)...})};
-        thread_handle_ = pthread_t{};
-        int rc = pthread_create(&(*thread_handle_), nullptr, trampoline, invoker_ptr.get());
-        if (rc != 0) {
-            throw std::system_error{rc, std::system_category(), "Failed to create thread: "};
-        }
-        (void)invoker_ptr.release();
-    }
 
     [[nodiscard]] bool joinable() const;
 

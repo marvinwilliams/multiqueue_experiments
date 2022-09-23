@@ -10,6 +10,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <future>
 #include <mutex>
 #include <ostream>
 #include <utility>
@@ -47,32 +48,34 @@ class ScopedOutput {
 
 struct SharedData {
     using clock_type = std::chrono::steady_clock;
+
+    int num_threads;
     utils::barrier barrier;
     alignas(L1_CACHE_LINESIZE) std::atomic_size_t index{0};
     clock_type::time_point timestamp;
-    std::mutex mutex;
     std::mutex write_mutex;
 
-    explicit SharedData(int num_threads) : barrier{num_threads} {
+    explicit SharedData(int n) : num_threads{n}, barrier{n} {
     }
 };
 
 }  // namespace detail
 
 class Context {
+    template <typename Task>
     friend class TaskHandle;
+
     using duration_type = detail::SharedData::clock_type::duration;
 
     detail::SharedData& shared_data_;
-    int num_threads_;
     int id_;
 
-    Context(detail::SharedData& sd, int n, int id) : shared_data_{sd}, num_threads_{n}, id_{id} {
+    Context(detail::SharedData& sd, int id) : shared_data_{sd}, id_{id} {
     }
 
    public:
     [[nodiscard]] int get_num_threads() const noexcept {
-        return num_threads_;
+        return shared_data_.num_threads;
     };
 
     [[nodiscard]] int get_id() const noexcept {
@@ -144,29 +147,65 @@ class Context {
             shared_data_.index.store(0, std::memory_order_relaxed);
         });
     }
+};
 
-    template <typename Func>
-    auto execute_exclusive(Func f) {
-        std::scoped_lock l{shared_data_.mutex};
-        return f();
+namespace affinity {
+
+struct individual_cores {
+    std::size_t stride = 1;
+    std::size_t offset = 0;
+
+    threading::thread_config operator()(int id) const {
+        threading::thread_config cfg;
+        cfg.cpu_set.set(offset + static_cast<std::size_t>(id) * stride);
+        return cfg;
     }
 };
 
+struct same_core {
+    std::size_t core = 1;
+
+    threading::thread_config operator()(int /*unused*/) const {
+        threading::thread_config cfg;
+        cfg.cpu_set.set(core);
+        return cfg;
+    }
+};
+
+}  // namespace affinity
+
+template <typename Task>
 class TaskHandle {
-    detail::SharedData shared_data;
-    std::vector<threading::pthread> threads;
+    using result_type = typename Task::result_type;
+
+    std::vector<threading::pthread> threads_;
+    detail::SharedData shared_data_;
+    std::promise<result_type> promise_;
 
    public:
-    template <typename Task, typename... Args>
-    explicit TaskHandle(int num_threads, Args const&... args) : shared_data(num_threads) {
-        for (int i = 0; i < num_threads; ++i) {
-            Context ctx{shared_data, num_threads, i};
-            threads.emplace_back(Task::get_config(i), Task::run, ctx, args...);
+    explicit TaskHandle(int num_threads) : threads_(static_cast<std::size_t>(num_threads)), shared_data_(num_threads) {
+    }
+
+    TaskHandle(TaskHandle const&) = delete;
+    TaskHandle(TaskHandle&&) noexcept = default;
+    TaskHandle& operator=(TaskHandle const&) = delete;
+    TaskHandle& operator=(TaskHandle&&) noexcept = default;
+    ~TaskHandle() = default;
+
+    template <typename Affinity, typename... Args>
+    std::future<result_type> run(Affinity affinity, Args... args) {
+        auto future = promise_.get_future();
+        for (int i = 0; i < threads_.size(); ++i) {
+            Context ctx{shared_data_, i};
+            threads_[i] = threading::pthread(affinity(i), Task::run, ctx, std::ref(promise_), args...);
         }
+        return future;
     }
 
     void join() {
-        threads.clear();
+        for (auto& t : threads_) {
+            t.join();
+        }
     }
 };
 
