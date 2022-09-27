@@ -1,13 +1,11 @@
 #pragma once
-#ifndef WRAPPER_KLSM_HPP_INCLUDED
-#define WRAPPER_KLSM_HPP_INCLUDED
 
 // Adapted from klsm
 
 #include "k_lsm/k_lsm.h"
 
-#include <stdio.h>
 #include <algorithm>
+#include <cstdio>
 #include <limits>
 #include <memory>
 #include <ostream>
@@ -28,8 +26,12 @@ class Klsm {
     using pq_type = kpq::k_lsm<key_type, mapped_type, Relaxation>;
 
    public:
-    struct Handle {
+    class Handle {
         pq_type* pq_;
+
+       public:
+        Handle(pq_type& pq) : pq_{pq} {
+        }
 
         void push(value_type const& value) {
             pq_->insert(value.first, value.second);
@@ -45,9 +47,12 @@ class Klsm {
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {}
+    Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {
+    }
 
-    Handle get_handle() { return Handle{pq_.get()}; }
+    Handle get_handle() {
+        return Handle{pq_.get()};
+    }
 
     void push(value_type const& value) {
         pq_->insert(value.first, value.second);
@@ -64,5 +69,3 @@ class Klsm {
 };
 
 }  // namespace wrapper
-
-#endif

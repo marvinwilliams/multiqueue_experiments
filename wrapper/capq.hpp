@@ -10,7 +10,7 @@
 #include <ostream>
 #include <utility>
 
-typedef struct fpasl_catree_set CAPQ;
+using CAPQ = struct fpasl_catree_set;
 struct CAPQ_deleter {
     void operator()(CAPQ*);
 };
@@ -20,8 +20,7 @@ namespace wrapper {
 // GC has MAX_THREADS = 128
 // (unsigned long) -1 is signaling empty
 
-template <bool remove_min_relax = true, bool put_relax = true,
-          bool catree_adapt = true>
+template <bool remove_min_relax = true, bool put_relax = true, bool catree_adapt = true>
 class Capq {
    public:
     using key_type = unsigned long;
@@ -37,10 +36,8 @@ class Capq {
 
     using handle_type = Handle;
 
-    static constexpr key_type min_valid_key =
-        std::numeric_limits<key_type>::min();
-    static constexpr key_type max_valid_key =
-        std::numeric_limits<key_type>::max() - 1;
+    static constexpr key_type min_valid_key = std::numeric_limits<key_type>::min();
+    static constexpr key_type max_valid_key = std::numeric_limits<key_type>::max() - 1;
 
    private:
     static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();

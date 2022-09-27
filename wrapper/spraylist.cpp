@@ -17,12 +17,12 @@ extern "C" {
 
 __thread unsigned long* seeds;
 
-void sl_intset_deleter::operator()(sl_intset_t* p) { /*sl_set_delete(p);*/ }
-void thread_data_deleter::operator()(thread_data_t* p) { delete p; }
-
 namespace wrapper {
 
-Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads + 1) {
+void Spraylist::sl_intset_deleter::operator()(sl_intset_t* p) { /*sl_set_delete(p);*/ }
+void Spraylist::thread_data_deleter::operator()(thread_data_t* p) { delete p; }
+
+Spraylist::Spraylist(int num_threads) : num_threads_(num_threads + 1) {
   ssalloc_init(num_threads_);
   seeds = seed_rand();
   *levelmax = floor_log_2(1'000'000);
@@ -43,31 +43,33 @@ Spraylist::Handle Spraylist::get_handle() {
   return Handle{std::move(thread_data), pq_.get()};
 }
 
-void Spraylist::Handle::push(value_type const& value) {
+void Spraylist::Handle::push(value_type const& value) const {
   sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
 }
 
-bool Spraylist::Handle::try_pop(value_type& retval) {
+bool Spraylist::Handle::try_pop(value_type& retval) const {
   retval.first = 0;
   while (true) {
     bool success = spray_delete_min_key(pq_, &retval.first, &retval.second,
                                         data_.get()) != 0;
-    if (success || retval.first == std::numeric_limits<key_type>::max())
+    if (success || retval.first == std::numeric_limits<key_type>::max()) {
       return success;
+}
   }
 }
 
-void Spraylist::push(value_type const& value) {
+void Spraylist::push(value_type const& value) const {
   sl_add_val(pq_.get(), value.first, value.second, TRANSACTIONAL);
 }
 
-bool Spraylist::try_pop(value_type& retval) {
+bool Spraylist::try_pop(value_type& retval) const {
   retval.first = 0;
   while (true) {
     bool success = spray_delete_min_key(pq_.get(), &retval.first, &retval.second,
                                         thread_data_.get()) != 0;
-    if (success || retval.first == std::numeric_limits<key_type>::max())
+    if (success || retval.first == std::numeric_limits<key_type>::max()) {
       return success;
+}
   }
 }
 

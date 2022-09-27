@@ -1,9 +1,15 @@
+[submodule "data/kplib"]
+	path = data/kplib
+	url = https://github.com/likr/kplib.git
 [submodule "third_party/Catch2"]
 	path = third_party/Catch2
 	url = https://github.com/catchorg/Catch2.git
 [submodule "third_party/klsm"]
 	path = third_party/klsm
-	url = https://github.com/marvinwilliams/klsm.git
-[submodule "data/kplib"]
-	path = data/kplib
-	url = https://github.com/likr/kplib.git
+	url = git@github.com:marvinwilliams/klsm.git
+[submodule "multiqueue"]
+	path = multiqueue
+	url = git@github.com:marvinwilliams/multiqueue.git
+[submodule "multififo"]
+	path = multififo
+	url = git@github.com:marvinwilliams/multififo.git

@@ -50,7 +50,7 @@ class TBBPriorityQueue {
 
    public:
     TBBPriorityQueue(unsigned int /* num_threads */)
-        : pq_(1'000'000, value_compare{Compare{}}) {}
+        : pq_(1 << 20, value_compare{Compare{}}) {}
 
     Handle get_handle() {
         auto h = Handle{};

@@ -33,12 +33,15 @@
 #error No valid PQ specified
 #endif
 
+#if defined PQ_MQ && defined MQ_PQ_STD
+#include <queue>
+#endif
+
 #include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
 #include <ostream>
-#include <queue>
 #include <type_traits>
 #include <utility>
 
@@ -174,41 +177,83 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, false> {
 #endif
 };
 
-template <typename T>
-struct DescribeType {};
-
-template <typename T, typename Container, typename Compare>
-void describe_type(std::ostream &out, DescribeType<std::priority_queue<T, Container, Compare>> /*unused*/) {
-    out << "std::priority_queue\n";
-}
-
-#ifdef PQ_MQ
-template <typename PQ, std::size_t I, std::size_t D>
-void describe_type(std::ostream &out, DescribeType<multiqueue::BufferedPQ<PQ, I, D>> /*unused*/) {
-    out << "Buffered PQ\n";
-    out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
-    out << "Inner PQ type: ";
-    describe_type(out, DescribeType<PQ>{});
-}
-
-template <typename T, typename Compare, unsigned int Degree, typename Container>
-void describe_type(std::ostream &out, DescribeType<multiqueue::Heap<T, Compare, Degree, Container>> /*unused*/) {
-    out << "Heap\n";
-    out << "Degree: " << Degree << '\n';
-}
-#endif
 }  // namespace detail
 
 template <typename KeyType, typename ValueType, bool Min>
 using priority_queue_type = typename detail::PriorityQueueTypeFactory<KeyType, ValueType, Min>::type;
 
+namespace describe {
+
+template <typename T>
+struct DescribeTag {};
+
+template <typename T>
+void describe_type(std::ostream &out, DescribeTag<T>) {
+    out << "unknown\n";
+}
+
 template <typename PriorityQueue>
 void describe(std::ostream &out, PriorityQueue const &pq) {
     pq.describe(out);
-#ifdef PQ_MQ
-    out << "Inner pq: ";
-    detail::describe_type(out, detail::DescribeType<typename PriorityQueue::inner_pq_type>{});
-#endif
 }
+
+#ifdef PQ_MQ
+#ifdef MQ_PQ_STD
+template <typename T, typename Container, typename Compare>
+void describe_type(std::ostream &out, DescribeTag<std::priority_queue<T, Container, Compare>>) {
+    out << "std::priority_queue\n";
+}
+#endif
+
+template <typename PQ, std::size_t I, std::size_t D>
+void describe_type(std::ostream &out, DescribeType<multiqueue::BufferedPQ<PQ, I, D>> /*unused*/) {
+    out << "Buffered PQ\n";
+    out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
+    out << "PQ type:\n";
+    describe_type(out, DescribeTag<PQ>{});
+}
+
+template <typename T, typename Compare, unsigned int Arity, typename Container>
+void describe_type(std::ostream &out, DescribeType<multiqueue::Heap<T, Compare, Arity, Container>> /*unused*/) {
+    out << "Heap with arity " << Arity << '\n';
+}
+
+inline std::string stick_policy_to_name(StickPolicy policy) {
+    switch (policy) {
+        case StickPolicy::None:
+            return "none";
+        case StickPolicy::RandomStrict:
+            return "random (strict)";
+        case StickPolicy::Random:
+            return "Random";
+        case StickPolicy::Swapping:
+            return "Swapping";
+        case StickPolicy::SwappingBlocking:
+            return "Swapping (blocking)";
+        case StickPolicy::SwappingLazy:
+            return "Swapping (lazy)";
+        case StickPolicy::Permutation:
+            return "Permutation";
+        default:
+            return "unknorn";
+    }
+}
+
+typename Key, typename T, typename KeyCompare, StickPolicy P,
+    template <typename, typename>
+    typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
+    typename Allocator > void describe(std::ostream &out,
+                                       multiqueue::MultiQueue<Key, T, KeyCompare, P, PriorityQueue, ValueTraits,
+                                                              SentinelTraits, Allocator> const &mq) {
+    out << "MultiQueue\n";
+    out << "Number of PQs: " << mq.num_pqs() << '\n';
+    out << "Sentinel: " << SentinelTraits::sentinel() << " (" << (SentinelTraits::is_implicit ? "implicit" : "explicit")
+        << ")\n";
+    out << "Stick policy: " << stick_policy_to_name(P) << '\n';
+    out << "Inner pq:\n";
+    describe_type(out, DescribeTag<typename PriorityQueue::pq_type::pq_type>{});
+}
+#endif
+}  // namespace describe
 
 }  // namespace util
