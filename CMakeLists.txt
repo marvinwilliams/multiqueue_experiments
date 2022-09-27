@@ -44,7 +44,7 @@ find_package(Threads)
 
 find_package(TBB)
 
-set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/external")
+set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 
 add_subdirectory(utils)
 add_subdirectory(tools)
@@ -72,8 +72,7 @@ string(
 )
 
 add_library(benchmark_base INTERFACE)
-target_include_directories(benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/external" "utils" "")
-target_include_directories(benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/external" "utils")
+target_include_directories(benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/third_party" "utils")
 target_compile_options(benchmark_base INTERFACE $<$<CONFIG:Release>:-march=native>)
 if(CMAKE_COMPILER_IS_GNUCXX)
   target_link_options(benchmark_base INTERFACE $<$<CONFIG:Release>:-flto>)
@@ -295,7 +294,7 @@ add_knapsack_explicit("mq_none;mq_random;mq_random_strict;mq_swapping;mq_perm;kl
 if(MULTIQUEUE_EXP_BUILD_TESTS)
   include(CTest)
   if(NOT TARGET Catch2::Catch2WithMain)
-    add_subdirectory("multiqueue/external/Catch2" EXCLUDE_FROM_ALL)
+    add_subdirectory(third_party/Catch2 EXCLUDE_FROM_ALL)
   endif()
   add_subdirectory(tests)
 endif()
