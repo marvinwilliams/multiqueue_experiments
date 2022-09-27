@@ -6,8 +6,52 @@ library(grid)
 library(gridExtra)
 library(xtable)
 
-pq_levels <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "mq_swapping_c_3_k_64", "mq_perm_c_3_k_4", "mq_perm_c_3_k_16", "mq_perm_c_3_k_64", "wrapper_capq", "wrapper_klsm1024")
-pq_names <- c(mq_random_c_4 = "MQ random C = 4", mq_sticky_c_4_k_4 = "MQ sticky C = 4, K = 4", mq_sticky_c_8_k_8 = "MQ sticky C = 8, K = 8", mq_swapping_c_3_k_4 = "MQ swapping C = 3, K = 4", mq_swapping_c_3_k_16 = "MQ swapping C = 3, K = 16", mq_swapping_c_3_k_64 = "MQ swapping C = 3, K = 64", mq_perm_c_3_k_4 = "MQ permute C = 3, K = 4", mq_perm_c_3_k_16 = "MQ permute C = 3, K = 16", mq_perm_c_3_k_64 = "MQ permute C = 3, K = 64", wrapper_capq = "CA-PQ", wrapper_klsm1024 = "K-Lsm 1024")
+pq_levels <- c("mq_random_c_2",
+               "mq_random_c_4",
+               "mq_sticky_c_4_k_4",
+               "mq_sticky_c_8_k_8",
+               "mq_sticky_c_16_k_64",
+               "mq_swapping_c_3_k_4",
+               "mq_swapping_c_3_k_16",
+               "mq_swapping_c_3_k_64",
+               "mq_swapping_c_8_k_8",
+               "mq_perm_c_4_k_4",
+               "mq_perm_c_4_k_16",
+               "mq_perm_c_4_k_64",
+               "mq_perm_c_8_k_8",
+               "mf_sticky_c_4_k_4",
+               "mf_sticky_c_8_k_8",
+               "tbb_q",
+               "tbb_pq",
+               "capq",
+               "klsm256",
+               "klsm1024",
+               "klsm4096",
+               "linden",
+               "spraylist")
+pq_names <- c(mq_random_c_2 = "MQ random C = 2",
+              mq_random_c_4 = "MQ random C = 4",
+              mq_sticky_c_4_k_4 = "MQ sticky C = 4, K = 4",
+              mq_sticky_c_8_k_8 = "MQ sticky C = 8, K = 8",
+              mq_sticky_c_16_k_64 = "MQ sticky C = 16, K = 64",
+              mq_swapping_c_3_k_4 = "MQ swapping C = 3, K = 4",
+              mq_swapping_c_3_k_16 = "MQ swapping C = 3, K = 16",
+              mq_swapping_c_3_k_64 = "MQ swapping C = 3, K = 64",
+              mq_swapping_c_8_k_8 = "MQ swapping C = 8, K = 8",
+              mq_perm_c_4_k_4 = "MQ permute C = 4, K = 4",
+              mq_perm_c_4_k_16 = "MQ permute C = 4, K = 16",
+              mq_perm_c_4_k_64 = "MQ permute C = 4, K = 64",
+              mq_perm_c_8_k_8 = "MQ permute C = 8, K = 8",
+              mf_sticky_c_4_k_4 = "MF sticky C = 4, K = 4",
+              mf_sticky_c_8_k_8 = "MF sticky C = 8, K = 8",
+              tbb_q = "TBB Concurrent Queue",
+              tbb_pq = "TBB Concurrent PQ",
+              capq = "CA-PQ",
+              klsm256 = "K-Lsm 256",
+              klsm1024 = "K-Lsm 1024",
+              klsm4096 = "K-Lsm 4096",
+              linden = "Linden",
+              spraylist = "Spraylist")
 
 read_histogram <- function(file) {
   data <- read.csv(file = file, header = F, col.names = c("slot", "frequency"), sep = " ")
@@ -20,13 +64,19 @@ read_throughput <- function(file) {
   data <- read.csv(file = file, header = T, sep = " ")
   data <- data %>%
     group_by(threads) %>%
-    summarize(mean = mean(throughput / 1000000), sd = sd(throughput / 1000000))
+    summarize(mean = mean(throughput), sd = sd(throughput))
+  data$mean <- as.double(data$mean)
   data.frame(data)
 }
 
 read_sssp <- function(file) {
   data <- read.csv(file = file, header = F, sep = " ")
   colnames(data) <- c("threads", "time", "relaxed")
+  data
+}
+
+read_knapsack <- function(file) {
+  data <- as.data.frame(read.dcf(file))
   data
 }
 
@@ -41,18 +91,19 @@ plot_throughput_comparison <- function(dir, latex = FALSE) {
   if (latex) {
     tikz(file = "throughput_compare.tex", standAlone = TRUE, width = 6, height = 3)
   }
-  plot <- ggplot(data, aes(x = threads, y = mean, color = name, shape = name)) +
+  selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "capq", "klsm256", "klsm4096", "tbb_pq")
+  plot <- data %>% filter(name %in% selection) %>% ggplot(aes(x = threads, y = mean / 1000000, color = name, shape = name)) +
     geom_line() +
     geom_point() +
-    geom_errorbar(aes(ymin = mean - sd, ymax = mean + sd),
+    geom_errorbar(aes(ymin = (mean - sd) / 1000000, ymax = (mean + sd) / 1000000),
       width = .2,
       position = position_dodge(0.05)
     ) +
     # labs(x = "p", y = bquote(10^6 ~ "Ops/s")) +
     labs(x = "p", y = "$10^6$ Ops/s") +
-    scale_x_continuous("p", labels = c("1", "2", "4", "8", "16", "32", "64"), breaks = c(1, 2, 4, 8, 16, 32, 64), minor_breaks = NULL, limits = c(1, 64), oob = squish, trans = "log2") +
-    scale_color_brewer(palette = "Paired", labels = label_map) +
-    scale_shape_manual(values = seq_len(length(factor(data$name))), labels = label_map) +
+    scale_x_continuous("p", labels = c("1", "2", "4", "8", "16", "32", "64", "64 ht"), breaks = c(1, 2, 4, 8, 16, 32, 64, 128), minor_breaks = NULL, limits = c(1, 80), oob = squish, trans = "log2") +
+    scale_color_brewer(palette = "Paired", labels = pq_names) +
+    scale_shape_manual(values = seq_len(length(factor(data$name))), labels = pq_names) +
     guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
     theme_bw() +
     theme(legend.position = "right", panel.grid.major.x = element_blank(), axis.text = element_text(size = rel(1.2)), axis.title = element_text(size = rel(1.2)), legend.text = element_text(size = rel(1.1)))
@@ -62,7 +113,125 @@ plot_throughput_comparison <- function(dir, latex = FALSE) {
     dev.off()
   } else {
     plot <- plot + labs(x = "p", y = bquote(10^6 ~ "Ops/s"))
-    ggsave(plot, file = "throughput_compare.pdf", width = 6, height = 3.6)
+    #ggsave(plot, file = "throughput_compare.pdf", width = 6, height = 3.6)
+    ggsave(plot, file = "throughput_compare.pdf") #width = 6, height = 3.6)
+  }
+}
+
+plot_rank_comparison <- function(dir) {
+  files <- list.files(dir, pattern = "rank_32.txt", include.dirs = TRUE, recursive = TRUE, full.names = TRUE)
+  data <- do.call(rbind, lapply(files, function(file) {
+    tmp <- read_histogram(file)
+    tmp$name <- str_extract(file, "[^/]+(?=/rank_32.txt)")
+    tmp
+  }))
+  data$name <- factor(data$name, levels = pq_levels)
+  selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "capq", "klsm256", "klsm4096", "tbb_pq")
+  plot <- data %>% filter(name %in% selection) %>% ggplot(aes(x = slot + 1, y = cumulated, color = name)) +
+        geom_line() +
+        coord_cartesian(xlim = c(1, 20000)) +
+        labs(x = "Rank", y = "Cumulative Frequency") +
+        scale_color_brewer(palette = "Paired", labels = pq_names) +
+        guides(color = guide_legend(title = NULL)) +
+        scale_x_log10() +
+        theme_bw() +
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "right", axis.text = element_text(size = rel(1)), axis.title = element_text(size = rel(1.2)))
+      ggsave(plot, file = "rank_compare.pdf", width = 6, height = 3)
+}
+
+plot_delay_comparison <- function(dir) {
+  files <- list.files(dir, pattern = "delay_32.txt", include.dirs = TRUE, recursive = TRUE, full.names = TRUE)
+  data <- do.call(rbind, lapply(files, function(file) {
+    tmp <- read_histogram(file)
+    tmp$name <- str_extract(file, "[^/]+(?=/delay_32.txt)")
+    tmp
+  }))
+  data$name <- factor(data$name, levels = pq_levels)
+  #selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "capq", "klsm256", "klsm4096", "tbb_pq")
+  selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_sticky_c_8_k_64", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "mq_swapping_c_3_k_64", "mf_sticky_c_4_k_4", "mf_sticky_c_8_k_8")
+  plot <- data %>% filter(name %in% selection) %>% ggplot(aes(x = slot + 1, y = cumulated, color = name)) +
+        geom_line() +
+        coord_cartesian(xlim = c(1, 20000)) +
+        labs(x = "Delay", y = "Cumulative Frequency") +
+        scale_color_brewer(palette = "Paired", labels = pq_names) +
+        guides(color = guide_legend(title = NULL)) +
+        scale_x_log10() +
+        theme_bw() +
+        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "right", axis.text = element_text(size = rel(1)), axis.title = element_text(size = rel(1.2)))
+      ggsave(plot, file = "delay_compare.pdf", width = 6, height = 3)
+}
+
+plot_knapsack_time_comparison <- function(dir, pattern, latex = FALSE) {
+  files <- list.files(dir, pattern = pattern, include.dirs = TRUE, recursive = TRUE, full.names = TRUE)
+  data <- do.call(rbind, lapply(files, function(file) {
+    tmp <- read_knapsack(file)
+    tmp$name <- str_extract(file, "[^/]+(?=/knapsack_)")
+    tmp$threads <- as.integer(str_match(file, ".kp_(\\d+).txt")[2])
+    tmp$mode <- str_match(file, "knapsack_([a-z]*)_")[2]
+    tmp
+  }))
+  data$name <- factor(data$name, levels = pq_levels)
+  data$time <- as.double(data$time)
+  if (latex) {
+    tikz(file = paste0(pattern, "_time.tex"), standAlone = TRUE, width = 6, height = 3)
+  }
+  #selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "capq", "klsm256", "klsm4096")
+  selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_sticky_c_8_k_64", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "mq_swapping_c_3_k_64", "mf_sticky_c_4_k_4", "mf_sticky_c_8_k_8")
+  #selection <- c("mf_sticky_c_4_k_4")
+  plot <- data %>% filter(threads > 1 & name %in% selection) %>% ggplot(aes(x = threads, y = time, color = name, shape = name)) +
+    geom_line() +
+    geom_point() +
+    scale_x_continuous("p", labels = c("2", "4", "8", "16", "32", "64", "64 ht"), breaks = c(2, 4, 8, 16, 32, 64, 128), minor_breaks = NULL, limits = c(1, 128), oob = squish, trans = "log2") +
+    scale_color_brewer(palette = "Paired", labels = pq_names) +
+    scale_shape_manual(values = seq_len(length(factor(data$name))), labels = pq_names) +
+    guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
+    theme_bw() +
+    theme(legend.position = "right", panel.grid.major.x = element_blank(), axis.text = element_text(size = rel(1.2)), axis.title = element_text(size = rel(1.2)), legend.text = element_text(size = rel(1.1)))
+  if (latex) {
+    plot <- plot + labs(x = "p", y = "$10^6$ Ops/s")
+    print(plot)
+    dev.off()
+  } else {
+    plot <- plot + labs(x = "p", y = "time (s)")
+    ggsave(plot, file = paste0(pattern, "_time.pdf"), width = 6, height = 3.6)
+  }
+}
+
+plot_knapsack_processed_comparison <- function(dir, pattern, latex = FALSE) {
+  files <- list.files(dir, pattern = pattern, include.dirs = TRUE, recursive = TRUE, full.names = TRUE)
+  data <- do.call(rbind, lapply(files, function(file) {
+    tmp <- read_knapsack(file)
+    tmp$name <- str_extract(file, "[^/]+(?=/knapsack_)")
+    tmp$threads <- as.integer(str_match(file, ".kp_(\\d+).txt")[2])
+    tmp$mode <- str_match(file, "knapsack_([a-z]*)_")[2]
+    tmp
+  }))
+  print(data)
+  data$name <- factor(data$name, levels = pq_levels)
+  names(data) <- str_replace_all(names(data), c(" " = "_"))
+  data$processed_nodes <- as.double(data$processed_nodes) / 1000000
+  if (latex) {
+    tikz(file = paste0(pattern, "_time.tex"), standAlone = TRUE, width = 6, height = 3)
+  }
+  selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "capq", "klsm256", "klsm4096")
+  #selection <- c("mq_random_c_4", "mq_sticky_c_4_k_4", "mq_sticky_c_8_k_8", "mq_sticky_c_8_k_64", "mq_swapping_c_3_k_4", "mq_swapping_c_3_k_16", "mq_swapping_c_3_k_64", "mf_sticky_c_4_k_4", "mf_sticky_c_8_k_8")
+  #selection <- c("mf_sticky_c_4_k_4")
+  plot <- data %>% filter(threads > 1 & name %in% selection) %>% ggplot(aes(x = threads, y = processed_nodes, color = name, shape = name)) +
+    geom_line() +
+    geom_point() +
+    scale_x_continuous("p", labels = c("2", "4", "8", "16", "32", "64", "64 ht"), breaks = c(2, 4, 8, 16, 32, 64, 128), minor_breaks = NULL, limits = c(1, 128), oob = squish, trans = "log2") +
+    scale_color_brewer(palette = "Paired", labels = pq_names) +
+    scale_shape_manual(values = seq_len(length(factor(data$name))), labels = pq_names) +
+    guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL), shape = guide_legend(title = NULL)) +
+    theme_bw() +
+    theme(legend.position = "right", panel.grid.major.x = element_blank(), axis.text = element_text(size = rel(1.2)), axis.title = element_text(size = rel(1.2)), legend.text = element_text(size = rel(1.1)))
+  if (latex) {
+    plot <- plot + labs(x = "p", y = "$10^6$ processed nodes")
+    print(plot)
+    dev.off()
+  } else {
+    plot <- plot + labs(x = "p", y = bquote(10^6 ~ "processed nodes"))
+    ggsave(plot, file = paste0(pattern, "_processed.pdf"), width = 6, height = 3.6)
   }
 }
 
@@ -306,65 +475,6 @@ plot_rank_merging <- function(data, outdir) {
         theme_bw() +
         theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = c(0.85, 0.85))
       ggsave(plot, file = paste(outdir, "/", "rank_merging_", .$threads[1], ".pdf", sep = ""), width = 6, height = 5)
-      .
-    })
-}
-
-plot_rank_comparison <- function(data, outdir) {
-  names <- c("intmq_c_2_k_1_ibs_16_dbs_16_numa", "intmq_c_4_k_1_ibs_16_dbs_16_numa", "intmq_c_4_k_4_ibs_16_dbs_16_numa", "intmq_c_8_k_8_ibs_16_dbs_16_numa", "wrapper_linden", "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
-  # names <- c("nbmq_c_2_k_1", "nbmq_c_4_k_1",  "nbmq_c_4_k_4",   "nbmq_c_8_k_8", "wrapper_linden", "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
-  # labels <- c("MQ (2, 1)", "MQ (4, 1)",   "MultiQueue (4, 4)",    "MultiQueue (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
-  labels <- c("MQ (2, 1)", "MQ (4, 1)", "MQ (4, 4)", "MQ (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
-  # names <- c("fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_8_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_16_k_16_ibs_16_dbs_16_numa", "mergingmq_c_4_k_1_ns_128_numa", "mergingmq_c_4_k_8_ns_128_numa", "mergingmq_c_8_k_8_ns_128_numa", "mergingmq_c_16_k_16_ns_128_numa")
-  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
-  plot_data %>%
-    group_by(threads) %>%
-    do({
-      plot <- ggplot(., aes(x = rank + 1, y = cumulated, color = name, linetype = name)) +
-        geom_line() +
-        scale_x_log10() +
-        coord_cartesian(xlim = c(1, 20000)) +
-        labs(x = "Rank", y = "Cumulative Frequency") +
-        scale_color_manual(breaks = names, values = c(3, 3, 3, 3, 2, 4, 6, 6, 7), labels = labels) +
-        scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 1, 1, 1, 2, 1), labels = labels) +
-        guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
-        theme_bw() +
-        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "right", axis.text = element_text(size = rel(1)), axis.title = element_text(size = rel(1.2)))
-      ggsave(plot, file = paste(outdir, "/", "rank_compare_", .$threads[1], ".eps", sep = ""), width = 6, height = 3)
-      .
-    })
-}
-
-plot_delay_comparison <- function(data, outdir) {
-  names <- c(
-    "intmq_c_2_k_1_ibs_16_dbs_16_numa",
-    "intmq_c_4_k_1_ibs_16_dbs_16_numa",
-    "intmq_c_4_k_4_ibs_16_dbs_16_numa",
-    "intmq_c_8_k_8_ibs_16_dbs_16_numa", "wrapper_linden",
-    "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024",
-    "wrapper_capq"
-  )
-  # names <- c("nbmq_c_2_k_1", "nbmq_c_4_k_1",  "nbmq_c_4_k_4",   "nbmq_c_8_k_8", "wrapper_linden", "wrapper_spraylist", "wrapper_klsm256", "wrapper_klsm1024", "wrapper_capq")
-  labels <- c("MQ (2, 1)", "MQ (4, 1)", "MQ (4, 4)", "MQ (8, 8)", "linden", "spraylist", "klsm256", "klsm1024", "capq")
-  # names <- c("fullbufferingmq_c_4_k_1_ibs_16_dbs_16_numa", "fullbufferingmq_c_4_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_8_k_8_ibs_16_dbs_16_numa", "fullbufferingmq_c_16_k_16_ibs_16_dbs_16_numa", "mergingmq_c_4_k_1_ns_128_numa", "mergingmq_c_4_k_8_ns_128_numa", "mergingmq_c_8_k_8_ns_128_numa", "mergingmq_c_16_k_16_ns_128_numa")
-  plot_data <- data %>% filter(name %in% names & prefill == "1000000" & dist == "uniform" & sleep == "0")
-  plot_data %>%
-    group_by(threads) %>%
-    do({
-      plot <- ggplot(., aes(x = rank + 1, y = cumulated, color = name, linetype = name)) +
-        geom_line() +
-        scale_x_log10() +
-        coord_cartesian(xlim = c(1, 20000)) +
-        labs(x = "Delay", y = "Cumulative Frequency") +
-        scale_color_manual(breaks = names, values = c(3, 3, 3, 3, 2, 4, 6, 6, 7), labels = labels) +
-        scale_linetype_manual(breaks = names, values = c(1, 2, 3, 4, 1, 1, 1, 2, 1), labels = labels) +
-        # guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
-        # theme_bw() +
-        # theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), axis.title.y = element_blank(), axis.text.y=element_blank(), axis.ticks.y = element_blank(),axis.title=element_text(size=rel(1.1)), axis.text=element_text(size=rel(1.1)) , legend.text=element_text(size=rel(1.2)))
-        guides(color = guide_legend(title = NULL), linetype = guide_legend(title = NULL)) +
-        theme_bw() +
-        theme(panel.grid.major = element_blank(), panel.grid.minor = element_blank(), legend.position = "right", axis.text = element_text(size = rel(1)), axis.title = element_text(size = rel(1.2)))
-      ggsave(plot, file = paste(outdir, "/", "delay_compare_", .$threads[1], ".eps", sep = ""), width = 6, height = 3)
       .
     })
 }
