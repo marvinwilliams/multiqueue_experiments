@@ -1,8 +1,8 @@
-[submodule "external/Catch2"]
-	path = external/Catch2
+[submodule "third_party/Catch2"]
+	path = third_party/Catch2
 	url = https://github.com/catchorg/Catch2
-[submodule "external/klsm"]
-	path = external/klsm
+[submodule "third_party/klsm"]
+	path = third_party/klsm
 	url = https://github.com/marvinwilliams/klsm.git
 [submodule "data/kplib"]
 	path = data/kplib
