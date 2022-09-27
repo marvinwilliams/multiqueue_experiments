@@ -11,7 +11,7 @@ execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE DEFAULT_PAGESIZE OUTPUT
 
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 
-if(EXISTS "${EXTERNAL_DIR}/Catch2/CmakeLists.txt")
+if(EXISTS "${EXTERNAL_DIR}/Catch2/CMakeLists.txt")
   add_subdirectory("${EXTERNAL_DIR}/Catch2" EXCLUDE_FROM_ALL)
   option("MULTIQUEUE_EXP_BUILD_TESTS" "Build unit tests for experiment tools" OFF)
 else()
