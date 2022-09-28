@@ -50,7 +50,7 @@ namespace util {
 namespace detail {
 
 #if defined PQ_MQ
-static constexpr ::multiqueue::StickPolicy stick_policy =
+static constexpr multiqueue::StickPolicy stick_policy =
 #ifdef MQ_STICK_POLICY_NONE
     multiqueue::StickPolicy::None
 #elif defined MQ_STICK_POLICY_RANDOM
@@ -71,34 +71,26 @@ static constexpr ::multiqueue::StickPolicy stick_policy =
     ;
 
 template <typename T, typename Compare>
-using InnerPriorityQueue =
-#ifndef MQ_DISABLE_BUFFERING
-    multiqueue::BufferedPQ<
-#endif
+using InnermostPQ =
 #ifdef MQ_PQ_STD
-        std::priority_queue<T, std::vector<T>, Compare>
+    std::priority_queue<T, std::vector<T>, Compare>
+#elif defined MQ_HEAP_ARITY
+    ::multiqueue::Heap<T, Compare, MQ_HEAP_ARITY>
 #else
-    multiqueue::Heap<T, Compare
-#ifdef MQ_HEAP_ARITY
-                     ,
-                     MQ_HEAP_ARITY
+    ::multiqueue::Heap<T, Compare>
 #endif
-                     >
-#endif
-#ifndef MQ_DISABLE_BUFFERING
-        ,
-#ifdef MQ_INSERTION_BUFFERSIZE
-        MQ_INSERTION_BUFFERSIZE
+    ;
+
+template <typename T, typename Compare>
+using SeqPriorityQueue =
+#ifdef MQ_DISABLE_BUFFERING
+    InnermostPQ<T, Compare>
+#elif defined MQ_INSERTION_BUFFERSIZE && defined MQ_DELETION_BUFFERSIZE
+    ::multiqueue::BufferedPQ<InnermostPQ<T, Compare>, MQ_INSERTION_BUFFERSIZE, MQ_DELETION_BUFFERSIZE>
+#elif !defined MQ_INSERTION_BUFFERSIZE && !defined MQ_DELETION_BUFFERSIZE
+    ::multiqueue::BufferedPQ<InnermostPQ<T, Compare>>
 #else
-        multiqueue::BuildConfiguration::DefaultInsertionBuffersize
-#endif
-        ,
-#ifdef MQ_DELETION_BUFFERSIZE
-        MQ_DELETION_BUFFERSIZE
-#else
-        multiqueue::BuildConfiguration::DefaultDeletionBuffersize
-#endif
-        >
+#error Must specify either both buffersizes or none
 #endif
     ;
 #endif
@@ -106,7 +98,7 @@ using InnerPriorityQueue =
 template <typename KeyType, typename ValueType, bool Min = true>
 struct PriorityQueueTypeFactory {
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, SeqPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_KLSM256
@@ -125,7 +117,7 @@ struct PriorityQueueTypeFactory {
 template <typename KeyType, typename ValueType>
 struct PriorityQueueTypeFactory<KeyType, ValueType, false> {
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, SeqPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -140,7 +132,7 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, true> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>, stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>, stick_policy, SeqPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ
@@ -167,7 +159,7 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, false> {
     using KeyType = unsigned long;
     using ValueType = unsigned long;
 #if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<>, stick_policy, InnerPriorityQueue>;
+    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<>, stick_policy, SeqPriorityQueue>;
 #elif defined PQ_MF
     using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
@@ -192,11 +184,6 @@ void describe_type(std::ostream &out, DescribeTag<T>) {
     out << "unknown\n";
 }
 
-template <typename PriorityQueue>
-void describe(std::ostream &out, PriorityQueue const &pq) {
-    pq.describe(out);
-}
-
 #ifdef PQ_MQ
 #ifdef MQ_PQ_STD
 template <typename T, typename Container, typename Compare>
@@ -205,54 +192,64 @@ void describe_type(std::ostream &out, DescribeTag<std::priority_queue<T, Contain
 }
 #endif
 
-template <typename PQ, std::size_t I, std::size_t D>
-void describe_type(std::ostream &out, DescribeType<multiqueue::BufferedPQ<PQ, I, D>> /*unused*/) {
-    out << "Buffered PQ\n";
-    out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
-    out << "PQ type:\n";
-    describe_type(out, DescribeTag<PQ>{});
-}
-
 template <typename T, typename Compare, unsigned int Arity, typename Container>
-void describe_type(std::ostream &out, DescribeType<multiqueue::Heap<T, Compare, Arity, Container>> /*unused*/) {
+void describe_type(std::ostream &out, DescribeTag<multiqueue::Heap<T, Compare, Arity, Container>>) {
     out << "Heap with arity " << Arity << '\n';
 }
 
-inline std::string stick_policy_to_name(StickPolicy policy) {
+template <typename PQ, std::size_t I, std::size_t D>
+void describe_type(std::ostream &out, DescribeTag<multiqueue::BufferedPQ<PQ, I, D>>) {
+    out << "Buffered PQ\n";
+    out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
+    out << "Backing PQ: ";
+    describe_type(out, DescribeTag<PQ>{});
+}
+
+inline std::string stick_policy_to_name(multiqueue::StickPolicy policy) {
     switch (policy) {
-        case StickPolicy::None:
+        case multiqueue::StickPolicy::None:
             return "none";
-        case StickPolicy::RandomStrict:
+        case multiqueue::StickPolicy::RandomStrict:
             return "random (strict)";
-        case StickPolicy::Random:
+        case multiqueue::StickPolicy::Random:
             return "Random";
-        case StickPolicy::Swapping:
+        case multiqueue::StickPolicy::Swapping:
             return "Swapping";
-        case StickPolicy::SwappingBlocking:
+        case multiqueue::StickPolicy::SwappingBlocking:
             return "Swapping (blocking)";
-        case StickPolicy::SwappingLazy:
+        case multiqueue::StickPolicy::SwappingLazy:
             return "Swapping (lazy)";
-        case StickPolicy::Permutation:
+        case multiqueue::StickPolicy::Permutation:
             return "Permutation";
         default:
             return "unknorn";
     }
 }
 
-typename Key, typename T, typename KeyCompare, StickPolicy P,
-    template <typename, typename>
-    typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
-    typename Allocator > void describe(std::ostream &out,
-                                       multiqueue::MultiQueue<Key, T, KeyCompare, P, PriorityQueue, ValueTraits,
-                                                              SentinelTraits, Allocator> const &mq) {
+template <typename Key, typename T, typename KeyCompare, multiqueue::StickPolicy P,
+          template <typename, typename> typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
+          typename Allocator>
+void describe(
+    std::ostream &out,
+    multiqueue::MultiQueue<Key, T, KeyCompare, P, PriorityQueue, ValueTraits, SentinelTraits, Allocator> const &mq) {
     out << "MultiQueue\n";
     out << "Number of PQs: " << mq.num_pqs() << '\n';
     out << "Sentinel: " << SentinelTraits::sentinel() << " (" << (SentinelTraits::is_implicit ? "implicit" : "explicit")
         << ")\n";
     out << "Stick policy: " << stick_policy_to_name(P) << '\n';
-    out << "Inner pq:\n";
-    describe_type(out, DescribeTag<typename PriorityQueue::pq_type::pq_type>{});
+    out << "Sequential PQ: ";
+    describe_type(out,
+                  DescribeTag<typename multiqueue::MultiQueue<Key, T, KeyCompare, P, PriorityQueue, ValueTraits,
+                                                              SentinelTraits, Allocator>::pq_type::pq_type>{});
 }
+
+#else
+
+template <typename KeyType, typename ValueType, bool Min>
+void describe(std::ostream &out, priority_queue_type<KeyType, ValueType, Min> const &pq) {
+    pq.describe(out);
+}
+
 #endif
 }  // namespace describe
 

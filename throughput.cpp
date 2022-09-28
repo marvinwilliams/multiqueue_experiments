@@ -1,11 +1,10 @@
-#include <mutex>
-#include "utils/priority_queue_factory.hpp"
-#include "utils/thread_coordination.hpp"
+#include "common/priority_queue_factory.hpp"
+#include "common/thread_coordination.hpp"
 #ifdef PQ_MQ
 #include "multiqueue/config.hpp"
 #endif
 
-#include "external/cxxopts.hpp"
+#include "cxxopts.hpp"
 
 #ifdef USE_PAPI
 extern "C" {
@@ -26,6 +25,7 @@ extern "C" {
 #include <iterator>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <new>
 #include <numeric>
 #include <random>
@@ -252,7 +252,6 @@ class Benchmark {
 };
 
 int main(int argc, char* argv[]) {
-    std::cout << "Build config\n";
 #ifndef NDEBUG
     std::cout << "Build type: Debug\n";
 #else
@@ -266,12 +265,6 @@ int main(int argc, char* argv[]) {
     std::cout << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
     std::cout << "Pagesize (bytes): " << PAGESIZE << '\n';
     std::cout << '\n';
-
-    std::cout << "Command line:";
-    for (int i = 0; i < argc; ++i) {
-        std::cout << ' ' << argv[i];
-    }
-    std::cout << "\n\n";
 
     Settings settings;
 #ifdef PQ_MQ
@@ -310,8 +303,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Settings\n"
-              << "Threads: " << settings.num_threads << '\n'
+    std::cout << "Command line:";
+    for (int i = 0; i < argc; ++i) {
+        std::cout << ' ' << argv[i];
+    }
+    std::cout << '\n';
+    std::cout << "Threads: " << settings.num_threads << '\n'
               << "Prefill per thread: " << settings.prefill_per_thread << '\n'
               << "Operations per thread: " << settings.operations_per_thread << '\n'
               << "Pop probability: " << std::fixed << std::setprecision(2) << settings.pop_prob << '\n'
@@ -350,8 +347,8 @@ int main(int argc, char* argv[]) {
     auto pq = PriorityQueue(settings.num_threads);
 #endif
 
-    std::cout << "Priority queue\nName: ";
-    util::describe(std::cout, pq);
+    std::cout << "Data structure: ";
+    util::describe::describe(std::cout, pq);
     std::cout << '\n';
 
     Benchmark::Data benchmark_data{};
