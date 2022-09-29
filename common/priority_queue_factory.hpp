@@ -33,7 +33,7 @@
 #error No valid PQ specified
 #endif
 
-#if defined PQ_MQ && defined MQ_PQ_STD
+#if defined PQ_MQ && defined MQ_USE_STD_PQ
 #include <queue>
 #endif
 
@@ -72,7 +72,7 @@ static constexpr multiqueue::StickPolicy stick_policy =
 
 template <typename T, typename Compare>
 using InnermostPQ =
-#ifdef MQ_PQ_STD
+#ifdef MQ_USE_STD_PQ
     std::priority_queue<T, std::vector<T>, Compare>
 #elif defined MQ_HEAP_ARITY
     ::multiqueue::Heap<T, Compare, MQ_HEAP_ARITY>
@@ -123,7 +123,7 @@ struct PriorityQueueTypeFactory<KeyType, ValueType, false> {
 #elif defined PQ_TBB_Q
     using type = wrapper::TBBQueue<KeyType, ValueType>;
 #elif defined PQ_TBB_PQ
-    using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
+    using type = wrapper::TBBPriorityQueue<KeyType, ValueType, std::less<>>;
 #endif
 };
 
@@ -165,7 +165,7 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, false> {
 #elif defined PQ_TBB_Q
     using type = wrapper::TBBQueue<KeyType, ValueType>;
 #elif defined PQ_TBB_PQ
-    using type = wrapper::TBBPriorityQueue<KeyType, ValueType>;
+    using type = wrapper::TBBPriorityQueue<KeyType, ValueType, std::less<>>;
 #endif
 };
 
@@ -185,7 +185,7 @@ void describe_type(std::ostream &out, DescribeTag<T>) {
 }
 
 #ifdef PQ_MQ
-#ifdef MQ_PQ_STD
+#ifdef MQ_USE_STD_PQ
 template <typename T, typename Container, typename Compare>
 void describe_type(std::ostream &out, DescribeTag<std::priority_queue<T, Container, Compare>>) {
     out << "std::priority_queue\n";
@@ -245,8 +245,8 @@ void describe(
 
 #else
 
-template <typename KeyType, typename ValueType, bool Min>
-void describe(std::ostream &out, priority_queue_type<KeyType, ValueType, Min> const &pq) {
+template <typename PriorityQueue>
+void describe(std::ostream &out, PriorityQueue const &pq) {
     pq.describe(out);
 }
 

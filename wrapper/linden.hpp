@@ -9,13 +9,12 @@
 #include <ostream>
 #include <utility>
 
-struct pq_t;
-
 namespace wrapper {
 
 class Linden {
+    struct linden_pq_t;
     struct pq_deleter {
-        void operator()(pq_t*);
+        void operator()(linden_pq_t*);
     };
 
    public:
@@ -25,7 +24,7 @@ class Linden {
     using value_type = std::pair<key_type, mapped_type>;
 
     struct Handle {
-        pq_t* pq_;
+        linden_pq_t* pq_;
 
         void push(value_type const& value) const;
         bool try_pop(value_type& retval) const;
@@ -43,10 +42,10 @@ class Linden {
 
     struct wrapper_type;
 
-    alignas(64) std::unique_ptr<pq_t, pq_deleter> pq_;
+    alignas(64) std::unique_ptr<linden_pq_t, pq_deleter> pq_;
 
    public:
-    Linden(unsigned int num_threads);
+    Linden(int num_threads);
 
     Handle get_handle();
 

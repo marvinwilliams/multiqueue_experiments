@@ -113,16 +113,18 @@ class Context {
 
     template <typename Iter, typename Work>
     void execute_synchronized_blockwise(Iter begin, Iter end, Work work) const {
-        static constexpr std::size_t block_size = 1 << 12;
+        using difference_type = typename std::iterator_traits<Iter>::difference_type;
+        static constexpr difference_type block_size = 1 << 12;
 
-        auto n = static_cast<std::size_t>(end - begin);
+        difference_type n = end - begin;
         shared_data_.barrier.wait();
         while (true) {
-            std::size_t block_begin = shared_data_.index.fetch_add(block_size, std::memory_order_relaxed);
+            auto block_begin =
+                static_cast<difference_type>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
             if (block_begin >= n) {
                 break;
             }
-            std::size_t block_end = std::min(block_begin + block_size, n);
+            auto block_end = std::min(block_begin + block_size, n);
             work(begin + block_begin, begin + block_end);
         }
         shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });
@@ -130,16 +132,18 @@ class Context {
 
     template <typename Iter, typename Work>
     void execute_synchronized_blockwise_timed(duration_type& duration, Iter begin, Iter end, Work work) const {
-        static constexpr std::size_t block_size = 1 << 12;
+        using difference_type = typename std::iterator_traits<Iter>::difference_type;
+        static constexpr difference_type block_size = 1 << 12;
 
-        auto n = static_cast<std::size_t>(end - begin);
+        difference_type n = end - begin;
         shared_data_.barrier.wait([this] { shared_data_.timestamp = std::chrono::steady_clock::now(); });
         while (true) {
-            std::size_t block_begin = shared_data_.index.fetch_add(block_size, std::memory_order_relaxed);
+            auto block_begin =
+                static_cast<difference_type>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
             if (block_begin >= n) {
                 break;
             }
-            std::size_t block_end = std::min(block_begin + block_size, n);
+            auto block_end = std::min(block_begin + block_size, n);
             work(begin + block_begin, begin + block_end);
         }
         shared_data_.barrier.wait([this, &duration] {
@@ -195,9 +199,10 @@ class TaskHandle {
     template <typename Affinity, typename... Args>
     std::future<result_type> run(Affinity affinity, Args... args) {
         auto future = promise_.get_future();
-        for (int i = 0; i < threads_.size(); ++i) {
-            Context ctx{shared_data_, i};
-            threads_[i] = threading::pthread(affinity(i), Task::run, ctx, std::ref(promise_), args...);
+        for (std::size_t i = 0; i < threads_.size(); ++i) {
+            Context ctx{shared_data_, static_cast<int>(i)};
+            threads_[i] =
+                threading::pthread(affinity(static_cast<int>(i)), Task::run, ctx, std::ref(promise_), args...);
         }
         return future;
     }

@@ -27,17 +27,17 @@ class Klsm {
 
    public:
     class Handle {
-        pq_type* pq_;
+        pq_type& pq_;
 
        public:
         Handle(pq_type& pq) : pq_{pq} {
         }
 
         void push(value_type const& value) {
-            pq_->insert(value.first, value.second);
+            pq_.insert(value.first, value.second);
         }
         bool try_pop(value_type& retval) {
-            return pq_->delete_min(retval.first, retval.second);
+            return pq_.delete_min(retval.first, retval.second);
         }
     };
 
@@ -47,11 +47,11 @@ class Klsm {
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {
+    Klsm(int /* num_threads */) : pq_(new pq_type) {
     }
 
     Handle get_handle() {
-        return Handle{pq_.get()};
+        return Handle{*pq_.get()};
     }
 
     void push(value_type const& value) {

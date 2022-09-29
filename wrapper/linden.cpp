@@ -13,16 +13,18 @@ extern "C" {
 
 namespace wrapper {
 
-void Linden::pq_deleter::operator()(pq_t* p) {
+struct Linden::linden_pq_t : pq_t {};
+
+void Linden::pq_deleter::operator()(linden_pq_t* p) {
     // Avoid segfault
-    ::insert(p, 1, 1);
-    pq_destroy(p);
+    ::insert(static_cast<pq_t*>(p), 1, 1);
+    pq_destroy(static_cast<pq_t*>(p));
     _destroy_gc_subsystem();
 }
 
-Linden::Linden(unsigned int /* num_threads */) {
+Linden::Linden(int /* num_threads */) {
     _init_gc_subsystem();
-    pq_.reset(pq_init(32));
+    pq_.reset(static_cast<linden_pq_t*>(pq_init(32)));
 }
 
 void Linden::Handle::push(value_type const& value) const {

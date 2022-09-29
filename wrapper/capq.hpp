@@ -45,7 +45,7 @@ class Capq {
     alignas(64) std::unique_ptr<CAPQ, CAPQ_deleter> pq_;
 
    public:
-    Capq(unsigned int /* num_threads */);
+    Capq(int /*num threads*/);
 
     Handle get_handle();
 

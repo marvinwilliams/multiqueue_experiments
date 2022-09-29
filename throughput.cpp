@@ -373,7 +373,7 @@ int main(int argc, char* argv[]) {
 #ifdef USE_PAPI
     std::cout << "Cache accesses/misses: " << result.cache_accesses << '/' << result.cache_misses << '\n';
 #else
-    std::cout << "Cache accesses/misses: not measured\n";
+    std::cout << "Cache accesses/misses: 0/0\n";
 #endif
 
     if (!out_file.empty()) {

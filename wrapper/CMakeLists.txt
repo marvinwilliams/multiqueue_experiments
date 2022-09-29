@@ -4,27 +4,6 @@ add_library(wrapper INTERFACE)
 target_include_directories(wrapper INTERFACE "..")
 
 add_library(
-  capq STATIC
-  ${EXTERNAL_DIR}/klsm/lib/capq/capq.c
-  ${EXTERNAL_DIR}/klsm/lib/capq/fat_skiplist.c
-  ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc/locks/qd_lock.c
-  ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc/locks/tatas_lock.c
-  ${EXTERNAL_DIR}/klsm/lib/capq/gc/gc.c
-  ${EXTERNAL_DIR}/klsm/lib/capq/gc/ptst.c
-  capq.cpp
-)
-target_link_libraries(capq PUBLIC wrapper)
-target_include_directories(
-  capq PRIVATE
-  ${EXTERNAL_DIR}/klsm/lib
-  ${EXTERNAL_DIR}/klsm/lib/capq
-  ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc
-)
-target_compile_options(capq PRIVATE -w -std=gnu++11)
-target_compile_definitions(capq PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
-target_compile_definitions(capq INTERFACE PQ_CAPQ)
-
-add_library(
   klsm STATIC
   ${EXTERNAL_DIR}/klsm/src/util/thread_local_ptr.cpp
 )
@@ -66,6 +45,27 @@ target_include_directories(
 )
 set_property(TARGET linden PROPERTY pq_name linden)
 target_compile_definitions(linden INTERFACE PQ_LINDEN)
+
+add_library(
+  capq STATIC
+  ${EXTERNAL_DIR}/klsm/lib/capq/capq.c
+  ${EXTERNAL_DIR}/klsm/lib/capq/fat_skiplist.c
+  ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc/locks/qd_lock.c
+  ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc/locks/tatas_lock.c
+  ${EXTERNAL_DIR}/klsm/lib/capq/gc/gc.c
+  ${EXTERNAL_DIR}/klsm/lib/capq/gc/ptst.c
+  capq.cpp
+)
+target_link_libraries(capq PUBLIC wrapper linden)
+target_include_directories(
+  capq PRIVATE
+  ${EXTERNAL_DIR}/klsm/lib
+  ${EXTERNAL_DIR}/klsm/lib/capq
+  ${EXTERNAL_DIR}/klsm/lib/capq/qdlocksrc
+)
+target_compile_options(capq PRIVATE -w -std=gnu++11)
+target_compile_definitions(capq PRIVATE INTEL CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+target_compile_definitions(capq INTERFACE PQ_CAPQ)
 
 add_library(
   spraylist STATIC

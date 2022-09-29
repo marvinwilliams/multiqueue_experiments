@@ -9,11 +9,10 @@
 **/
 
 #pragma once
-#ifndef BARRIER_HPP_INCLUDED
-#define BARRIER_HPP_INCLUDED
 
 #include <pthread.h>
 
+#include <cassert>
 #include <exception>
 #include <iostream>
 #include <system_error>
@@ -61,5 +60,3 @@ class barrier {
 };
 
 }  // namespace utils
-
-#endif  //! BARRIER_HPP_INCLUDED
