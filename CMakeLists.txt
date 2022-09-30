@@ -198,8 +198,13 @@ foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
 endforeach()
 
 add_custom_target(throughput_tuning)
-foreach (t ${mq_tuning_targets})
+foreach(t ${mq_tuning_targets})
   add_dependencies(throughput_tuning throughput_${t})
+endforeach()
+
+add_custom_target(throughput_all)
+foreach(t ${mq_targets} ${wrapper_targets})
+  add_dependencies(throughput_all throughput_${t})
 endforeach()
 
 add_library(quality INTERFACE)
@@ -214,7 +219,6 @@ foreach(target ${mq_targets} ${wrapper_targets})
     add_test(NAME quality_${target}_large COMMAND /bin/bash -c "$<TARGET_FILE:quality_${target}> -j 8 | $<TARGET_FILE:evaluate_quality> -v")
   endif()
 endforeach()
-
 
 add_library(insert_delete INTERFACE)
 target_sources(insert_delete INTERFACE insert_delete.cpp)
