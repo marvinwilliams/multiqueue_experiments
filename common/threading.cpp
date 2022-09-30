@@ -69,7 +69,7 @@ void pthread::init_attr(pthread_attr_t &attr, thread_config const &config) {
     if (!config.cpu_set.none()) {
         cpu_set_t set{};
         CPU_ZERO(&set);
-        for (std::size_t i = 0; i < config.cpu_set.size(); ++i) {
+        for (int i = 0; i < config.cpu_set.size(); ++i) {
             if (config.cpu_set[i]) {
                 CPU_SET(i, &set);
             }

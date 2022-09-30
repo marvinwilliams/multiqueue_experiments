@@ -1,5 +1,4 @@
-#ifndef THREAD_COORDINATION_HPP_7F7173D6
-#define THREAD_COORDINATION_HPP_7F7173D6
+#pragma once
 
 #include "barrier.hpp"
 #include "threading.hpp"
@@ -15,10 +14,6 @@
 #include <utility>
 #include <vector>
 
-#ifndef L1_CACHE_LINESIZE
-#define L1_CACHE_LINESIZE 64
-#endif
-
 namespace thread_coordination {
 
 using duration_type = std::chrono::steady_clock::duration;
@@ -33,7 +28,7 @@ class ScopedOutput {
     out_type& out_;
 
    public:
-    explicit ScopedOutput(std::mutex& mutex, out_type& out, int id) : out_{out} {
+    explicit ScopedOutput(std::mutex& mutex, out_type& out, unsigned int id) : out_{out} {
         l_ = std::unique_lock{mutex};
         out_ << "[Thread " << id << "] ";
     }
@@ -48,13 +43,13 @@ class ScopedOutput {
 struct SharedData {
     using clock_type = std::chrono::steady_clock;
 
-    int num_threads;
+    unsigned int num_threads;
     utils::barrier barrier;
-    alignas(L1_CACHE_LINESIZE) std::atomic_size_t index{0};
     clock_type::time_point timestamp;
     std::mutex write_mutex;
+    alignas(64) std::atomic_size_t index{0};
 
-    explicit SharedData(int n) : num_threads{n}, barrier{n} {
+    explicit SharedData(unsigned int n) : num_threads{n}, barrier{n} {
     }
 };
 
@@ -67,17 +62,17 @@ class Context {
     using duration_type = detail::SharedData::clock_type::duration;
 
     detail::SharedData& shared_data_;
-    int id_;
+    unsigned int id_;
 
-    Context(detail::SharedData& sd, int id) : shared_data_{sd}, id_{id} {
+    Context(detail::SharedData& sd, unsigned int id) : shared_data_{sd}, id_{id} {
     }
 
    public:
-    [[nodiscard]] int get_num_threads() const noexcept {
+    [[nodiscard]] unsigned int get_num_threads() const noexcept {
         return shared_data_.num_threads;
     };
 
-    [[nodiscard]] int get_id() const noexcept {
+    [[nodiscard]] unsigned int get_id() const noexcept {
         return id_;
     }
 
@@ -155,20 +150,20 @@ class Context {
 namespace affinity {
 
 struct individual_cores {
-    std::size_t stride = 1;
-    std::size_t offset = 0;
+    unsigned int stride = 1;
+    unsigned int offset = 0;
 
-    threading::thread_config operator()(int id) const {
+    threading::thread_config operator()(unsigned int id) const {
         threading::thread_config cfg;
-        cfg.cpu_set.set(offset + static_cast<std::size_t>(id) * stride);
+        cfg.cpu_set.set(offset + id * stride);
         return cfg;
     }
 };
 
 struct same_core {
-    std::size_t core = 1;
+    unsigned int core = 1;
 
-    threading::thread_config operator()(int /*unused*/) const {
+    threading::thread_config operator()(unsigned int /*unused*/) const {
         threading::thread_config cfg;
         cfg.cpu_set.set(core);
         return cfg;
@@ -184,16 +179,16 @@ class TaskHandle {
 
    public:
     template <typename... Args>
-    explicit TaskHandle(Affinity affinity, int num_threads, Args... args)
-        : threads_(static_cast<std::size_t>(num_threads)), shared_data_(num_threads) {
-        for (std::size_t i = 0; i < threads_.size(); ++i) {
-            Context ctx{shared_data_, static_cast<int>(i)};
-            threads_[i] = threading::pthread(affinity(static_cast<int>(i)), Task::run, ctx, args...);
+    explicit TaskHandle(Affinity affinity, unsigned int num_threads, Args... args)
+        : threads_(num_threads), shared_data_(num_threads) {
+        for (unsigned int i = 0; i < threads_.size(); ++i) {
+            Context ctx{shared_data_, i};
+            threads_[i] = threading::pthread(affinity(i), Task::run, ctx, args...);
         }
     }
 
     template <typename... Args>
-    explicit TaskHandle(int num_threads, Args... args) : TaskHandle(Affinity{}, num_threads, args...) {
+    explicit TaskHandle(unsigned int num_threads, Args... args) : TaskHandle(Affinity{}, num_threads, args...) {
     }
 
     TaskHandle(TaskHandle const&) = delete;
@@ -210,5 +205,3 @@ class TaskHandle {
 };
 
 }  // namespace thread_coordination
-
-#endif

@@ -47,11 +47,11 @@ class Spraylist {
     static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
     alignas(64) std::unique_ptr<sl_intset_t, sl_intset_deleter> pq_;
-    int num_threads_;
+    unsigned int num_threads_;
     std::unique_ptr<thread_data_t, thread_data_deleter> thread_data_;
 
    public:
-    explicit Spraylist(int num_threads);
+    explicit Spraylist(unsigned int num_threads);
 
     Handle get_handle();
 

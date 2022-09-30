@@ -220,6 +220,11 @@ foreach(target ${mq_targets} ${wrapper_targets})
   endif()
 endforeach()
 
+add_custom_target(quality_all)
+foreach(t ${mq_targets} ${wrapper_targets})
+  add_dependencies(quality_all quality_${t})
+endforeach()
+
 add_library(insert_delete INTERFACE)
 target_sources(insert_delete INTERFACE insert_delete.cpp)
 target_link_libraries(insert_delete INTERFACE thread_coordination benchmark_base)

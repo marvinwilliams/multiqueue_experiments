@@ -9,7 +9,6 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <condition_variable>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -18,12 +17,12 @@
 #include <iterator>
 #include <limits>
 #include <memory>
-#include <mutex>
 #include <new>
 #include <numeric>
 #include <random>
 #include <type_traits>
 #include <utility>
+#include <vector>
 
 #ifdef USE_PAPI
 extern "C" {
@@ -35,41 +34,18 @@ extern "C" {
 using key_type = unsigned long;
 using value_type = unsigned long;
 
-class Operation {
-    key_type data;
-
-   public:
-    static constexpr key_type PopOp = 0;
-
-    Operation() : data{PopOp} {
-    }
-
-    Operation(key_type insert_key) : data{insert_key} {
-        assert(insert_key != PopOp);
-    }
-
-    [[nodiscard]] constexpr bool is_pop() const noexcept {
-        return data == PopOp;
-    }
-    [[nodiscard]] constexpr key_type get_insert_key() const noexcept {
-        assert(!is_pop());
-        return data;
-    }
-};
-
 using PriorityQueue = util::priority_queue_type<key_type, value_type, true>;
-using Handle = typename PriorityQueue::handle_type;
 
 static constexpr std::size_t DefaultPrefillPerThread = 1 << 20;
 static constexpr std::size_t DefaultOperationsPerThread = 1 << 24;
-static constexpr int DefaultNumThreads = 4;
+static constexpr unsigned int DefaultNumThreads = 4;
 static constexpr double DefaultPopProbability = 0.5;
 static constexpr key_type DefaultMaxKey = key_type{1} << 30;
 
 struct Settings {
     std::size_t prefill_per_thread = DefaultPrefillPerThread;
     std::size_t operations_per_thread = DefaultOperationsPerThread;
-    int num_threads = DefaultNumThreads;
+    unsigned int num_threads = DefaultNumThreads;
     double pop_prob = DefaultPopProbability;
     std::uint32_t seed = 1;
     key_type min_key = 1;
@@ -78,32 +54,42 @@ struct Settings {
 
 class Benchmark {
    public:
+    using Handle = typename PriorityQueue::handle_type;
+
+    using tick_type = std::uint64_t;
+
+    class Operation {
+        key_type data;
+
+       public:
+        static constexpr key_type PopOp = 0;
+
+        Operation() : data{PopOp} {
+        }
+
+        Operation(key_type insert_key) : data{insert_key} {
+            assert(insert_key != PopOp);
+        }
+
+        [[nodiscard]] constexpr bool is_pop() const noexcept {
+            return data == PopOp;
+        }
+        [[nodiscard]] constexpr key_type get_insert_key() const noexcept {
+            assert(!is_pop());
+            return data;
+        }
+    };
     struct Data {
         std::vector<Operation> operations;
-        bool fail = false;
         thread_coordination::duration_type prefill_time{};
         thread_coordination::duration_type work_time{};
-        std::atomic_size_t num_failed_pops = 0;
-        std::atomic_size_t cache_accesses = 0;
-        std::atomic_size_t cache_misses = 0;
+        std::atomic_uint num_failed_pops = 0;
+        std::atomic_llong cache_accesses = 0;
+        std::atomic_llong cache_misses = 0;
         std::mutex m;
     };
 
    private:
-    static bool check_operations(std::size_t prefill_elements, std::vector<Operation>& ops) {
-        for (auto op : ops) {
-            if (op.is_pop()) {
-                if (prefill_elements == 0) {
-                    return false;
-                }
-                --prefill_elements;
-            } else {
-                ++prefill_elements;
-            }
-        }
-        return true;
-    }
-
 #ifdef USE_PAPI
     static bool start_performance_counter(int& event_set) {
         if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
@@ -126,7 +112,7 @@ class Benchmark {
 #endif
 
     static void work(thread_coordination::Context const& ctx, Handle& handle, Data& data) {
-        std::size_t num_failed_pops = 0;
+        unsigned int num_failed_pops = 0;
 #ifdef USE_PAPI
         int event_set = PAPI_NULL;
         bool papi_started = start_performance_counter(event_set);
@@ -141,7 +127,7 @@ class Benchmark {
                                                              PriorityQueue::value_type retval;
                                                              // Let retval escape
                                                              asm volatile("" ::"g"(&retval));
-                                                             while (!handle.try_pop(retval)) {
+                                                             if (!handle.try_pop(retval)) {
                                                                  ++num_failed_pops;
                                                              }
                                                              // "Use" memory to force write to retval
@@ -158,8 +144,8 @@ class Benchmark {
             if (int ret = PAPI_stop(event_set, cache_stats); ret != PAPI_OK) {
                 ctx.write(std::cerr) << "Failed to stop counters\n";
             } else {
-                data.cache_accesses += static_cast<std::size_t>(cache_stats[0]);
-                data.cache_misses += static_cast<std::size_t>(cache_stats[1]);
+                data.cache_accesses += cache_stats[0];
+                data.cache_misses += cache_stats[1];
             }
         }
 #endif
@@ -187,23 +173,7 @@ class Benchmark {
         std::generate_n(block_begin, settings.operations_per_thread,
                         [&]() { return pop_dist(rng) ? Operation{} : Operation{key_dist(rng)}; });
 
-        ctx.synchronize([&settings, &data]() {
-            std::clog << "done\nChecking operations..." << std::flush;
-            std::size_t num_prefill_elements =
-                static_cast<std::size_t>(settings.num_threads) * settings.prefill_per_thread;
-            if (!check_operations(num_prefill_elements, data.operations)) {
-                std::cerr << "\nError: Invalid operation sequence, increase prefill or decrease pop probability\n";
-                data.fail = true;
-            } else {
-                std::clog << "done\nPrefilling..." << std::flush;
-            }
-        });
-
-        ctx.synchronize();
-
-        if (data.fail) {
-            return;
-        }
+        ctx.synchronize([]() { std::clog << "done\nPrefilling..." << std::flush; });
 
         Handle handle = [&data, &pq]() {
             std::scoped_lock l{data.m};
@@ -247,13 +217,14 @@ int main(int argc, char* argv[]) {
 #ifdef PQ_MQ
     multiqueue::Config mq_config;
 #endif
+
     std::filesystem::path out_file;
 
     cxxopts::Options options(argv[0]);
     options.add_options()
         // clang-format off
         ("h,help", "Print this help")
-        ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
+        ("j,threads", "The number of threads", cxxopts::value<unsigned int>(settings.num_threads), "NUMBER")
         ("p,prefill", "The prefill per thread", cxxopts::value<std::size_t>(settings.prefill_per_thread), "NUMBER")
         ("n,ops", "The number of operations per thread", cxxopts::value<std::size_t>(settings.operations_per_thread), "NUMBER")
         ("d,pop-prob", "Specify the probability of pops in [0,1]", cxxopts::value<double>(settings.pop_prob), "NUMBER")
@@ -261,10 +232,10 @@ int main(int argc, char* argv[]) {
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
         ("s,seed", "Specify the initial seed", cxxopts::value<std::uint32_t>(settings.seed), "NUMBER")
 #ifdef PQ_MQ
-        ("c,factor", "The factor for queues", cxxopts::value<int>(mq_config.c), "NUMBER")
-        ("k,stickiness", "The stickiness period", cxxopts::value<int>(mq_config.stickiness), "NUMBER")
+        ("c,factor", "The factor for queues", cxxopts::value<unsigned int>(mq_config.c), "NUMBER")
+        ("k,stickiness", "The stickiness period", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
 #endif
-        ("o,outfile", "Write the benchmark results to file", cxxopts::value<std::filesystem::path>(out_file), "PATH")
+        ("o,outfile", "Output data in csv (comma-separated)", cxxopts::value<std::filesystem::path>(out_file), "PATH")
         // clang-format on
         ;
 
@@ -335,16 +306,12 @@ int main(int argc, char* argv[]) {
                                                            std::ref(benchmark_data), std::ref(pq));
 
     task_handle.join();
-    if (benchmark_data.fail) {
-        std::cerr << "Benchmark failed\n";
-        return 1;
-    }
 
-    std::cout << "Failed pops: " << benchmark_data.num_failed_pops << '\n';
     std::cout << "Prefill time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.prefill_time).count() << '\n';
     std::cout << "Work time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.work_time).count() << '\n';
+    std::cout << "Failed pops: " << benchmark_data.num_failed_pops << '\n';
 #ifdef USE_PAPI
     std::cout << "Cache accesses/misses: " << benchmark_data.cache_accesses << '/' << benchmark_data.cache_misses
               << '\n';
@@ -359,13 +326,13 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         out << "threads,prefill,operations,pop_prob,min_key,max_key,"
-               "seed,failed_pops,prefill_time,work_time"
-            << ",cache_accesses,cache_misses" << '\n';
+               "seed,prefill_time,work_time,failed_pops,cache_accesses,cache_misses\n";
         out << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.operations_per_thread
             << ',' << settings.pop_prob << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed
-            << ',' << benchmark_data.num_failed_pops << ',' << std::fixed << std::setprecision(3)
+            << ',' << std::fixed << std::setprecision(3)
             << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ',' << std::fixed
-            << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count()
+            << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << ','
+            << benchmark_data.num_failed_pops
 #ifdef USE_PAPI
             << ',' << benchmark_data.cache_accesses << ',' << benchmark_data.cache_misses
 #else

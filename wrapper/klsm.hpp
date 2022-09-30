@@ -47,7 +47,7 @@ class Klsm {
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    Klsm(int /* num_threads */) : pq_(new pq_type) {
+    Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {
     }
 
     Handle get_handle() {

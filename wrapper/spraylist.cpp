@@ -22,7 +22,7 @@ namespace wrapper {
 void Spraylist::sl_intset_deleter::operator()(sl_intset_t* p) { /*sl_set_delete(p);*/ }
 void Spraylist::thread_data_deleter::operator()(thread_data_t* p) { delete p; }
 
-Spraylist::Spraylist(int num_threads) : num_threads_(num_threads + 1) {
+Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads + 1) {
   ssalloc_init(num_threads_);
   seeds = seed_rand();
   *levelmax = floor_log_2(1'000'000);

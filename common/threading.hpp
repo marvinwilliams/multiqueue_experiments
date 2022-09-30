@@ -146,7 +146,7 @@ class pthread {
 
     void set_priority(int priority);
 
-    void pin_to_core(size_t core);
+    void pin_to_core(std::size_t core);
 
     void set_affinity(std::bitset<CPU_SETSIZE> const &cpu_set);
 

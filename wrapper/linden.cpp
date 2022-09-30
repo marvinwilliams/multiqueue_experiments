@@ -22,7 +22,7 @@ void Linden::pq_deleter::operator()(linden_pq_t* p) {
     _destroy_gc_subsystem();
 }
 
-Linden::Linden(int /* num_threads */) {
+Linden::Linden(unsigned int /* num_threads */) {
     _init_gc_subsystem();
     pq_.reset(static_cast<linden_pq_t*>(pq_init(32)));
 }
