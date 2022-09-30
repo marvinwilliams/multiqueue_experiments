@@ -129,7 +129,7 @@ target_compile_definitions(mq_std_buffered INTERFACE MQ_USE_STD_PQ)
 target_link_libraries(mq_std_buffered INTERFACE mq_interface)
 list(APPEND mq_tuning_targets mq_std_buffered)
 
-function(add_mq_variant ibs dbs d)
+function(add_tuning_variant ibs dbs d)
   set(name mq_ibs_${ibs}_dbs_${dbs}_d_${d})
   add_library(${name} INTERFACE)
   target_compile_definitions(${name} INTERFACE MQ_INSERTION_BUFFERSIZE=${ibs} MQ_DELETION_BUFFERSIZE=${dbs} MQ_HEAP_ARITY=${d})
@@ -141,12 +141,10 @@ endfunction()
 
 foreach(ibs 4 8 16 64 128)
   foreach(dbs 4 8 16 64 128)
-    add_mq_variant(${ibs} ${dbs} 8)
+    foreach(d 2 4 8 16 64)
+      add_tuning_variant(${ibs} ${dbs} ${d})
+    endforeach()
   endforeach()
-endforeach()
-foreach(d 2 4 16 64)
-  add_mq_variant(16 16 ${d})
-  add_mq_variant(64 64 ${d})
 endforeach()
 
 add_library(mq_none INTERFACE)
@@ -188,15 +186,20 @@ add_library(mf INTERFACE)
 target_compile_definitions(mf INTERFACE PQ_MF)
 target_link_libraries(mf INTERFACE multififo::multififo)
 
-set(wrapper_targets capq klsm256 klsm1024 klsm4096 linden spraylist tbb_pq)
-
 add_library(throughput INTERFACE)
 target_sources(throughput INTERFACE throughput.cpp)
 target_link_libraries(throughput INTERFACE thread_coordination benchmark_base)
 
+set(wrapper_targets capq klsm256 klsm1024 klsm4096 linden spraylist tbb_pq)
+
 foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   add_executable(throughput_${target})
   target_link_libraries(throughput_${target} PRIVATE ${target} throughput)
+endforeach()
+
+add_custom_target(throughput_tuning)
+foreach (t ${mq_tuning_targets})
+  add_dependencies(throughput_tuning throughput_${t})
 endforeach()
 
 add_library(quality INTERFACE)
@@ -211,6 +214,7 @@ foreach(target ${mq_targets} ${wrapper_targets})
     add_test(NAME quality_${target}_large COMMAND /bin/bash -c "$<TARGET_FILE:quality_${target}> -j 8 | $<TARGET_FILE:evaluate_quality> -v")
   endif()
 endforeach()
+
 
 add_library(insert_delete INTERFACE)
 target_sources(insert_delete INTERFACE insert_delete.cpp)

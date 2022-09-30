@@ -10,7 +10,6 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
-#include <future>
 #include <mutex>
 #include <ostream>
 #include <utility>
@@ -62,7 +61,7 @@ struct SharedData {
 }  // namespace detail
 
 class Context {
-    template <typename Task>
+    template <typename Affinity, typename Task>
     friend class TaskHandle;
 
     using duration_type = detail::SharedData::clock_type::duration;
@@ -178,16 +177,23 @@ struct same_core {
 
 }  // namespace affinity
 
-template <typename Task>
+template <typename Task, typename Affinity = affinity::individual_cores>
 class TaskHandle {
-    using result_type = typename Task::result_type;
-
     std::vector<threading::pthread> threads_;
     detail::SharedData shared_data_;
-    std::promise<result_type> promise_;
 
    public:
-    explicit TaskHandle(int num_threads) : threads_(static_cast<std::size_t>(num_threads)), shared_data_(num_threads) {
+    template <typename... Args>
+    explicit TaskHandle(Affinity affinity, int num_threads, Args... args)
+        : threads_(static_cast<std::size_t>(num_threads)), shared_data_(num_threads) {
+        for (std::size_t i = 0; i < threads_.size(); ++i) {
+            Context ctx{shared_data_, static_cast<int>(i)};
+            threads_[i] = threading::pthread(affinity(static_cast<int>(i)), Task::run, ctx, args...);
+        }
+    }
+
+    template <typename... Args>
+    explicit TaskHandle(int num_threads, Args... args) : TaskHandle(Affinity{}, num_threads, args...) {
     }
 
     TaskHandle(TaskHandle const&) = delete;
@@ -195,17 +201,6 @@ class TaskHandle {
     TaskHandle& operator=(TaskHandle const&) = delete;
     TaskHandle& operator=(TaskHandle&&) noexcept = default;
     ~TaskHandle() = default;
-
-    template <typename Affinity, typename... Args>
-    std::future<result_type> run(Affinity affinity, Args... args) {
-        auto future = promise_.get_future();
-        for (std::size_t i = 0; i < threads_.size(); ++i) {
-            Context ctx{shared_data_, static_cast<int>(i)};
-            threads_[i] =
-                threading::pthread(affinity(static_cast<int>(i)), Task::run, ctx, std::ref(promise_), args...);
-        }
-        return future;
-    }
 
     void join() {
         for (auto& t : threads_) {
