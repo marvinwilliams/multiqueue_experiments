@@ -98,7 +98,7 @@ class Benchmark {
         if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
             return false;
         }
-        if (int ret = PAPI_add_event(event_set, PAPI_L1_DCA); ret != PAPI_OK) {
+        if (int ret = PAPI_add_named_event(event_set, "perf::L1-DCACHE-LOADS"); ret != PAPI_OK) {
             return false;
         }
         if (int ret = PAPI_add_named_event(event_set, "perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
