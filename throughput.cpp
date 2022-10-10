@@ -84,8 +84,8 @@ class Benchmark {
         thread_coordination::duration_type prefill_time{};
         thread_coordination::duration_type work_time{};
         std::atomic_uint num_failed_pops = 0;
-        std::atomic_llong cache_accesses = 0;
-        std::atomic_llong cache_misses = 0;
+        std::atomic_llong cache_loads = 0;
+        std::atomic_llong cache_load_misses = 0;
         std::mutex m;
     };
 
@@ -144,8 +144,8 @@ class Benchmark {
             if (int ret = PAPI_stop(event_set, cache_stats); ret != PAPI_OK) {
                 ctx.write(std::cerr) << "Failed to stop counters\n";
             } else {
-                data.cache_accesses += cache_stats[0];
-                data.cache_misses += cache_stats[1];
+                data.cache_loads += cache_stats[0];
+                data.cache_load_misses += cache_stats[1];
             }
         }
 #endif
@@ -278,8 +278,8 @@ int main(int argc, char* argv[]) {
         std::cerr << "Error initializing threads for PAPI\n";
         return 1;
     }
-    if (int ret = PAPI_query_event(PAPI_L1_DCA); ret != PAPI_OK) {
-        std::cerr << "Cannot measure cache accesses\n";
+    if (int ret = PAPI_query_named_event("perf::L1-DCACHE-LOADS"); ret != PAPI_OK) {
+        std::cerr << "Cannot measure cache loads\n";
         return 1;
     }
     if (int ret = PAPI_query_named_event("perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
@@ -313,10 +313,10 @@ int main(int argc, char* argv[]) {
               << std::chrono::duration<double>(benchmark_data.work_time).count() << '\n';
     std::cout << "Failed pops: " << benchmark_data.num_failed_pops << '\n';
 #ifdef USE_PAPI
-    std::cout << "Cache accesses/misses: " << benchmark_data.cache_accesses << '/' << benchmark_data.cache_misses
+    std::cout << "Cache loads/misses: " << benchmark_data.cache_loads << '/' << benchmark_data.cache_load_misses
               << '\n';
 #else
-    std::cout << "Cache accesses/misses: 0/0\n";
+    std::cout << "Cache loads/misses: 0/0\n";
 #endif
 
     if (!out_file.empty()) {
@@ -326,7 +326,7 @@ int main(int argc, char* argv[]) {
             return 1;
         }
         out << "threads,prefill,operations,pop_prob,min_key,max_key,"
-               "seed,prefill_time,work_time,failed_pops,cache_accesses,cache_misses\n";
+               "seed,prefill_time,work_time,failed_pops,cache_loads,cache_load_misses\n";
         out << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.operations_per_thread
             << ',' << settings.pop_prob << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed
             << ',' << std::fixed << std::setprecision(3)
@@ -334,7 +334,7 @@ int main(int argc, char* argv[]) {
             << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << ','
             << benchmark_data.num_failed_pops
 #ifdef USE_PAPI
-            << ',' << benchmark_data.cache_accesses << ',' << benchmark_data.cache_misses
+            << ',' << benchmark_data.cache_loads << ',' << benchmark_data.cache_load_misses
 #else
             << ",0,0"
 #endif
