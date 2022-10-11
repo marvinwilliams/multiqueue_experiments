@@ -50,6 +50,7 @@ struct Settings {
     std::uint32_t seed = 1;
     key_type min_key = 1;
     key_type max_key = DefaultMaxKey;
+    bool no_work = false;
 };
 
 class Benchmark {
@@ -189,9 +190,9 @@ class Benchmark {
         if (ctx.get_id() == 0) {
             std::clog << "done\nWorking..." << std::flush;
         }
-
-        work(ctx, handle, data);
-
+        if (!settings.no_work) {
+            work(ctx, handle, data);
+        }
         if (ctx.get_id() == 0) {
             std::clog << "done\n" << std::endl;
         }
@@ -236,6 +237,7 @@ int main(int argc, char* argv[]) {
         ("k,stickiness", "The stickiness period", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
 #endif
         ("o,outfile", "Output data in csv (comma-separated)", cxxopts::value<std::filesystem::path>(out_file), "PATH")
+        ("x,no-work", "Don't perform the actual benchmark", cxxopts::value<bool>(settings.no_work), "PATH")
         // clang-format on
         ;
 
