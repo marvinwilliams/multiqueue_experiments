@@ -11,7 +11,7 @@
       "binaryDir": "build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "MULTIQUEUE_EXP_PC": "ON",
+        "MULTIQUEUE_EXP_PC": "OFF",
         "MULTIQUEUE_BUILD_TESTS": "OFF",
         "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
         "MULTIQUEUE_BUILD_EXAMPLES": "OFF",

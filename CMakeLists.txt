@@ -202,6 +202,11 @@ foreach(t ${mq_tuning_targets})
   add_dependencies(throughput_tuning throughput_${t})
 endforeach()
 
+add_custom_target(throughput_wrapper)
+foreach(t ${wrapper_targets})
+  add_dependencies(throughput_wrapper throughput_${t})
+endforeach()
+
 add_custom_target(throughput_all)
 foreach(t ${mq_targets} ${wrapper_targets})
   add_dependencies(throughput_all throughput_${t})
