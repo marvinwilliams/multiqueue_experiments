@@ -147,6 +147,11 @@ foreach(ibs 4 8 16 64 128)
   endforeach()
 endforeach()
 
+add_library(mq_none_strict INTERFACE)
+target_compile_definitions(mq_none_strict INTERFACE MQ_STICK_POLICY_NONE_STRICT)
+target_link_libraries(mq_none_strict INTERFACE mq_interface)
+list(APPEND mq_targets mq_none_strict)
+
 add_library(mq_none INTERFACE)
 target_compile_definitions(mq_none INTERFACE MQ_STICK_POLICY_NONE)
 target_link_libraries(mq_none INTERFACE mq_interface)

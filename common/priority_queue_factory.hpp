@@ -51,7 +51,9 @@ namespace detail {
 
 #if defined PQ_MQ
 static constexpr multiqueue::StickPolicy stick_policy =
-#ifdef MQ_STICK_POLICY_NONE
+#ifdef MQ_STICK_POLICY_NONE_STRICT
+    multiqueue::StickPolicy::NoneStrict
+#elif defined MQ_STICK_POLICY_NONE
     multiqueue::StickPolicy::None
 #elif defined MQ_STICK_POLICY_RANDOM
     multiqueue::StickPolicy::Random
