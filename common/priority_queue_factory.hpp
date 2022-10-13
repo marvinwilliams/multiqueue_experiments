@@ -209,6 +209,8 @@ void describe_type(std::ostream &out, DescribeTag<multiqueue::BufferedPQ<PQ, I, 
 
 inline std::string stick_policy_to_name(multiqueue::StickPolicy policy) {
     switch (policy) {
+        case multiqueue::StickPolicy::NoneStrict:
+            return "none (strict)";
         case multiqueue::StickPolicy::None:
             return "none";
         case multiqueue::StickPolicy::RandomStrict:
@@ -224,7 +226,7 @@ inline std::string stick_policy_to_name(multiqueue::StickPolicy policy) {
         case multiqueue::StickPolicy::Permutation:
             return "Permutation";
         default:
-            return "unknorn";
+            return "unknown";
     }
 }
 

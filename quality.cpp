@@ -51,15 +51,15 @@ static value_type get_elem_id(value_type value) noexcept {
     return value & value_mask;
 }
 
-static constexpr std::size_t DefaultPrefillPerThread = 1 << 20;
-static constexpr std::size_t DefaultOperationsPerThread = 1 << 24;
+static constexpr std::size_t DefaultPrefill = 1 << 20;
+static constexpr std::size_t DefaultOperations = 1 << 24;
 static constexpr unsigned int DefaultNumThreads = 4;
 static constexpr double DefaultPopProbability = 0.5;
 static constexpr key_type DefaultMaxKey = key_type{1} << 30;
 
 struct Settings {
-    std::size_t prefill_per_thread = DefaultPrefillPerThread;
-    std::size_t operations_per_thread = DefaultOperationsPerThread;
+    std::size_t prefill = DefaultPrefill;
+    std::size_t operations = DefaultOperations;
     unsigned int num_threads = DefaultNumThreads;
     double pop_prob = DefaultPopProbability;
     std::uint32_t seed = 1;
@@ -196,26 +196,22 @@ class Benchmark {
         auto pop_dist = std::bernoulli_distribution(settings.pop_prob);
 
         // Prefill
-        std::vector<key_type> prefill_keys(settings.prefill_per_thread);
+        std::vector<key_type> prefill_keys(settings.prefill / settings.num_threads);
         std::generate(prefill_keys.begin(), prefill_keys.end(), [&key_dist, &rng]() { return key_dist(rng); });
 
         // Workload
-        auto block_begin =
-            data.operations.begin() + ctx.get_id() * static_cast<std::ptrdiff_t>(settings.operations_per_thread);
-        std::generate_n(block_begin, settings.operations_per_thread,
-                        [&]() { return pop_dist(rng) ? Operation{} : Operation{key_dist(rng)}; });
+        ctx.execute_synchronized_blockwise(data.operations.begin(), data.operations.end(),
+                                           [&](auto block_begin, auto block_end) {
+                                               for (auto it = block_begin; it != block_end; ++it) {
+                                                   *it = pop_dist(rng) ? Operation{} : Operation{key_dist(rng)};
+                                               }
+                                           });
+        if (ctx.get_id() == 0) {
+            std::clog << "done\nPrefilling..." << std::flush;
+        }
 
-        ctx.synchronize([]() { std::clog << "done\nPrefilling..." << std::flush; });
-
-        data.pop_log[ctx.get_id()].reserve(
-            static_cast<std::size_t>((static_cast<double>(settings.prefill_per_thread) +
-                                      settings.pop_prob * static_cast<double>(settings.operations_per_thread)) *
-                                     1.5));
-        data.push_log[ctx.get_id()].reserve(
-            static_cast<std::size_t>((static_cast<double>(settings.prefill_per_thread) +
-                                      (1.0 - settings.pop_prob) * static_cast<double>(settings.operations_per_thread)) *
-                                     1.5));
-
+        data.pop_log[ctx.get_id()].reserve(settings.operations);
+        data.push_log[ctx.get_id()].reserve(settings.prefill);
         Handle handle = [&data, &pq]() {
             std::scoped_lock l{data.m};
             return pq.get_handle();
@@ -273,8 +269,8 @@ int main(int argc, char* argv[]) {
         // clang-format off
         ("h,help", "Print this help")
         ("j,threads", "The number of threads", cxxopts::value<unsigned int>(settings.num_threads), "NUMBER")
-        ("p,prefill", "The prefill per thread", cxxopts::value<std::size_t>(settings.prefill_per_thread), "NUMBER")
-        ("n,ops", "The number of operations per thread", cxxopts::value<std::size_t>(settings.operations_per_thread), "NUMBER")
+        ("p,prefill", "The prefill", cxxopts::value<std::size_t>(settings.prefill), "NUMBER")
+        ("n,ops", "The number of operations", cxxopts::value<std::size_t>(settings.operations), "NUMBER")
         ("d,pop-prob", "Specify the probability of pops in [0,1]", cxxopts::value<double>(settings.pop_prob), "NUMBER")
         ("l,min", "Specify the min key", cxxopts::value<key_type>(settings.min_key), "NUMBER")
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
@@ -306,8 +302,8 @@ int main(int argc, char* argv[]) {
     }
     std::cout << '\n';
     std::cout << "Threads: " << settings.num_threads << '\n'
-              << "Prefill per thread: " << settings.prefill_per_thread << '\n'
-              << "Operations per thread: " << settings.operations_per_thread << '\n'
+              << "Prefill: " << settings.prefill << '\n'
+              << "Operations: " << settings.operations << '\n'
               << "Pop probability: " << std::fixed << std::setprecision(2) << settings.pop_prob << '\n'
               << "Min key: " << settings.min_key << '\n'
               << "Max key: " << settings.max_key << '\n'
@@ -336,7 +332,7 @@ int main(int argc, char* argv[]) {
     std::cout << '\n';
 
     Benchmark::Data benchmark_data{};
-    benchmark_data.operations.resize(static_cast<std::size_t>(settings.num_threads) * settings.operations_per_thread);
+    benchmark_data.operations.resize(settings.operations);
     benchmark_data.pop_log.resize(settings.num_threads);
     benchmark_data.push_log.resize(settings.num_threads);
     benchmark_data.failed_pop_log.resize(settings.num_threads);
@@ -355,31 +351,30 @@ int main(int argc, char* argv[]) {
     auto log_out = std::ofstream{log_file};
     if (!log_out.is_open()) {
         std::cerr << "Could not open log file\n";
-        return 1;
-    }
-    log_out << "# " << settings.num_threads << ' ' << settings.prefill_per_thread << '\n';
-    for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& [tick, key] : benchmark_data.push_log[t]) {
-            log_out << "i " << t << ' ' << tick << ' ' << key << '\n';
+    } else {
+        log_out << "# " << settings.num_threads << ' ' << settings.prefill << '\n';
+        for (unsigned int t = 0; t < settings.num_threads; ++t) {
+            for (auto const& [tick, key] : benchmark_data.push_log[t]) {
+                log_out << "i " << t << ' ' << tick << ' ' << key << '\n';
+            }
         }
-    }
 
-    for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& [tick, value] : benchmark_data.pop_log[t]) {
-            log_out << "d " << t << ' ' << tick << ' ' << get_thread_id(value) << ' ' << get_elem_id(value) << '\n';
+        for (unsigned int t = 0; t < settings.num_threads; ++t) {
+            for (auto const& [tick, value] : benchmark_data.pop_log[t]) {
+                log_out << "d " << t << ' ' << tick << ' ' << get_thread_id(value) << ' ' << get_elem_id(value) << '\n';
+            }
         }
-    }
 
-    for (unsigned int t = 0; t < settings.num_threads; ++t) {
-        for (auto const& tick : benchmark_data.failed_pop_log[t]) {
-            log_out << "f " << t << ' ' << tick << '\n';
+        for (unsigned int t = 0; t < settings.num_threads; ++t) {
+            for (auto const& tick : benchmark_data.failed_pop_log[t]) {
+                log_out << "f " << t << ' ' << tick << '\n';
+            }
         }
+
+        log_out << std::flush;
+        log_out.close();
+        std::clog << "done" << std::endl;
     }
-
-    log_out << std::flush;
-    log_out.close();
-    std::clog << "done" << std::endl;
-
     if (!out_file.empty()) {
         auto out = std::ofstream{out_file};
         if (!out.is_open()) {
@@ -388,12 +383,11 @@ int main(int argc, char* argv[]) {
         }
         out << "threads,prefill,operations,pop_prob,min_key,max_key,"
                "seed,prefill_time,work_time\n";
-        out << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.operations_per_thread
-            << ',' << settings.pop_prob << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed
-            << ',' << std::fixed << std::setprecision(3)
-            << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ',' << std::fixed
-            << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << ','
-            << std::endl;
+        out << settings.num_threads << ',' << settings.prefill << ',' << settings.operations << ',' << settings.pop_prob
+            << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed << ',' << std::fixed
+            << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ','
+            << std::fixed << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count()
+            << ',' << std::endl;
     }
     return 0;
 }
