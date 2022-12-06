@@ -270,18 +270,26 @@ int main(int argc, char* argv[]) {
     std::clog << "Writing histograms..." << std::flush;
     {
         auto out_f = std::ofstream{out_rank};
-        for (size_t i = 0; i < rank_histogram.size(); ++i) {
-            if (rank_histogram[i] > 0) {
-                out_f << i << " " << rank_histogram[i] << '\n';
+        if (!out_f) {
+            std::cerr << "Failed to open file to write rank histogram\n";
+        } else {
+            for (size_t i = 0; i < rank_histogram.size(); ++i) {
+                if (rank_histogram[i] > 0) {
+                    out_f << i << " " << rank_histogram[i] << '\n';
+                }
             }
+            out_f.close();
         }
-        out_f.close();
     }
     {
         auto out_f = std::ofstream{out_delay};
-        for (size_t i = 0; i < delay_histogram.size(); ++i) {
-            if (delay_histogram[i] > 0) {
-                out_f << i << " " << delay_histogram[i] << '\n';
+        if (!out_f) {
+            std::cerr << "Failed to open file to write delay histogram\n";
+        } else {
+            for (size_t i = 0; i < delay_histogram.size(); ++i) {
+                if (delay_histogram[i] > 0) {
+                    out_f << i << " " << delay_histogram[i] << '\n';
+                }
             }
         }
         out_f.close();

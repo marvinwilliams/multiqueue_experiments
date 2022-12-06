@@ -87,6 +87,10 @@ class Benchmark {
         std::atomic_uint num_failed_pops = 0;
         std::atomic_llong cache_loads = 0;
         std::atomic_llong cache_load_misses = 0;
+#ifdef MULTIQUEUE_COUNT_STATS
+        std::atomic_size_t num_locking_failed{0};
+        std::atomic_size_t num_resets{0};
+#endif
         std::mutex m;
     };
 
@@ -190,9 +194,17 @@ class Benchmark {
         if (ctx.get_id() == 0) {
             std::clog << "done\nWorking..." << std::flush;
         }
+#ifdef MULTIQUEUE_COUNT_STATS
+        handle.stats.num_locking_failed = 0;
+        handle.stats.num_resets = 0;
+#endif
         if (!settings.no_work) {
             work(ctx, handle, data);
         }
+#ifdef MULTIQUEUE_COUNT_STATS
+        data.num_locking_failed += handle.stats.num_locking_failed;
+        data.num_resets += handle.stats.num_resets;
+#endif
         if (ctx.get_id() == 0) {
             std::clog << "done\n" << std::endl;
         }
@@ -319,6 +331,16 @@ int main(int argc, char* argv[]) {
               << '\n';
 #else
     std::cout << "Cache loads/misses: 0/0\n";
+#endif
+#ifdef MULTIQUEUE_COUNT_STATS
+    std::cout << "Failed locks per operation: "
+              << static_cast<double>(benchmark_data.num_locking_failed) /
+            static_cast<double>(settings.num_threads * settings.operations_per_thread)
+              << '\n';
+    std::cout << "Operations per reset: "
+              << static_cast<double>(settings.num_threads * settings.operations_per_thread) /
+            static_cast<double>(benchmark_data.num_resets)
+              << '\n';
 #endif
 
     if (!out_file.empty()) {

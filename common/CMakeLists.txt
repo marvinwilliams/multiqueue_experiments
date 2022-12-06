@@ -11,7 +11,6 @@ target_sources(threading
   PUBLIC
     threading.hpp
 )
-target_compile_options(threading PRIVATE -fno-omit-frame-pointer)
 
 add_library(thread_coordination INTERFACE)
 target_link_libraries(thread_coordination INTERFACE threading)

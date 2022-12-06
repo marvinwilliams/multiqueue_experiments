@@ -2,8 +2,6 @@
 // under the Boost Software License 1.0
 
 #pragma once
-#ifndef REPLAY_TREE_HPP_INCLUDED
-#define REPLAY_TREE_HPP_INCLUDED
 
 #include <algorithm>
 #include <cassert>
@@ -2214,5 +2212,3 @@ class TreeIterator {
 
 //! \}
 //! \}
-
-#endif  //! REPLAY_TREE_HPP_INCLUDED
