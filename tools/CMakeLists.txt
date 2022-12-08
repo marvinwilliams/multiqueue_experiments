@@ -1,11 +1,3 @@
-add_executable(evaluate_quality evaluate_quality.cpp)
-target_link_libraries(evaluate_quality PRIVATE multiqueue_internal)
-target_include_directories(evaluate_quality PRIVATE "${EXTERNAL_DIR}" "${CMAKE_CURRENT_SOURCE_DIR}")
-target_compile_features(
-  evaluate_quality PRIVATE
-  cxx_std_17
-)
-
 add_executable(knapsack_generator knapsack_generator.cpp)
 target_include_directories(knapsack_generator PRIVATE "${EXTERNAL_DIR}")
 target_link_libraries(knapsack_generator PRIVATE multiqueue_internal)

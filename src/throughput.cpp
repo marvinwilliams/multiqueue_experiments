@@ -1,5 +1,5 @@
-#include "common/priority_queue_factory.hpp"
-#include "common/thread_coordination.hpp"
+#include "priority_queue_factory.hpp"
+#include "thread_coordination.hpp"
 #ifdef PQ_MQ
 #include "multiqueue/config.hpp"
 #endif
