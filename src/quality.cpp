@@ -298,7 +298,7 @@ int main(int argc, char* argv[]) {
             << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed << ',' << std::fixed
             << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ','
             << std::fixed << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count()
-            << ',' << std::endl;
+            << std::endl;
     } else {
         std::cerr << "Could not open file to write out benchmark_datas\n";
     }

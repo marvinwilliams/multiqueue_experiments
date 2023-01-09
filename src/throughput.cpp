@@ -51,7 +51,12 @@ struct Settings {
     key_type min_key = 1;
     key_type max_key = DefaultMaxKey;
     bool no_work = false;
+#ifdef USE_PAPI
+    bool use_pc = false;
+#endif
 };
+
+Settings settings;
 
 class Benchmark {
    public:
@@ -80,18 +85,24 @@ class Benchmark {
             return data;
         }
     };
+
     struct Data {
         std::vector<Operation> operations;
         thread_coordination::duration_type prefill_time{};
         thread_coordination::duration_type work_time{};
-        std::atomic_uint num_failed_pops = 0;
-        std::atomic_llong cache_loads = 0;
-        std::atomic_llong cache_load_misses = 0;
+        std::atomic_uint num_failed_pops{0};
+#ifdef USE_PAPI
+        std::atomic_llong cache_misses{0};
+#endif
 #ifdef MULTIQUEUE_COUNT_STATS
         std::atomic_size_t num_locking_failed{0};
         std::atomic_size_t num_resets{0};
+        std::atomic_size_t use_counts{0};
 #endif
         std::mutex m;
+
+        explicit Data(std::size_t num_operations) : operations(num_operations) {
+        }
     };
 
    private:
@@ -101,9 +112,6 @@ class Benchmark {
             return false;
         }
         if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
-            return false;
-        }
-        if (int ret = PAPI_add_named_event(event_set, "perf::L1-DCACHE-LOADS"); ret != PAPI_OK) {
             return false;
         }
         if (int ret = PAPI_add_named_event(event_set, "perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
@@ -119,38 +127,40 @@ class Benchmark {
     static void work(thread_coordination::Context const& ctx, Handle& handle, Data& data) {
         unsigned int num_failed_pops = 0;
 #ifdef USE_PAPI
+        bool papi_started = false;
         int event_set = PAPI_NULL;
-        bool papi_started = start_performance_counter(event_set);
-        if (!papi_started) {
-            ctx.write(std::cerr) << "Failed to start counters\n";
+        if (settings.use_pc) {
+            papi_started = start_performance_counter(event_set);
+            if (!papi_started) {
+                ctx.write(std::cerr) << "Failed to start counters\n";
+            }
         }
 #endif
-        ctx.execute_synchronized_blockwise_timed(data.work_time, data.operations.begin(), data.operations.end(),
-                                                 [&handle, &num_failed_pops](auto block_begin, auto block_end) {
-                                                     for (auto it = block_begin; it != block_end; ++it) {
-                                                         if (it->is_pop()) {
-                                                             PriorityQueue::value_type retval;
-                                                             // Let retval escape
-                                                             asm volatile("" ::"g"(&retval));
-                                                             if (!handle.try_pop(retval)) {
-                                                                 ++num_failed_pops;
-                                                             }
-                                                             // "Use" memory to force write to retval
-                                                             asm volatile("" ::: "memory");
-                                                         } else {
-                                                             key_type key = it->get_insert_key();
-                                                             handle.push({key, key});
-                                                         }
-                                                     }
-                                                 });
+        volatile PriorityQueue::mapped_type val;
+        PriorityQueue::value_type retval;
+        ctx.execute_synchronized_blockwise_timed(
+            data.work_time, data.operations.begin(), data.operations.end(),
+            [&handle, &num_failed_pops, &val, &retval](auto block_begin, auto block_end) {
+                for (auto it = block_begin; it != block_end; ++it) {
+                    if (it->is_pop()) {
+                        if (handle.try_pop(retval)) {
+                            val = retval.second;
+                        } else {
+                            ++num_failed_pops;
+                        }
+                    } else {
+                        key_type key = it->get_insert_key();
+                        handle.push({key, key});
+                    }
+                }
+            });
 #ifdef USE_PAPI
         if (papi_started) {
-            long long cache_stats[2];
-            if (int ret = PAPI_stop(event_set, cache_stats); ret != PAPI_OK) {
+            long long cache_misses;
+            if (int ret = PAPI_stop(event_set, &cache_misses); ret != PAPI_OK) {
                 ctx.write(std::cerr) << "Failed to stop counters\n";
             } else {
-                data.cache_loads += cache_stats[0];
-                data.cache_load_misses += cache_stats[1];
+                data.cache_misses += cache_misses;
             }
         }
 #endif
@@ -158,7 +168,7 @@ class Benchmark {
     }
 
    public:
-    static void run(thread_coordination::Context ctx, Settings const& settings, Data& data, PriorityQueue& pq) {
+    static void run(thread_coordination::Context ctx, Data& data, PriorityQueue& pq) {
         if (ctx.get_id() == 0) {
             std::clog << "Generating operations..." << std::flush;
         }
@@ -194,17 +204,19 @@ class Benchmark {
         if (ctx.get_id() == 0) {
             std::clog << "done\nWorking..." << std::flush;
         }
-#ifdef MULTIQUEUE_COUNT_STATS
-        handle.stats.num_locking_failed = 0;
-        handle.stats.num_resets = 0;
-#endif
         if (!settings.no_work) {
-            work(ctx, handle, data);
-        }
 #ifdef MULTIQUEUE_COUNT_STATS
-        data.num_locking_failed += handle.stats.num_locking_failed;
-        data.num_resets += handle.stats.num_resets;
+            handle.stats.num_locking_failed = 0;
+            handle.stats.num_resets = 0;
+            handle.stats.use_counts = 0;
 #endif
+            work(ctx, handle, data);
+#ifdef MULTIQUEUE_COUNT_STATS
+            data.num_locking_failed += handle.stats.num_locking_failed;
+            data.num_resets += handle.stats.num_resets;
+            data.use_counts += handle.stats.use_counts;
+#endif
+        }
         if (ctx.get_id() == 0) {
             std::clog << "done\n" << std::endl;
         }
@@ -226,7 +238,6 @@ int main(int argc, char* argv[]) {
     std::cout << "Pagesize (bytes): " << PAGESIZE << '\n';
     std::cout << '\n';
 
-    Settings settings;
 #ifdef PQ_MQ
     multiqueue::Config mq_config;
 #endif
@@ -249,7 +260,10 @@ int main(int argc, char* argv[]) {
         ("k,stickiness", "The stickiness period", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
 #endif
         ("o,outfile", "Output data in csv (comma-separated)", cxxopts::value<std::filesystem::path>(out_file), "PATH")
-        ("x,no-work", "Don't perform the actual benchmark", cxxopts::value<bool>(settings.no_work), "PATH")
+        ("x,no-work", "Don't perform the actual benchmark", cxxopts::value<bool>(settings.no_work))
+#ifdef USE_PAPI
+        ("r,pc", "Use performance counters to count L1 data cache misses", cxxopts::value<bool>(settings.use_pc))
+#endif
         // clang-format on
         ;
 
@@ -284,21 +298,19 @@ int main(int argc, char* argv[]) {
               << '\n';
 
 #ifdef USE_PAPI
-    if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
-        std::cerr << "Error initializing PAPI\n";
-        return 1;
-    }
-    if (int ret = PAPI_thread_init((unsigned long (*)())(pthread_self)); ret != PAPI_OK) {
-        std::cerr << "Error initializing threads for PAPI\n";
-        return 1;
-    }
-    if (int ret = PAPI_query_named_event("perf::L1-DCACHE-LOADS"); ret != PAPI_OK) {
-        std::cerr << "Cannot measure cache loads\n";
-        return 1;
-    }
-    if (int ret = PAPI_query_named_event("perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
-        std::cerr << "Cannot measure cache misses\n";
-        return 1;
+    if (settings.use_pc) {
+        if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
+            std::cerr << "Error initializing PAPI\n";
+            return 1;
+        }
+        if (int ret = PAPI_thread_init((unsigned long (*)())(pthread_self)); ret != PAPI_OK) {
+            std::cerr << "Error initializing threads for PAPI\n";
+            return 1;
+        }
+        if (int ret = PAPI_query_named_event("perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
+            std::cerr << "Cannot measure L1 data cache misses\n";
+            return 1;
+        }
     }
 #endif
 
@@ -313,11 +325,10 @@ int main(int argc, char* argv[]) {
     util::describe::describe(std::cout, pq);
     std::cout << '\n';
 
-    Benchmark::Data benchmark_data{};
-    benchmark_data.operations.resize(static_cast<std::size_t>(settings.num_threads) * settings.operations_per_thread);
+    Benchmark::Data benchmark_data(settings.num_threads * settings.operations_per_thread);
 
-    thread_coordination::TaskHandle<Benchmark> task_handle(settings.num_threads, std::cref(settings),
-                                                           std::ref(benchmark_data), std::ref(pq));
+    thread_coordination::TaskHandle<Benchmark> task_handle(settings.num_threads, std::ref(benchmark_data),
+                                                           std::ref(pq));
 
     task_handle.join();
 
@@ -327,19 +338,17 @@ int main(int argc, char* argv[]) {
               << std::chrono::duration<double>(benchmark_data.work_time).count() << '\n';
     std::cout << "Failed pops: " << benchmark_data.num_failed_pops << '\n';
 #ifdef USE_PAPI
-    std::cout << "Cache loads/misses: " << benchmark_data.cache_loads << '/' << benchmark_data.cache_load_misses
-              << '\n';
-#else
-    std::cout << "Cache loads/misses: 0/0\n";
+    if (settings.use_pc) {
+        std::cout << "L1 data cache misses: " << benchmark_data.cache_misses << '\n';
+    }
 #endif
 #ifdef MULTIQUEUE_COUNT_STATS
     std::cout << "Failed locks per operation: "
               << static_cast<double>(benchmark_data.num_locking_failed) /
             static_cast<double>(settings.num_threads * settings.operations_per_thread)
               << '\n';
-    std::cout << "Operations per reset: "
-              << static_cast<double>(settings.num_threads * settings.operations_per_thread) /
-            static_cast<double>(benchmark_data.num_resets)
+    std::cout << "Average queue use count: "
+              << static_cast<double>(benchmark_data.use_counts) / static_cast<double>(benchmark_data.num_resets)
               << '\n';
 #endif
 
@@ -349,20 +358,29 @@ int main(int argc, char* argv[]) {
             std::cerr << "Could not open file to write out benchmark_datas\n";
             return 1;
         }
-        out << "threads,prefill,operations,pop_prob,min_key,max_key,"
-               "seed,prefill_time,work_time,failed_pops,cache_loads,cache_load_misses\n";
+        out << "threads,prefill,ops_per_thread,pop_prob,min_key,max_key,"
+               "seed,prefill_time,work_time,failed_pops,l1d_cache_misses,num_resets,use_counts\n";
         out << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.operations_per_thread
             << ',' << settings.pop_prob << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed
             << ',' << std::fixed << std::setprecision(3)
             << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ',' << std::fixed
             << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << ','
-            << benchmark_data.num_failed_pops
+            << benchmark_data.num_failed_pops;
 #ifdef USE_PAPI
-            << ',' << benchmark_data.cache_loads << ',' << benchmark_data.cache_load_misses
+        if (settings.use_pc) {
+            out << ',' << benchmark_data.cache_misses;
+        } else {
+            out << ",n/a";
+        }
 #else
-            << ",0,0"
+        out << ",n/a";
 #endif
-            << std::endl;
+#ifdef MULTIQUEUE_COUNT_STATS
+        out << ',' << benchmark_data.num_resets << ',' << benchmark_data.use_counts;
+#else
+        out << ",n/a,n/a";
+#endif
+        out << std::endl;
     }
     return 0;
 }
