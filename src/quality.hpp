@@ -14,8 +14,8 @@ using Handle = typename PriorityQueue::handle_type;
 
 namespace packed_value {
 
-static constexpr unsigned int ThreadIdBits = 8;
-static constexpr unsigned int OpIdBits = std::numeric_limits<value_type>::digits - ThreadIdBits;
+static constexpr unsigned int ThreadIdBits = 7;
+static constexpr unsigned int OpIdBits = 32 - ThreadIdBits; // Use maximum of 32 bits
 static constexpr unsigned int MaxThreadId = 1UL << ThreadIdBits;
 static constexpr value_type MaxOpId = value_type{1} << OpIdBits;
 
