@@ -31,6 +31,9 @@
 #include <utility>
 #include <vector>
 
+using PriorityQueue = util::priority_queue_type<key_type, value_type, true>;
+using Handle = typename PriorityQueue::handle_type;
+
 static constexpr std::size_t DefaultPrefill = 1 << 20;
 static constexpr std::size_t DefaultOperations = 1 << 24;
 static constexpr unsigned int DefaultNumThreads = 4;

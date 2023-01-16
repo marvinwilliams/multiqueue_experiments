@@ -1,16 +1,13 @@
 #pragma once
 
-#include "priority_queue_factory.hpp"
-
+#include <optional>
 #include <cassert>
 #include <cstdint>
+#include <vector>
 
 using key_type = unsigned long;
 using value_type = unsigned long;
 using tick_type = std::uint64_t;
-
-using PriorityQueue = util::priority_queue_type<key_type, value_type, true>;
-using Handle = typename PriorityQueue::handle_type;
 
 namespace packed_value {
 
