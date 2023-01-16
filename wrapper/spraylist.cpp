@@ -19,17 +19,17 @@ __thread unsigned long* seeds;
 
 namespace wrapper {
 
-void Spraylist::sl_intset_deleter::operator()(sl_intset_t* p) { /*sl_set_delete(p);*/ }
+void Spraylist::sl_intset_deleter::operator()(sl_intset_t* p) { sl_set_delete(p); }
 void Spraylist::thread_data_deleter::operator()(thread_data_t* p) { delete p; }
 
-Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads + 1) {
+Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads) {
   ssalloc_init(num_threads_);
   seeds = seed_rand();
-  *levelmax = floor_log_2(1'000'000);
-  pq_.reset(sl_set_new());
   thread_data_ = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
   thread_data_->seed = rand();
   thread_data_->seed2 = rand();
+  *levelmax = floor_log_2(1'000'000);
+  pq_.reset(sl_set_new());
   thread_data_->nb_threads = num_threads_;
 }
 

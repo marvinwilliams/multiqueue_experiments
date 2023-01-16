@@ -80,8 +80,8 @@ add_library(
   spraylist.cpp
 )
 target_link_libraries(spraylist PUBLIC wrapper)
-target_compile_options(spraylist PRIVATE -w -std=c++17)
-target_compile_definitions(spraylist PRIVATE INTEL PRIVATE LOCKFREE PRIVATE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+target_compile_options(spraylist PRIVATE -w -std=gnu11)
+target_compile_definitions(spraylist PRIVATE INTEL PRIVATE LOCKFREE PRIVATE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE} PRIVATE SSALLOC_USE_MALLOC)
 target_include_directories(
   spraylist PRIVATE
   ${EXTERNAL_DIR}/klsm/lib
