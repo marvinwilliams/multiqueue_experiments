@@ -143,11 +143,10 @@ class Benchmark {
             [&handle, &num_failed_pops, &val, &retval](auto block_begin, auto block_end) {
                 for (auto it = block_begin; it != block_end; ++it) {
                     if (it->is_pop()) {
-                        if (handle.try_pop(retval)) {
-                            val = retval.second;
-                        } else {
+                        while (!handle.try_pop(retval)) {
                             ++num_failed_pops;
                         }
+                        val = retval.second;
                     } else {
                         key_type key = it->get_insert_key();
                         handle.push({key, key});
