@@ -173,18 +173,18 @@ class Benchmark {
 
 int main(int argc, char* argv[]) {
 #ifndef NDEBUG
-    std::cout << "Build type: Debug\n";
+    std::clog << "Build type: Debug\n";
 #else
-    std::cout << "Build type: Release\n";
+    std::clog << "Build type: Release\n";
 #endif
 #ifdef USE_PAPI
-    std::cout << "Performance counter: enabled\n";
+    std::clog << "Performance counter: enabled\n";
 #else
-    std::cout << "Performance counter: disabled\n";
+    std::clog << "Performance counter: disabled\n";
 #endif
-    std::cout << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
-    std::cout << "Pagesize (bytes): " << PAGESIZE << '\n';
-    std::cout << '\n';
+    std::clog << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
+    std::clog << "Pagesize (bytes): " << PAGESIZE << '\n';
+    std::clog << '\n';
 
     Settings settings;
 #ifdef PQ_MQ
@@ -193,7 +193,6 @@ int main(int argc, char* argv[]) {
 
     std::filesystem::path rank_file;
     std::filesystem::path delay_file;
-    std::filesystem::path out_file;
     bool verify_only = false;
 
     cxxopts::Options options(argv[0]);
@@ -211,7 +210,6 @@ int main(int argc, char* argv[]) {
         ("c,factor", "The factor for queues", cxxopts::value<unsigned int>(mq_config.c), "NUMBER")
         ("k,stickiness", "The stickiness period", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
 #endif
-        ("o,outfile", "Output measurement data in csv (comma-separated)", cxxopts::value<std::filesystem::path>(out_file), "PATH")
         ("v,verify", "Only verify the operations", cxxopts::value<bool>(verify_only))
         ("r,out-rank", "The output file of the rank histogram", cxxopts::value<std::filesystem::path>(rank_file)->default_value("rank_histogram.txt"), "PATH")
         ("d,out-delay", "The output file of the delay histogram", cxxopts::value<std::filesystem::path>(delay_file)->default_value("delay_histogram.txt"), "PATH")
@@ -230,12 +228,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Command line:";
+    std::clog << "Command line:";
     for (int i = 0; i < argc; ++i) {
-        std::cout << ' ' << argv[i];
+        std::clog << ' ' << argv[i];
     }
-    std::cout << '\n';
-    std::cout << "Threads: " << settings.num_threads << '\n'
+    std::clog << '\n';
+    std::clog << "Threads: " << settings.num_threads << '\n'
               << "Prefill: " << settings.prefill << '\n'
               << "Operations: " << settings.operations << '\n'
               << "Pop probability: " << std::fixed << std::setprecision(2) << settings.pop_prob << '\n'
@@ -260,9 +258,9 @@ int main(int argc, char* argv[]) {
     auto pq = PriorityQueue(settings.num_threads);
 #endif
 
-    std::cout << "Data structure: ";
-    util::describe::describe(std::cout, pq);
-    std::cout << '\n';
+    std::clog << "Data structure: ";
+    util::describe::describe(std::clog, pq);
+    std::clog << '\n';
 
     Benchmark::Data benchmark_data{};
     benchmark_data.operations.resize(settings.operations);
@@ -274,9 +272,9 @@ int main(int argc, char* argv[]) {
 
     task_handle.join();
 
-    std::cout << "Prefill time (s): " << std::setprecision(3)
+    std::clog << "Prefill time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.prefill_time).count() << '\n';
-    std::cout << "Work time (s): " << std::setprecision(3)
+    std::clog << "Work time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.work_time).count() << '\n';
 
     if (verify_only) {
@@ -291,19 +289,10 @@ int main(int argc, char* argv[]) {
         std::clog << "Evaluation failed!" << std::endl;
         return 1;
     }
-    if (out_file.empty()) {
-        return 0;
-    }
-    if (auto out = std::ofstream{out_file}; out) {
-        out << "threads,prefill,operations,pop_prob,min_key,max_key,"
-               "seed,prefill_time,work_time\n";
-        out << settings.num_threads << ',' << settings.prefill << ',' << settings.operations << ',' << settings.pop_prob
-            << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed << ',' << std::fixed
-            << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ','
-            << std::fixed << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count()
-            << std::endl;
-    } else {
-        std::cerr << "Could not open file to write out benchmark_datas\n";
-    }
+    std::cout << settings.num_threads << ',' << settings.prefill << ',' << settings.operations << ','
+              << settings.pop_prob << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed << ','
+              << std::fixed << std::setprecision(3)
+              << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ',' << std::fixed
+              << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << std::endl;
     return 0;
 }

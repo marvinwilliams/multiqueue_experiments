@@ -225,24 +225,22 @@ class Benchmark {
 
 int main(int argc, char* argv[]) {
 #ifndef NDEBUG
-    std::cout << "Build type: Debug\n";
+    std::clog << "Build type: Debug\n";
 #else
-    std::cout << "Build type: Release\n";
+    std::clog << "Build type: Release\n";
 #endif
 #ifdef USE_PAPI
-    std::cout << "Performance counter: enabled\n";
+    std::clog << "Performance counter: enabled\n";
 #else
-    std::cout << "Performance counter: disabled\n";
+    std::clog << "Performance counter: disabled\n";
 #endif
-    std::cout << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
-    std::cout << "Pagesize (bytes): " << PAGESIZE << '\n';
-    std::cout << '\n';
+    std::clog << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
+    std::clog << "Pagesize (bytes): " << PAGESIZE << '\n';
+    std::clog << '\n';
 
 #ifdef PQ_MQ
     multiqueue::Config mq_config;
 #endif
-
-    std::filesystem::path out_file;
 
     cxxopts::Options options(argv[0]);
     options.add_options()
@@ -259,7 +257,6 @@ int main(int argc, char* argv[]) {
         ("c,factor", "The factor for queues", cxxopts::value<unsigned int>(mq_config.c), "NUMBER")
         ("k,stickiness", "The stickiness period", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
 #endif
-        ("o,outfile", "Output data in csv (comma-separated)", cxxopts::value<std::filesystem::path>(out_file), "PATH")
         ("x,no-work", "Don't perform the actual benchmark", cxxopts::value<bool>(settings.no_work))
 #ifdef USE_PAPI
         ("r,pc", "Use performance counters to count L1 data cache misses", cxxopts::value<bool>(settings.use_pc))
@@ -279,12 +276,12 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    std::cout << "Command line:";
+    std::clog << "Command line:";
     for (int i = 0; i < argc; ++i) {
-        std::cout << ' ' << argv[i];
+        std::clog << ' ' << argv[i];
     }
-    std::cout << '\n';
-    std::cout << "Threads: " << settings.num_threads << '\n'
+    std::clog << '\n';
+    std::clog << "Threads: " << settings.num_threads << '\n'
               << "Prefill per thread: " << settings.prefill_per_thread << '\n'
               << "Operations per thread: " << settings.operations_per_thread << '\n'
               << "Pop probability: " << std::fixed << std::setprecision(2) << settings.pop_prob << '\n'
@@ -321,9 +318,9 @@ int main(int argc, char* argv[]) {
     auto pq = PriorityQueue(settings.num_threads);
 #endif
 
-    std::cout << "Data structure: ";
-    util::describe::describe(std::cout, pq);
-    std::cout << '\n';
+    std::clog << "Data structure: ";
+    util::describe::describe(std::clog, pq);
+    std::clog << '\n';
 
     Benchmark::Data benchmark_data(settings.num_threads * settings.operations_per_thread);
 
@@ -332,55 +329,46 @@ int main(int argc, char* argv[]) {
 
     task_handle.join();
 
-    std::cout << "Prefill time (s): " << std::setprecision(3)
+    std::clog << "Prefill time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.prefill_time).count() << '\n';
-    std::cout << "Work time (s): " << std::setprecision(3)
+    std::clog << "Work time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.work_time).count() << '\n';
-    std::cout << "Failed pops: " << benchmark_data.num_failed_pops << '\n';
+    std::clog << "Failed pops: " << benchmark_data.num_failed_pops << '\n';
 #ifdef USE_PAPI
     if (settings.use_pc) {
-        std::cout << "L1 data cache misses: " << benchmark_data.cache_misses << '\n';
+        std::clog << "L1 data cache misses: " << benchmark_data.cache_misses << '\n';
     }
 #endif
 #ifdef MULTIQUEUE_COUNT_STATS
-    std::cout << "Failed locks per operation: "
+    std::clog << "Failed locks per operation: "
               << static_cast<double>(benchmark_data.num_locking_failed) /
             static_cast<double>(settings.num_threads * settings.operations_per_thread)
               << '\n';
-    std::cout << "Average queue use count: "
+    std::clog << "Average queue use count: "
               << static_cast<double>(benchmark_data.use_counts) / static_cast<double>(benchmark_data.num_resets)
               << '\n';
 #endif
 
-    if (!out_file.empty()) {
-        auto out = std::ofstream{out_file};
-        if (!out.is_open()) {
-            std::cerr << "Could not open file to write out benchmark_datas\n";
-            return 1;
-        }
-        out << "threads,prefill,ops_per_thread,pop_prob,min_key,max_key,"
-               "seed,prefill_time,work_time,failed_pops,l1d_cache_misses,num_resets,use_counts\n";
-        out << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.operations_per_thread
-            << ',' << settings.pop_prob << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed
-            << ',' << std::fixed << std::setprecision(3)
-            << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ',' << std::fixed
-            << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << ','
-            << benchmark_data.num_failed_pops;
+    std::cout << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.operations_per_thread
+              << ',' << settings.pop_prob << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.seed
+              << ',' << std::fixed << std::setprecision(3)
+              << std::chrono::duration<double>(benchmark_data.prefill_time).count() << ',' << std::fixed
+              << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << ','
+              << benchmark_data.num_failed_pops;
 #ifdef USE_PAPI
-        if (settings.use_pc) {
-            out << ',' << benchmark_data.cache_misses;
-        } else {
-            out << ",n/a";
-        }
+    if (settings.use_pc) {
+        std::cout << ',' << benchmark_data.cache_misses;
+    } else {
+        std::cout << ",n/a";
+    }
 #else
-        out << ",n/a";
+    std::cout << ",n/a";
 #endif
 #ifdef MULTIQUEUE_COUNT_STATS
-        out << ',' << benchmark_data.num_resets << ',' << benchmark_data.use_counts;
+    std::cout << ',' << benchmark_data.num_resets << ',' << benchmark_data.use_counts;
 #else
-        out << ",n/a,n/a";
+    std::cout << ",n/a,n/a";
 #endif
-        out << std::endl;
-    }
+    std::cout << std::endl;
     return 0;
 }

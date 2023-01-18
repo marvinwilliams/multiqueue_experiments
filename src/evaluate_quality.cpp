@@ -129,7 +129,9 @@ bool evaluate(PushLogType& push_log, PopLogType const& pop_log, std::filesystem:
             ++rank_histogram[r];
         }
         for (size_t i = 0; i < rank_histogram.size(); ++i) {
-            out << i << " " << rank_histogram[i] << '\n';
+            if (rank_histogram[i] > 0) {
+                out << i << " " << rank_histogram[i] << '\n';
+            }
         }
     } else {
         std::cerr << "Failed to open file to write rank histogram\n";
@@ -140,7 +142,9 @@ bool evaluate(PushLogType& push_log, PopLogType const& pop_log, std::filesystem:
             ++delay_histogram[r];
         }
         for (size_t i = 0; i < delay_histogram.size(); ++i) {
-            out << i << " " << delay_histogram[i] << '\n';
+            if (delay_histogram[i] > 0) {
+                out << i << " " << delay_histogram[i] << '\n';
+            }
         }
     } else {
         std::cerr << "Failed to open file to write delay histogram\n";
