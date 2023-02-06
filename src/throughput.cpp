@@ -99,8 +99,6 @@ class Benchmark {
         std::atomic_size_t num_resets{0};
         std::atomic_size_t use_counts{0};
 #endif
-        std::mutex m;
-
         explicit Data(std::size_t num_operations) : operations(num_operations) {
         }
     };
@@ -189,10 +187,7 @@ class Benchmark {
 
         ctx.synchronize([]() { std::clog << "done\nPrefilling..." << std::flush; });
 
-        Handle handle = [&data, &pq]() {
-            std::scoped_lock l{data.m};
-            return pq.get_handle();
-        }();
+        Handle handle = pq.get_handle(ctx.get_id());
 
         ctx.execute_synchronized_timed(data.prefill_time, [&handle, &prefill_keys]() {
             for (auto k : prefill_keys) {

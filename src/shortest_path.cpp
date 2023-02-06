@@ -1,7 +1,10 @@
+#include "thread_coordination.hpp"
 #include "utils/priority_queue_factory.hpp"
 #include "utils/thread_coordination.hpp"
-#include "utils/threading.hpp"
-#include "utils/xoroshiro256starstar.hpp"
+
+#ifdef PQ_MQ
+#include "multiqueue/config.hpp"
+#endif
 
 #include "cxxopts.hpp"
 
@@ -32,6 +35,8 @@
 using distance_type = unsigned long;
 using node_type = unsigned long;
 
+using PriorityQueue = typename util::PriorityQueueFactory<distance_type, node_type>::type;
+
 struct Graph {
     struct Edge {
         node_type target;
@@ -41,231 +46,41 @@ struct Graph {
     std::vector<Edge> edges;
 };
 
-struct alignas(2 * L1_CACHE_LINESIZE) Distance {
-    std::atomic_ulong value;
+struct ThreadData {
+    typename PriorityQueue::handle_type pq_handle;
+#ifdef EXP_COUNT_STATS
+    unsigned long long pushed_nodes{0};
+    unsigned long long ignored_nodes{0};
+    unsigned long long extracted_nodes{0};
+    unsigned long long failed_extracts{0};
+    unsigned long long processed_nodes{0};
+#endif
+
+    explicit ThreadData(typename PriorityQueue::handle_type h) : pq_handle(std::move(h)){};
 };
 
-using PriorityQueue =
-    typename util::PriorityQueueFactory<distance_type, node_type>::type;
+#ifdef MULTIQUEUE_COUNT_STATS
+#define INC_COUNTER(counter) ++data.counter
+#else
+#define INC_COUNTER(counter) (void)0
+#endif
 
-struct Settings {
-    std::filesystem::path graph_file;
-    std::filesystem::path output;
-    unsigned int num_threads = 4;
-    std::uint64_t seed = 1;
-    node_type starting_node = 0;
-    util::PriorityQueueParameters config;
+struct Result {
+    std::chrono::milliseconds duration;
+#ifdef EXP_COUNT_STATS
+    alignas(L1_CACHE_LINESIZE) std::atomic_ullong pushed_nodes{0};
+    alignas(L1_CACHE_LINESIZE) std::atomic_ullong ignored_nodes{0};
+    alignas(L1_CACHE_LINESIZE) std::atomic_ullong popped_nodes{0};
+    alignas(L1_CACHE_LINESIZE) std::atomic_ullong failed_pops{0};
+    alignas(L1_CACHE_LINESIZE) std::atomic_ullong processed_nodes{0};
+#endif
 };
 
-#ifdef COUNT_STATS
-struct StatCounters {
-    std::size_t pushed_nodes = 0;
-    std::size_t ignored_nodes = 0;
-    std::size_t extracted_nodes = 0;
-    std::size_t failed_extracts = 0;
-    std::size_t processed_nodes = 0;
-    std::size_t idle = 0;
-};
-
-Settings settings;
 Graph graph;
-std::unique_ptr<StatCounters[]> stats;
+Result result;
 
-inline void pushed_node(unsigned int id) { ++stats[id].pushed_nodes; }
-inline void ignored_node(unsigned int id) { ++stats[id].ignored_nodes; }
-inline void extracted_node(unsigned int id) { ++stats[id].extracted_nodes; }
-inline void extract_failed(unsigned int id) { ++stats[id].failed_extracts; }
-inline void processed_node(unsigned int id) { ++stats[id].processed_nodes; }
-inline void started_idling(unsigned int id) { ++stats[id].idle; }
-#else
-inline void pushed_node(unsigned int) {}
-inline void ignored_node(unsigned int) {}
-inline void extracted_node(unsigned int) {}
-inline void extract_failed(unsigned int) {}
-inline void processed_node(unsigned int) {}
-inline void started_idling(unsigned int) {}
-#endif
-
-// Each thread has a state, which is either working (0), check_idle (1) or idle
-// (2) or woken up by another thread (3)
-struct alignas(2 * L1_CACHE_LINESIZE) IdleState {
-    std::atomic_uint state = 0;
-};
-
-std::unique_ptr<IdleState[]> idle_state;
-
-alignas(2 * L1_CACHE_LINESIZE) std::atomic_size_t idle_counter = 0;
-
-inline bool idle(unsigned int id) {
-    idle_state[id].state.store(2, std::memory_order_relaxed);
-    idle_counter.fetch_add(1, std::memory_order_relaxed);
-    started_idling(id);
-    while (true) {
-        if (idle_state[id].state.load(std::memory_order_acquire) == 0) {
-            // Someone woke this thread up
-            return false;
-        }
-        if (idle_counter.load(std::memory_order_relaxed) ==
-            2 * settings.num_threads) {
-            // Everyone idles
-            return true;
-        }
-        std::this_thread::yield();
-    }
-}
-
-std::unique_ptr<Distance[]> shortest_distances;
-
-static constexpr auto retries = 400;
-
-// Returns true if this node inserted new nodes
-bool process_node(PriorityQueue::Handle& handle,
-                  PriorityQueue::value_type const& value, unsigned int id) {
-    auto current_distance =
-        shortest_distances[value.second].value.load(std::memory_order_relaxed);
-    if (value.first > current_distance) {
-        ignored_node(id);
-        return false;
-    }
-    processed_node(id);
-    bool inserted = false;
-    for (node_type i = graph.nodes[value.second];
-         i < graph.nodes[value.second + 1]; ++i) {
-        node_type target = graph.edges[i].target;
-        distance_type d = value.first + graph.edges[i].weight;
-        distance_type old_d =
-            shortest_distances[target].value.load(std::memory_order_relaxed);
-        while (d < old_d) {
-            if (shortest_distances[target].value.compare_exchange_weak(
-                    old_d, d, std::memory_order_relaxed,
-                    std::memory_order_relaxed)) {
-                handle.push({d, target});
-                pushed_node(id);
-                inserted = true;
-                break;
-            }
-        }
-    }
-    return inserted;
-}
-
-void main_loop(typename PriorityQueue::Handle& handle, unsigned int id) {
-    auto extract_node = [&handle, id](auto& retval) {
-        for (std::size_t i = 0; i < retries * settings.num_threads; ++i) {
-            if (handle.try_extract_top(retval)) {
-                return true;
-            }
-            extract_failed(id);
-        }
-        return false;
-    };
-
-#if defined PQ_MQ || defined PQ_MF
-    auto partition_empty = [&handle, id]() {
-        for (unsigned int i = 0; i < *settings.pq_params.c; ++i) {
-            if (!handle.is_empty(id * (*settings.pq_params.c) + i)) {
-                return false;
-            }
-        }
-        return true;
-    };
-#endif
-
-    PriorityQueue::value_type retval;
-
-    while (true) {
-        if (!extract_node(retval)) {
-            // no item found, initiate idling
-            idle_state[id].state.store(1, std::memory_order_relaxed);
-            idle_counter.fetch_add(1, std::memory_order_release);
-#if defined PQ_MQ || defined PQ_MF
-            if (partition_empty()) {
-                if (idle(id)) {
-                    return;
-                }
-            } else {
-                idle_state[id].state.store(0, std::memory_order_relaxed);
-                idle_counter.fetch_sub(1, std::memory_order_release);
-            }
-            continue;
-#else
-            if (!handle.try_extract_top(retval)) {
-                if (idle(id)) {
-                    return;
-                } else {
-                    continue;
-                }
-            }
-            idle_state[id].state.store(0, std::memory_order_relaxed);
-            idle_counter.fetch_sub(1, std::memory_order_release);
-#endif
-        }
-        extracted_node(id);
-        if (process_node(handle, retval, id)) {
-            if (idle_counter.load(std::memory_order_acquire) != 0) {
-                for (std::size_t i = 0; i < settings.num_threads; ++i) {
-                    if (i == id) {
-                        continue;
-                    }
-                    unsigned int thread_idle_state =
-                        idle_state[i].state.load(std::memory_order_relaxed);
-                    while (true) {
-                        while (thread_idle_state == 1) {
-                            _mm_pause();
-                            thread_idle_state = idle_state[i].state.load(
-                                std::memory_order_relaxed);
-                        }
-                        if (thread_idle_state != 2) {
-                            break;
-                        }
-                        if (idle_state[i].state.compare_exchange_strong(
-                                thread_idle_state, 3,
-                                std::memory_order_relaxed)) {
-                            idle_counter.fetch_sub(2,
-                                                   std::memory_order_relaxed);
-                            idle_state[i].state.store(
-                                0, std::memory_order_release);
-                            break;
-                        }
-                    }
-                }
-            }
-        }
-    }
-}
-
-struct Task {
-    static void run(thread_coordination::Context ctx, PriorityQueue& pq) {
-        auto handle = pq.get_handle();
-
-        if (ctx.is_main()) {
-            std::clog << "\nComputing shortest paths..." << std::flush;
-            for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
-                shortest_distances[i].value =
-                    std::numeric_limits<distance_type>::max();
-            }
-            shortest_distances[settings.starting_node].value.store(
-                0, std::memory_order_relaxed);
-            process_node(handle, {0, settings.starting_node}, ctx.get_id());
-        }
-        ctx.execute_synchronized_timed("main_loop", main_loop, handle,
-                                       ctx.get_id());
-        if (ctx.is_main()) {
-            std::clog << "done\n";
-        }
-    }
-
-    static threading::thread_config get_config(
-        thread_coordination::Context const& ctx) {
-        threading::thread_config config;
-        config.cpu_set.reset();
-        config.cpu_set.set(ctx.get_id());
-        return config;
-    }
-};
-
-void read_graph() {
-    int fd = open(settings.graph_file.c_str(), O_RDONLY);
+void read_graph(std::filesystem::path const& graph_file) {
+    int fd = open(graph_file.c_str(), O_RDONLY);
     if (fd == -1) {
         throw std::runtime_error{"Could not open file"};
     }
@@ -350,18 +165,163 @@ void read_graph() {
         edge_list.push_back({source - 1, {target - 1, weight}});
     }
     munmap(addr, static_cast<std::size_t>(sb.st_size));
-    std::sort(edge_list.begin(), edge_list.end(),
-              [](auto& lhs, auto& rhs) { return lhs.first < rhs.first; });
+    std::sort(edge_list.begin(), edge_list.end(), [](auto& lhs, auto& rhs) { return lhs.first < rhs.first; });
     graph.nodes[0] = 0;
     for (std::size_t i = 1; i < num_nodes + 1; ++i) {
         graph.nodes[i] = graph.nodes[i - 1];
-        while (graph.nodes[i] < num_edges &&
-               edge_list[graph.nodes[i]].first == i - 1) {
+        while (graph.nodes[i] < num_edges && edge_list[graph.nodes[i]].first == i - 1) {
             ++graph.nodes[i];
         }
     }
-    std::transform(edge_list.begin(), edge_list.end(), graph.edges.begin(),
-                   [](auto const& e) { return e.second; });
+    std::transform(edge_list.begin(), edge_list.end(), graph.edges.begin(), [](auto const& e) { return e.second; });
+}
+
+// Each thread has a state, which is either working (0), check_idle (1) or idle
+// (2) or woken up by another thread (3)
+struct alignas(2 * L1_CACHE_LINESIZE) IdleState {
+    std::atomic_uint state = 0;
+};
+
+alignas(L1_CACHE_LINESIZE) std::atomic_uint idle_counter{0};
+std::vector<IdleState> idle_state;
+
+bool idle(unsigned int num_threads, unsigned int id) {
+    idle_state[id].state.store(2, std::memory_order_relaxed);
+    idle_counter.fetch_add(1, std::memory_order_relaxed);
+    while (true) {
+        if (idle_state[id].state.load(std::memory_order_acquire) == 0) {
+            // Someone woke this thread up
+            return false;
+        }
+        if (idle_counter.load(std::memory_order_relaxed) == 2 * num_threads) {
+            // Everyone idles
+            return true;
+        }
+        _mm_pause();
+    }
+}
+
+struct alignas(2 * L1_CACHE_LINESIZE) Distance {
+    std::atomic<distance_type> value;
+};
+
+std::vector<Distance> shortest_distances;
+
+// Returns true if this node inserted new nodes
+bool process_node(ThreadData& data, PriorityQueue::value_type const& value) {
+    auto current_distance = shortest_distances[value.second].value.load(std::memory_order_relaxed);
+    if (value.first > current_distance) {
+        INC_COUNTER(ignored_nodes);
+        return false;
+    }
+    INC_COUNTER(processed_nodes);
+    bool inserted = false;
+    for (node_type i = graph.nodes[value.second]; i < graph.nodes[value.second + 1]; ++i) {
+        node_type target = graph.edges[i].target;
+        distance_type d = value.first + graph.edges[i].weight;
+        distance_type old_d = shortest_distances[target].value.load(std::memory_order_relaxed);
+        while (d < old_d) {
+            if (shortest_distances[target].value.compare_exchange_weak(old_d, d, std::memory_order_seq_cst,
+                                                                       std::memory_order_relaxed)) {
+                data.pq_handle.push({d, target});
+                INC_COUNTER(pushed_nodes);
+                inserted = true;
+                break;
+            }
+        }
+    }
+    return inserted;
+}
+
+void main_loop(thread_coordination::Context ctx, ThreadData& data) {
+    auto search_element = [&data](auto& retval) {
+#if defined PQ_MQ || defined PQ_MF
+        for (auto i = from; i != to; ++i) {
+            if (data.pq_handle.try_pop_from(i, retval)) {
+                return true;
+            }
+        }
+        return false;
+#else
+        return handle.try_pop(retval);
+#endif
+    };
+
+    PriorityQueue::value_type retval;
+
+    while (true) {
+        if (!handle.try_pop(retval)) {
+            INC_COUNTER(pop_failed);
+            // no item found, initiate idling
+            idle_state[id].state.store(1, std::memory_order_relaxed);
+            idle_counter.fetch_add(1, std::memory_order_release);
+#if defined PQ_MQ || defined PQ_MF
+            if (partition_empty()) {
+                if (idle(id)) {
+                    return;
+                }
+            } else {
+                idle_state[id].state.store(0, std::memory_order_relaxed);
+                idle_counter.fetch_sub(1, std::memory_order_release);
+            }
+            continue;
+#else
+            if (!handle.try_extract_top(retval)) {
+                if (idle(id)) {
+                    return;
+                } else {
+                    continue;
+                }
+            }
+            idle_state[id].state.store(0, std::memory_order_relaxed);
+            idle_counter.fetch_sub(1, std::memory_order_release);
+#endif
+        }
+        extracted_node(id);
+        if (process_node(handle, retval, id)) {
+            if (idle_counter.load(std::memory_order_acquire) != 0) {
+                for (std::size_t i = 0; i < num_threads; ++i) {
+                    if (i == id) {
+                        continue;
+                    }
+                    while (true) {
+                        auto thread_idle_state = idle_state[i].state.load(std::memory_order_relaxed);
+                        while (thread_idle_state == 1) {
+                            _mm_pause();
+                            thread_idle_state = idle_state[i].state.load(std::memory_order_relaxed);
+                        }
+                        if (thread_idle_state != 2) {
+                            break;
+                        }
+                        if (idle_state[i].state.compare_exchange_strong(thread_idle_state, 3,
+                                                                        std::memory_order_relaxed)) {
+                            idle_counter.fetch_sub(2, std::memory_order_relaxed);
+                            idle_state[i].state.store(0, std::memory_order_release);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+void run_benchmark(PriorityQueue& pq) {
+    shortest_distances[settings.starting_node].value = 0;
+    for (std::size_t i = 1; i < graph.nodes.size() - 1; ++i) {
+        shortest_distances[i].value = std::numeric_limits<distance_type>::max();
+    }
+
+    std::vector std::clog << "\nComputing shortest paths..." << std::flush;
+
+    thread_coordination::TaskHandletask_handle{settings.num_threads,
+                                               [](thread_coordination::Context ctx, PriorityQueue& pq) {
+                                                   ThreadData data{pq.get_handle(ctx.get_id())};
+                                                   ctx.execute_synchronized_timed(duration, main_loop, data, ctx);
+                                               },
+                                               std::ref(pq)};
+    task_handle.wait();
+    std::clog << "done\n";
 }
 
 int main(int argc, char* argv[]) {
@@ -376,28 +336,39 @@ int main(int argc, char* argv[]) {
     std::clog << '\n';
 
     std::clog << "Command line: ";
-    std::copy(argv, argv + argc,
-              std::ostream_iterator<char const*>(std::clog, " "));
+    std::copy(argv, argv + argc, std::ostream_iterator<char const*>(std::clog, " "));
     std::clog << "\n\n";
 
-    cxxopts::Options options(
-        "Shortest path benchmark",
-        "This executable measures and records the performance of relaxed "
-        "priority queues in the SSSP problem");
+    std::filesystem::path graph_file;
+    std::filesystem::path solution_file;
+    std::filesystem::path out_file;
+    unsigned int num_threads = 4;
+    node_type starting_node = 0;
+
+#ifdef PQ_MQ
+    multiqueue::Config mq_config;
+#endif
+
+    cxxopts::Options options("Shortest path benchmark",
+                             "This executable measures and records the performance of relaxed "
+                             "priority queues in the SSSP problem");
     // clang-format off
     options.add_options()
       ("j,threads", "Specify the number of threads "
-       "(default: 4)", cxxopts::value<unsigned int>(), "NUMBER")
+       "(default: 4)", cxxopts::value<unsigned int>(num_threads), "NUMBER")
       ("n,start", "The starting node"
-       "(default: 0)", cxxopts::value<node_type>(), "NUMBER")
-      ("f,file", "The input graph", cxxopts::value<std::filesystem::path>(settings.graph_file)->default_value("graph.gr"), "PATH")
+       "(default: 0)", cxxopts::value<node_type>(starting_node), "NUMBER")
+      ("f,file", "The input graph", cxxopts::value<std::filesystem::path>(graph_file)->default_value("graph.gr"), "PATH")
+      ("v,solution", "The reference solution", cxxopts::value<std::filesystem::path>(solution_file)->default_value("solution.txt"), "PATH")
+      ("o,output", "The output", cxxopts::value<std::filesystem::path>(out_file)->default_value("solution.txt"), "PATH")
+#ifdef PQ_MQ
       ("s,seed", "Specify the initial seed"
-       "(default: 0)", cxxopts::value<std::uint32_t>(), "NUMBER")
-      ("o,output", "File to output the solution to (default: no output)", cxxopts::value<std::filesystem::path>(settings.output), "PATH")
+       "(default: 0)", cxxopts::value<std::uint32_t>(mq_config.seed), "NUMBER")
       ("c,factor", "The number of queues when using multiqueue or multififo"
-       "(default: 4)", cxxopts::value<std::size_t>(), "NUMBER")
+       "(default: 4)", cxxopts::value<std::size_t>(mq_config.c), "NUMBER")
       ("k,stickiness", "The stickiness when using multiqueue or multififo supporting stickiness"
-       "(default: 8)", cxxopts::value<unsigned int>(), "NUMBER")
+       "(default: 8)", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
+#endif
       ("h,help", "Print this help");
     // clang-format on
 
@@ -407,41 +378,28 @@ int main(int argc, char* argv[]) {
             std::cerr << options.help() << std::endl;
             return 0;
         }
-        if (result.count("start") > 0) {
-            settings.starting_node = result["start"].as<node_type>();
-        }
-        if (result.count("threads") > 0) {
-            settings.num_threads = result["threads"].as<unsigned int>();
-        }
-        if (result.count("factor") > 0) {
-            settings.pq_params.c = result["factor"].as<std::size_t>();
-        }
-        if (result.count("stickiness") > 0) {
-            settings.pq_params.stickiness =
-                result["stickiness"].as<unsigned int>();
-        }
-        if (result.count("seed") > 0) {
-            settings.seed = result["seed"].as<std::uint32_t>();
-        }
     } catch (cxxopts::OptionParseException const& e) {
         std::cerr << e.what() << std::endl;
         return 1;
     }
 
     std::clog << "Settings: \n\t"
-              << "Threads: " << settings.num_threads << "\n\t"
-              << "Graph file: " << settings.graph_file.string() << "\n\t"
-              << "Starting node: " << settings.starting_node << "\n\t"
+              << "Threads: " << num_threads << "\n\t"
+              << "Graph file: " << graph_file.string() << "\n\t"
+              << "Solution file: " << (solution_file ? solution_file.string() : "Not supplied") << "\n\t"
+              << "Starting node: " << starting_node << "\n\t"
               << "Seed: " << settings.seed;
     std::clog << "\n\n";
 
-    xoroshiro256starstar rng;
-    rng.seed(settings.seed);
-    settings.pq_params.seed = rng();
-    auto pq = util::create_pq<PriorityQueue>(1'000'000, settings.num_threads,
-                                             settings.pq_params);
+#ifdef PQ_MQ
+    auto pq = PriorityQueue(num_threads, mq_config);
+#else
+    auto pq = PriorityQueue(num_threads);
+#endif
 
-    std::clog << "Using priority queue: " << pq.description() << "\n\n";
+    std::clog << "Data structure: ";
+    util::describe::describe(std::clog, pq);
+    std::clog << '\n';
 
     std::clog << "Reading graph..." << std::flush;
     try {
@@ -453,56 +411,42 @@ int main(int argc, char* argv[]) {
     assert(graph.nodes.size() > 0);
 
     std::clog << "done\n";
-    std::cout << "nodes: " << graph.nodes.size() - 1 << '\n';
-    std::cout << "edges: " << graph.edges.size() << '\n';
+    std::clog << "nodes: " << graph.nodes.size() - 1 << '\n';
+    std::clog << "edges: " << graph.edges.size() << '\n';
 
-    idle_counter = 0;
-    idle_state = std::make_unique<IdleState[]>(settings.num_threads);
-#ifdef COUNT_STATS
-    stats = std::make_unique<StatCounters[]>(settings.num_threads);
+    idle_state = std::vector<IdleState>(settings.num_threads);
+    shortest_distances = std::vector<Distance>(graph.nodes.size() - 1);
+
+    run_benchmark(pq);
+
+    std::clog << "time: " << std::setprecision(3) << std::chrono::duration<double>(duration).count() << '\n';
+#ifdef EXP_COUNT_STATS
+    std::cout << "pushed nodes: " << result.pushed_nodes << '\n';
+    std::cout << "ignored nodes: " << result.ignored_nodes << '\n';
+    std::cout << "extracted nodes: " << result.popped_nodes << '\n';
+    std::cout << "failed extracts: " << result.failed_pops << '\n';
+    std::cout << "processed nodes: " << result.processed_nodes << '\n';
 #endif
-
-    shortest_distances = std::make_unique<Distance[]>(graph.nodes.size() - 1);
-
-    thread_coordination::ThreadCoordinator coordinator{settings.num_threads};
-    coordinator.run_task<Task>(std::ref(pq));
-    coordinator.join();
-    auto duration = *coordinator.get_duration("main_loop");
-    std::cout << "time: " << std::setprecision(3)
-              << std::chrono::duration<double>(duration).count() << '\n';
-#ifdef COUNT_STATS
-    StatCounters total_stats = std::reduce(
-        stats.get(), stats.get() + settings.num_threads, StatCounters{},
-        [](StatCounters lhs, StatCounters const& rhs) {
-            lhs.pushed_nodes += rhs.pushed_nodes;
-            lhs.ignored_nodes += rhs.ignored_nodes;
-            lhs.extracted_nodes += rhs.extracted_nodes;
-            lhs.failed_extracts += rhs.failed_extracts;
-            lhs.processed_nodes += rhs.processed_nodes;
-            lhs.idle += rhs.idle;
-            return lhs;
-        });
-    std::cout << "pushed nodes: " << total_stats.pushed_nodes << '\n';
-    std::cout << "ignored nodes: " << total_stats.ignored_nodes << '\n';
-    std::cout << "extracted nodes: " << total_stats.extracted_nodes << '\n';
-    std::cout << "failed extracts: " << total_stats.failed_extracts << '\n';
-    std::cout << "processed nodes: " << total_stats.processed_nodes << '\n';
-    std::cout << "idle: " << total_stats.idle << '\n';
-#endif
-    if (!settings.output.empty()) {
-        std::clog << "\nWriting output..." << std::flush;
+    if (!output.empty()) {
         std::ofstream out_stream{settings.output};
-        if (!out_stream) {
+        if (out_stream) {
+            std::clog << "\nWriting output..." << std::flush;
+            out_stream << "node dist\n";
+            for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
+                out_stream << i << ' ' << shortest_distances[i].value.load() << '\n';
+            }
+            std::clog << "done\n";
+        } else {
             std::cerr << "\nCould not open output file\n";
-            return 1;
         }
-        out_stream << "node dist\n";
-        for (std::size_t i = 0; i + 1 < graph.nodes.size(); ++i) {
-            out_stream << i << ' '
-                       << shortest_distances[i].value.load(
-                              std::memory_order_relaxed)
-                       << '\n';
-        }
-        std::clog << "done\n";
     }
+    std::cout << num_threads << ',' << seed << ',' << std::fixed << std::setprecision(3)
+              << std::chrono::duration<double>(result.duration).count();
+#ifdef MULTIQUEUE_COUNT_STATS
+    std::cout << ',' << result.pushed_nodes << ',' << result.igored_nodes << ',' << result.popped_nodes << ','
+              << result.failed_pops << ',' << result.processed_nodes;
+#else
+    std::cout << ",n/a,n/a,n/a,n/a,n/a";
+#endif
+    std::cout << std::endl;
 }

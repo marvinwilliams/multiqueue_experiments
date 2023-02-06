@@ -11,6 +11,7 @@
 #ifdef USE_TSC
 #include <x86intrin.h>
 #endif
+
 #include <atomic>
 #include <cassert>
 #include <chrono>

@@ -172,23 +172,23 @@ struct same_core {
 
 }  // namespace affinity
 
-template <typename Task, typename Affinity = affinity::individual_cores>
+template <typename Affinity = affinity::individual_cores>
 class TaskHandle {
     std::vector<threading::pthread> threads_;
     detail::SharedData shared_data_;
 
    public:
-    template <typename... Args>
-    explicit TaskHandle(Affinity affinity, unsigned int num_threads, Args... args)
+    template <typename Task, typename... Args>
+    explicit TaskHandle(Affinity affinity, unsigned int num_threads, Task task, Args... args)
         : threads_(num_threads), shared_data_(num_threads) {
         for (unsigned int i = 0; i < threads_.size(); ++i) {
             Context ctx{shared_data_, i};
-            threads_[i] = threading::pthread(affinity(i), Task::run, ctx, args...);
+            threads_[i] = threading::pthread(affinity(i), task, ctx, args...);
         }
     }
 
-    template <typename... Args>
-    explicit TaskHandle(unsigned int num_threads, Args... args) : TaskHandle(Affinity{}, num_threads, args...) {
+    template <typename Task, typename... Args>
+    explicit TaskHandle(unsigned int num_threads, Task task, Args... args) : TaskHandle(Affinity{}, num_threads, task, args...) {
     }
 
     TaskHandle(TaskHandle const&) = delete;
@@ -197,7 +197,7 @@ class TaskHandle {
     TaskHandle& operator=(TaskHandle&&) noexcept = default;
     ~TaskHandle() = default;
 
-    void join() {
+    void wait() {
         for (auto& t : threads_) {
             t.join();
         }
