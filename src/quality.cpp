@@ -33,7 +33,7 @@
 #include <vector>
 
 using PriorityQueue = util::priority_queue_type<key_type, value_type, true>;
-using Handle = typename PriorityQueue::handle_type;
+using Handle = typename PriorityQueue::Handle;
 
 static constexpr std::size_t DefaultPrefill = 1 << 20;
 static constexpr std::size_t DefaultOperations = 1 << 24;
@@ -83,7 +83,6 @@ class Benchmark {
         PopLogType pop_log;
         std::atomic_size_t cache_accesses = 0;
         std::atomic_size_t cache_misses = 0;
-        std::mutex m;
     };
 
    private:
@@ -152,10 +151,7 @@ class Benchmark {
 
         data.pop_log[ctx.get_id()].reserve(settings.operations);
         data.push_log[ctx.get_id()].reserve(settings.prefill);
-        Handle handle = [&data, &pq]() {
-            std::scoped_lock l{data.m};
-            return pq.get_handle();
-        }();
+        Handle handle = pq.get_handle(ctx.get_id());
 
         ctx.execute_synchronized_timed(data.prefill_time, [id = ctx.get_id(), &handle, &prefill_keys, &data]() {
             for (auto k : prefill_keys) {
@@ -268,10 +264,10 @@ int main(int argc, char* argv[]) {
     benchmark_data.pop_log.resize(settings.num_threads);
     benchmark_data.push_log.resize(settings.num_threads);
 
-    thread_coordination::TaskHandle<Benchmark> task_handle(settings.num_threads, std::cref(settings),
+    thread_coordination::TaskHandle task_handle(settings.num_threads, Benchmark::run, std::cref(settings),
                                                            std::ref(benchmark_data), std::ref(pq));
 
-    task_handle.join();
+    task_handle.wait();
 
     std::clog << "Prefill time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.prefill_time).count() << '\n';

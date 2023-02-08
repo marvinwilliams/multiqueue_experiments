@@ -60,7 +60,7 @@ Settings settings;
 
 class Benchmark {
    public:
-    using Handle = typename PriorityQueue::handle_type;
+    using Handle = typename PriorityQueue::Handle;
 
     using tick_type = std::uint64_t;
 
@@ -318,10 +318,10 @@ int main(int argc, char* argv[]) {
 
     Benchmark::Data benchmark_data(settings.num_threads * settings.operations_per_thread);
 
-    thread_coordination::TaskHandle<Benchmark> task_handle(settings.num_threads, std::ref(benchmark_data),
+    thread_coordination::TaskHandle task_handle(settings.num_threads, Benchmark::run, std::ref(benchmark_data),
                                                            std::ref(pq));
 
-    task_handle.join();
+    task_handle.wait();
 
     std::clog << "Prefill time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(benchmark_data.prefill_time).count() << '\n';

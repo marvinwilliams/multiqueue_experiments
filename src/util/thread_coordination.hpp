@@ -56,7 +56,7 @@ struct SharedData {
 }  // namespace detail
 
 class Context {
-    template <typename Affinity, typename Task>
+    template <typename Affinity>
     friend class TaskHandle;
 
     using duration_type = detail::SharedData::clock_type::duration;
