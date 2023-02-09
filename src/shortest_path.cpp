@@ -59,7 +59,7 @@ struct ThreadData {
     explicit ThreadData(typename PriorityQueue::handle_type h) : pq_handle(std::move(h)){};
 };
 
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef COUNT_STATS
 #define INC_COUNTER(counter) ++data.counter
 #else
 #define INC_COUNTER(counter) (void)0
@@ -442,7 +442,7 @@ int main(int argc, char* argv[]) {
     }
     std::cout << num_threads << ',' << seed << ',' << std::fixed << std::setprecision(3)
               << std::chrono::duration<double>(result.duration).count();
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef COUNT_STATS
     std::cout << ',' << result.pushed_nodes << ',' << result.igored_nodes << ',' << result.popped_nodes << ','
               << result.failed_pops << ',' << result.processed_nodes;
 #else

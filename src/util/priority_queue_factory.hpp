@@ -51,21 +51,19 @@ namespace detail {
 
 #if defined PQ_MQ
 static constexpr multiqueue::StickPolicy stick_policy =
-#ifdef MQ_STICK_POLICY_NONE_STRICT
-    multiqueue::StickPolicy::NoneStrict
-#elif defined MQ_STICK_POLICY_NONE
+#ifdef STICK_POLICY_NONE
     multiqueue::StickPolicy::None
-#elif defined MQ_STICK_POLICY_RANDOM
+#elif defined STICK_POLICY_RANDOM
     multiqueue::StickPolicy::Random
-#elif defined MQ_STICK_POLICY_RANDOM_STRICT
+#elif defined STICK_POLICY_RANDOM_STRICT
     multiqueue::StickPolicy::RandomStrict
-#elif defined MQ_STICK_POLICY_SWAPPING
+#elif defined STICK_POLICY_SWAPPING
     multiqueue::StickPolicy::Swapping
-#elif defined MQ_STICK_POLICY_SWAPPING_LAZY
+#elif defined STICK_POLICY_SWAPPING_LAZY
     multiqueue::StickPolicy::SwappingLazy
-#elif defined MQ_STICK_POLICY_SWAPPING_BLOCKING
+#elif defined STICK_POLICY_SWAPPING_BLOCKING
     multiqueue::StickPolicy::SwappingBlocking
-#elif defined MQ_STICK_POLICY_PERMUTATION
+#elif defined STICK_POLICY_PERMUTATION
     multiqueue::StickPolicy::Permutation
 #else
     multiqueue::StickPolicy::None
@@ -74,10 +72,10 @@ static constexpr multiqueue::StickPolicy stick_policy =
 
 template <typename T, typename Compare>
 using InnermostPQ =
-#ifdef MQ_USE_STD_PQ
+#ifdef USE_STD_PQ
     std::priority_queue<T, std::vector<T>, Compare>
-#elif defined MQ_HEAP_ARITY
-    ::multiqueue::Heap<T, Compare, MQ_HEAP_ARITY>
+#elif defined HEAP_ARITY
+    ::multiqueue::Heap<T, Compare, HEAP_ARITY>
 #else
     ::multiqueue::Heap<T, Compare>
 #endif
@@ -85,11 +83,11 @@ using InnermostPQ =
 
 template <typename T, typename Compare>
 using SeqPriorityQueue =
-#ifdef MQ_DISABLE_BUFFERING
+#ifdef DISABLE_BUFFERING
     InnermostPQ<T, Compare>
-#elif defined MQ_INSERTION_BUFFERSIZE && defined MQ_DELETION_BUFFERSIZE
-    ::multiqueue::BufferedPQ<InnermostPQ<T, Compare>, MQ_INSERTION_BUFFERSIZE, MQ_DELETION_BUFFERSIZE>
-#elif !defined MQ_INSERTION_BUFFERSIZE && !defined MQ_DELETION_BUFFERSIZE
+#elif defined INSERTION_BUFFERSIZE && defined DELETION_BUFFERSIZE
+    ::multiqueue::BufferedPQ<InnermostPQ<T, Compare>, INSERTION_BUFFERSIZE, DELETION_BUFFERSIZE>
+#elif !defined INSERTION_BUFFERSIZE && !defined DELETION_BUFFERSIZE
     ::multiqueue::BufferedPQ<InnermostPQ<T, Compare>>
 #else
 #error Must specify either both buffersizes or none
@@ -209,8 +207,6 @@ void describe_type(std::ostream &out, DescribeTag<multiqueue::BufferedPQ<PQ, I, 
 
 inline std::string stick_policy_to_name(multiqueue::StickPolicy policy) {
     switch (policy) {
-        case multiqueue::StickPolicy::NoneStrict:
-            return "none (strict)";
         case multiqueue::StickPolicy::None:
             return "none";
         case multiqueue::StickPolicy::RandomStrict:

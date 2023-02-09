@@ -13,7 +13,7 @@
 
 struct HeapElement {
     key_type key;
-    unsigned int from_thread_id;
+    int from_thread_id;
     std::size_t op_id;
 };
 
@@ -33,20 +33,20 @@ bool verify(PushLogType& push_log, PopLogType const& pop_log) {
             if (!entry.payload) {
                 continue;
             }
-            if (entry.tick < push_log[entry.payload->from_thread_id][entry.payload->op_id].tick) {
+            if (entry.tick < push_log[static_cast<std::size_t>(entry.payload->from_thread_id)][entry.payload->op_id].tick) {
                 if (entry.payload->op_id > 0 &&
-                    entry.tick < push_log[entry.payload->from_thread_id][entry.payload->op_id - 1].tick) {
+                    entry.tick < push_log[static_cast<std::size_t>(entry.payload->from_thread_id)][entry.payload->op_id - 1].tick) {
                     std::cerr << "Popped element before push of previous element finished" << std::endl;
                     return false;
                 }
-                push_log[entry.payload->from_thread_id][entry.payload->op_id].tick = entry.tick;
+                push_log[static_cast<std::size_t>(entry.payload->from_thread_id)][entry.payload->op_id].tick = entry.tick;
             }
 
-            if (popped[entry.payload->from_thread_id][entry.payload->op_id]) {
+            if (popped[static_cast<std::size_t>(entry.payload->from_thread_id)][entry.payload->op_id]) {
                 std::cerr << "Popped element twice" << std::endl;
                 return false;
             }
-            popped[entry.payload->from_thread_id][entry.payload->op_id] = true;
+            popped[static_cast<std::size_t>(entry.payload->from_thread_id)][entry.payload->op_id] = true;
         }
     }
     return true;
@@ -79,9 +79,9 @@ bool evaluate(PushLogType& push_log, PopLogType const& pop_log, std::filesystem:
     std::size_t progress_update = (all_pops.size() / 10UL);
     for (auto& pop : all_pops) {
         // Inserting everything before next deletion
-        for (unsigned int t = 0; t < push_log.size(); ++t) {
+        for (std::size_t t = 0; t < push_log.size(); ++t) {
             while (push_id[t] < push_log[t].size() && push_log[t][push_id[t]].tick <= pop.tick) {
-                replay_tree.insert({push_log[t][push_id[t]].key, t, push_id[t]});
+                replay_tree.insert({push_log[t][push_id[t]].key, static_cast<int>(t), push_id[t]});
                 ++push_id[t];
             }
         }
@@ -93,12 +93,12 @@ bool evaluate(PushLogType& push_log, PopLogType const& pop_log, std::filesystem:
         }
 
         // Check if the insertion corresponding to the current deletion is already inserted
-        if (push_id[pop.payload->from_thread_id] < pop.payload->op_id) {
+        if (push_id[static_cast<std::size_t>(pop.payload->from_thread_id)] < pop.payload->op_id) {
             std::cerr << "Push after pop after verifying, this must not happen" << std::endl;
             return false;
         }
 
-        auto key = push_log[pop.payload->from_thread_id][pop.payload->op_id].key;
+        auto key = push_log[static_cast<std::size_t>(pop.payload->from_thread_id)][pop.payload->op_id].key;
         auto [start, end] = replay_tree.equal_range(key);
         start = std::find_if(start, end, [&pop](auto const& e) {
             return std::tie(pop.payload->from_thread_id, pop.payload->op_id) == std::tie(e.from_thread_id, e.op_id);

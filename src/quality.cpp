@@ -37,16 +37,16 @@ using Handle = typename PriorityQueue::Handle;
 
 static constexpr std::size_t DefaultPrefill = 1 << 20;
 static constexpr std::size_t DefaultOperations = 1 << 24;
-static constexpr unsigned int DefaultNumThreads = 4;
+static constexpr int DefaultNumThreads = 4;
 static constexpr double DefaultPopProbability = 0.5;
 static constexpr key_type DefaultMaxKey = key_type{1} << 30;
 
 struct Settings {
     std::size_t prefill = DefaultPrefill;
     std::size_t operations = DefaultOperations;
-    unsigned int num_threads = DefaultNumThreads;
+    int num_threads = DefaultNumThreads;
     double pop_prob = DefaultPopProbability;
-    std::uint32_t seed = 1;
+    int seed = 1;
     key_type min_key = 1;
     key_type max_key = DefaultMaxKey;
 };
@@ -94,7 +94,7 @@ class Benchmark {
         _mm_lfence();
 #else
         static constexpr long nsec_per_s = 1000000000;
-        timespec ts;
+        timespec ts{};
         clock_gettime(CLOCK_REALTIME, &ts);
         return static_cast<tick_type>(ts.tv_sec * nsec_per_s + ts.tv_nsec);
 #endif
@@ -109,15 +109,17 @@ class Benchmark {
                         bool success = handle.try_pop(retval);
                         auto tick = get_tick();
                         if (success) {
-                            data.pop_log[ctx.get_id()].emplace_back(tick, retval.second);
+                            data.pop_log[static_cast<std::size_t>(ctx.get_id())].emplace_back(tick, retval.second);
                         } else {
-                            data.pop_log[ctx.get_id()].emplace_back(tick);
+                            data.pop_log[static_cast<std::size_t>(ctx.get_id())].emplace_back(tick);
                         }
                     } else {
                         key_type key = it->get_insert_key();
-                        handle.push({key, packed_value::pack(ctx.get_id(), data.push_log[ctx.get_id()].size())});
+                        handle.push({key,
+                                     packed_value::pack(ctx.get_id(),
+                                                        data.push_log[static_cast<std::size_t>(ctx.get_id())].size())});
                         auto tick = get_tick();
-                        data.push_log[ctx.get_id()].push_back({tick, key});
+                        data.push_log[static_cast<std::size_t>(ctx.get_id())].push_back({tick, key});
                     }
                 }
             });
@@ -129,13 +131,13 @@ class Benchmark {
             std::clog << "Generating operations\n";
         }
 
-        std::seed_seq seed{settings.seed, static_cast<std::uint32_t>(ctx.get_id())};
+        std::seed_seq seed{settings.seed, ctx.get_id()};
         std::default_random_engine rng(seed);
         auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
         auto pop_dist = std::bernoulli_distribution(settings.pop_prob);
 
         // Prefill
-        std::vector<key_type> prefill_keys(settings.prefill / settings.num_threads);
+        std::vector<key_type> prefill_keys(settings.prefill / static_cast<std::size_t>(settings.num_threads));
         std::generate(prefill_keys.begin(), prefill_keys.end(), [&key_dist, &rng]() { return key_dist(rng); });
 
         // Workload
@@ -149,14 +151,14 @@ class Benchmark {
             std::clog << "Prefilling\n";
         }
 
-        data.pop_log[ctx.get_id()].reserve(settings.operations);
-        data.push_log[ctx.get_id()].reserve(settings.prefill);
+        data.pop_log[static_cast<std::size_t>(ctx.get_id())].reserve(settings.operations);
+        data.push_log[static_cast<std::size_t>(ctx.get_id())].reserve(settings.prefill);
         Handle handle = pq.get_handle(ctx.get_id());
 
         ctx.execute_synchronized_timed(data.prefill_time, [id = ctx.get_id(), &handle, &prefill_keys, &data]() {
             for (auto k : prefill_keys) {
-                handle.push({k, packed_value::pack(id, data.push_log[id].size())});
-                data.push_log[id].push_back({0, k});
+                handle.push({k, packed_value::pack(id, data.push_log[static_cast<std::size_t>(id)].size())});
+                data.push_log[static_cast<std::size_t>(id)].push_back({0, k});
             }
         });
 
@@ -196,16 +198,16 @@ int main(int argc, char* argv[]) {
     options.add_options()
         // clang-format off
         ("h,help", "Print this help")
-        ("j,threads", "The number of threads", cxxopts::value<unsigned int>(settings.num_threads), "NUMBER")
+        ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("p,prefill", "The prefill", cxxopts::value<std::size_t>(settings.prefill), "NUMBER")
         ("n,ops", "The number of operations", cxxopts::value<std::size_t>(settings.operations), "NUMBER")
         ("f,pop-prob", "Specify the probability of pops in [0,1]", cxxopts::value<double>(settings.pop_prob), "NUMBER")
         ("l,min", "Specify the min key", cxxopts::value<key_type>(settings.min_key), "NUMBER")
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
-        ("s,seed", "Specify the initial seed", cxxopts::value<std::uint32_t>(settings.seed), "NUMBER")
+        ("s,seed", "Specify the initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
 #ifdef PQ_MQ
-        ("c,factor", "The factor for queues", cxxopts::value<unsigned int>(mq_config.c), "NUMBER")
-        ("k,stickiness", "The stickiness period", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
+        ("c,factor", "The factor for queues", cxxopts::value<int>(mq_config.c), "NUMBER")
+        ("k,stickiness", "The stickiness period", cxxopts::value<int>(mq_config.stickiness), "NUMBER")
 #endif
         ("v,verify", "Only verify the operations", cxxopts::value<bool>(verify_only))
         ("r,out-rank", "The output file of the rank histogram", cxxopts::value<std::filesystem::path>(rank_file)->default_value("rank_histogram.txt"), "PATH")
@@ -261,11 +263,11 @@ int main(int argc, char* argv[]) {
 
     Benchmark::Data benchmark_data{};
     benchmark_data.operations.resize(settings.operations);
-    benchmark_data.pop_log.resize(settings.num_threads);
-    benchmark_data.push_log.resize(settings.num_threads);
+    benchmark_data.pop_log.resize(static_cast<std::size_t>(settings.num_threads));
+    benchmark_data.push_log.resize(static_cast<std::size_t>(settings.num_threads));
 
     thread_coordination::TaskHandle task_handle(settings.num_threads, Benchmark::run, std::cref(settings),
-                                                           std::ref(benchmark_data), std::ref(pq));
+                                                std::ref(benchmark_data), std::ref(pq));
 
     task_handle.wait();
 

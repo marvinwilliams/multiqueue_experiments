@@ -38,16 +38,16 @@ using PriorityQueue = util::priority_queue_type<key_type, value_type, true>;
 
 static constexpr std::size_t DefaultPrefillPerThread = 1 << 20;
 static constexpr std::size_t DefaultOperationsPerThread = 1 << 24;
-static constexpr unsigned int DefaultNumThreads = 4;
+static constexpr int DefaultNumThreads = 4;
 static constexpr double DefaultPopProbability = 0.5;
 static constexpr key_type DefaultMaxKey = key_type{1} << 30;
 
 struct Settings {
     std::size_t prefill_per_thread = DefaultPrefillPerThread;
     std::size_t operations_per_thread = DefaultOperationsPerThread;
-    unsigned int num_threads = DefaultNumThreads;
+    int num_threads = DefaultNumThreads;
     double pop_prob = DefaultPopProbability;
-    std::uint32_t seed = 1;
+    int seed = 1;
     key_type min_key = 1;
     key_type max_key = DefaultMaxKey;
     bool no_work = false;
@@ -90,11 +90,11 @@ class Benchmark {
         std::vector<Operation> operations;
         thread_coordination::duration_type prefill_time{};
         thread_coordination::duration_type work_time{};
-        std::atomic_uint num_failed_pops{0};
+        std::atomic_llong num_failed_pops{0};
 #ifdef USE_PAPI
         std::atomic_llong cache_misses{0};
 #endif
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef MQ_COUNT_STATS
         std::atomic_size_t num_locking_failed{0};
         std::atomic_size_t num_resets{0};
         std::atomic_size_t use_counts{0};
@@ -123,7 +123,7 @@ class Benchmark {
 #endif
 
     static void work(thread_coordination::Context const& ctx, Handle& handle, Data& data) {
-        unsigned int num_failed_pops = 0;
+        long long num_failed_pops = 0;
 #ifdef USE_PAPI
         bool papi_started = false;
         int event_set = PAPI_NULL;
@@ -170,7 +170,7 @@ class Benchmark {
             std::clog << "Generating operations..." << std::flush;
         }
 
-        std::seed_seq seed{settings.seed, static_cast<std::uint32_t>(ctx.get_id())};
+        std::seed_seq seed{settings.seed, ctx.get_id()};
         std::default_random_engine rng(seed);
         auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
         auto pop_dist = std::bernoulli_distribution(settings.pop_prob);
@@ -199,13 +199,13 @@ class Benchmark {
             std::clog << "done\nWorking..." << std::flush;
         }
         if (!settings.no_work) {
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef MQ_COUNT_STATS
             handle.stats.num_locking_failed = 0;
             handle.stats.num_resets = 0;
             handle.stats.use_counts = 0;
 #endif
             work(ctx, handle, data);
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef MQ_COUNT_STATS
             data.num_locking_failed += handle.stats.num_locking_failed;
             data.num_resets += handle.stats.num_resets;
             data.use_counts += handle.stats.use_counts;
@@ -240,16 +240,16 @@ int main(int argc, char* argv[]) {
     options.add_options()
         // clang-format off
         ("h,help", "Print this help")
-        ("j,threads", "The number of threads", cxxopts::value<unsigned int>(settings.num_threads), "NUMBER")
+        ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("p,prefill", "The prefill per thread", cxxopts::value<std::size_t>(settings.prefill_per_thread), "NUMBER")
         ("n,ops", "The number of operations per thread", cxxopts::value<std::size_t>(settings.operations_per_thread), "NUMBER")
         ("d,pop-prob", "Specify the probability of pops in [0,1]", cxxopts::value<double>(settings.pop_prob), "NUMBER")
         ("l,min", "Specify the min key", cxxopts::value<key_type>(settings.min_key), "NUMBER")
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
-        ("s,seed", "Specify the initial seed", cxxopts::value<std::uint32_t>(settings.seed), "NUMBER")
+        ("s,seed", "Specify the initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
 #ifdef PQ_MQ
-        ("c,factor", "The factor for queues", cxxopts::value<unsigned int>(mq_config.c), "NUMBER")
-        ("k,stickiness", "The stickiness period", cxxopts::value<unsigned int>(mq_config.stickiness), "NUMBER")
+        ("c,factor", "The factor for queues", cxxopts::value<int>(mq_config.c), "NUMBER")
+        ("k,stickiness", "The stickiness period", cxxopts::value<int>(mq_config.stickiness), "NUMBER")
 #endif
         ("x,no-work", "Don't perform the actual benchmark", cxxopts::value<bool>(settings.no_work))
 #ifdef USE_PAPI
@@ -316,7 +316,7 @@ int main(int argc, char* argv[]) {
     util::describe::describe(std::clog, pq);
     std::clog << '\n';
 
-    Benchmark::Data benchmark_data(settings.num_threads * settings.operations_per_thread);
+    Benchmark::Data benchmark_data(static_cast<std::size_t>(settings.num_threads) * settings.operations_per_thread);
 
     thread_coordination::TaskHandle task_handle(settings.num_threads, Benchmark::run, std::ref(benchmark_data),
                                                            std::ref(pq));
@@ -333,7 +333,7 @@ int main(int argc, char* argv[]) {
         std::clog << "L1 data cache misses: " << benchmark_data.cache_misses << '\n';
     }
 #endif
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef MQ_COUNT_STATS
     std::clog << "Failed locks per operation: "
               << static_cast<double>(benchmark_data.num_locking_failed) /
             static_cast<double>(settings.num_threads * settings.operations_per_thread)
@@ -358,7 +358,7 @@ int main(int argc, char* argv[]) {
 #else
     std::cout << ",n/a";
 #endif
-#ifdef MULTIQUEUE_COUNT_STATS
+#ifdef MQ_COUNT_STATS
     std::cout << ',' << benchmark_data.num_resets << ',' << benchmark_data.use_counts;
 #else
     std::cout << ",n/a,n/a";
