@@ -15,8 +15,6 @@
 #include "multiqueue/heap.hpp"
 #include "multiqueue/multiqueue.hpp"
 #include "multiqueue/stick_policy.hpp"
-#elif defined PQ_MF
-#include "multififo/multififo.hpp"
 #elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
 #elif defined PQ_KLSM256 || defined PQ_KLSM1024 || defined PQ_KLSM4096
@@ -33,7 +31,7 @@
 #error No valid PQ specified
 #endif
 
-#if defined PQ_MQ && defined MQ_USE_STD_PQ
+#if defined PQ_MQ && defined USE_STD_PQ
 #include <queue>
 #endif
 
@@ -71,7 +69,7 @@ static constexpr multiqueue::StickPolicy stick_policy =
     ;
 
 template <typename T, typename Compare>
-using InnermostPQ =
+using SeqPriorityQueue = ::multiqueue::BufferedPQ<
 #ifdef USE_STD_PQ
     std::priority_queue<T, std::vector<T>, Compare>
 #elif defined HEAP_ARITY
@@ -79,28 +77,19 @@ using InnermostPQ =
 #else
     ::multiqueue::Heap<T, Compare>
 #endif
-    ;
-
-template <typename T, typename Compare>
-using SeqPriorityQueue =
-#ifdef DISABLE_BUFFERING
-    InnermostPQ<T, Compare>
-#elif defined INSERTION_BUFFERSIZE && defined DELETION_BUFFERSIZE
-    ::multiqueue::BufferedPQ<InnermostPQ<T, Compare>, INSERTION_BUFFERSIZE, DELETION_BUFFERSIZE>
-#elif !defined INSERTION_BUFFERSIZE && !defined DELETION_BUFFERSIZE
-    ::multiqueue::BufferedPQ<InnermostPQ<T, Compare>>
-#else
+#if defined INSERTION_BUFFERSIZE && defined DELETION_BUFFERSIZE
+    ,
+    INSERTION_BUFFERSIZE, DELETION_BUFFERSIZE
+#elif defined INSERTION_BUFFERSIZE || defined DELETION_BUFFERSIZE
 #error Must specify either both buffersizes or none
 #endif
-    ;
+    >;
 #endif
 
 template <typename KeyType, typename ValueType, bool Min = true>
 struct PriorityQueueTypeFactory {
 #if defined PQ_MQ
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_MF
-    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_KLSM256
     using type = wrapper::Klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024
@@ -118,8 +107,6 @@ template <typename KeyType, typename ValueType>
 struct PriorityQueueTypeFactory<KeyType, ValueType, false> {
 #if defined PQ_MQ
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_MF
-    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
     using type = wrapper::TBBQueue<KeyType, ValueType>;
 #elif defined PQ_TBB_PQ
@@ -133,8 +120,6 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, true> {
     using ValueType = unsigned long;
 #if defined PQ_MQ
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_MF
-    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_CAPQ
     using type = wrapper::Capq<true, true, true>;
 #elif defined PQ_KLSM256
@@ -160,8 +145,6 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, false> {
     using ValueType = unsigned long;
 #if defined PQ_MQ
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_MF
-    using type = multififo::MultiFifo<std::pair<KeyType, ValueType>>;
 #elif defined PQ_TBB_Q
     using type = wrapper::TBBQueue<KeyType, ValueType>;
 #elif defined PQ_TBB_PQ
@@ -185,7 +168,7 @@ void describe_type(std::ostream &out, DescribeTag<T>) {
 }
 
 #ifdef PQ_MQ
-#ifdef MQ_USE_STD_PQ
+#ifdef USE_STD_PQ
 template <typename T, typename Container, typename Compare>
 void describe_type(std::ostream &out, DescribeTag<std::priority_queue<T, Container, Compare>>) {
     out << "std::priority_queue\n";
