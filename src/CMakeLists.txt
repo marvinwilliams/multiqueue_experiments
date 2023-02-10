@@ -64,7 +64,7 @@ function(add_tuning_variant bs d)
   set(mq_tuning_targets ${mq_tuning_targets} PARENT_SCOPE)
 endfunction()
 
-foreach(bs 0 4 8 16 64 128)
+foreach(bs 0 4 8 16 64 128 512)
   foreach(d 2 4 8 16 64)
     add_tuning_variant(${bs} ${d})
   endforeach()
@@ -175,7 +175,7 @@ foreach(target ${mq_targets} ${wrapper_targets})
 endforeach()
 
 add_custom_target(quality_mq)
-foreach(t ${mq_targets} ${wrapper_targets})
+foreach(t ${mq_targets})
   add_dependencies(quality_mq quality_${t})
 endforeach()
 
