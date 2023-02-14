@@ -165,7 +165,7 @@ add_library(quality INTERFACE)
 target_sources(quality INTERFACE quality.cpp evaluate_quality.cpp)
 target_link_libraries(quality INTERFACE thread_coordination benchmark_base)
 
-foreach(target ${mq_targets} ${wrapper_targets})
+foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   add_executable(quality_${target})
   target_link_libraries(quality_${target} PRIVATE ${target} quality)
   if(BUILD_TESTING)

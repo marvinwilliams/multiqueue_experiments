@@ -52,11 +52,31 @@ struct Settings {
     key_type max_key = DefaultMaxKey;
     bool no_work = false;
 #ifdef USE_PAPI
-    bool use_pc = false;
+    int use_pc = -1;
+    int l3_groupsize = 4;
 #endif
 };
 
 Settings settings;
+
+#ifdef USE_PAPI
+std::array const event_names{"PAPI_L1_DCA",
+                             "PAPI_L2_DCM",
+                             "PAPI_L2_DCH",
+                             "PAPI_L2_DCR",
+                             "perf::PERF_COUNT_HW_CACHE_L1D",
+                             "perf::L1-DCACHE-LOADS",
+                             "perf::L1-DCACHE-LOAD-MISSES",
+                             "perf::L1-DCACHE-STORES",
+                             "perf::L1-DCACHE-STORE-MISSES",
+                             "perf_raw:r0729",
+                             "perf_raw:rc860",
+                             "perf_raw:r0864",
+                             "perf::LLC-LOADS",
+                             "perf::LLC-LOAD-MISSES",
+                             "perf::LLC-STORES",
+                             "perf::LLC-STORE-MISSES"};
+#endif
 
 class Benchmark {
    public:
@@ -92,7 +112,7 @@ class Benchmark {
         thread_coordination::duration_type work_time{};
         std::atomic_llong num_failed_pops{0};
 #ifdef USE_PAPI
-        std::atomic_llong cache_misses{0};
+        std::atomic_llong counter{0};
 #endif
 #ifdef MQ_COUNT_STATS
         std::atomic_size_t num_locking_failed{0};
@@ -112,7 +132,12 @@ class Benchmark {
         if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
             return false;
         }
-        if (int ret = PAPI_add_named_event(event_set, "perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
+        int code{};
+        if (int ret = PAPI_event_name_to_code(event_names[static_cast<std::size_t>(settings.use_pc)], &code);
+            ret != PAPI_OK) {
+            return false;
+        }
+        if (int ret = PAPI_add_event(event_set, code); ret != PAPI_OK) {
             return false;
         }
         if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
@@ -127,7 +152,9 @@ class Benchmark {
 #ifdef USE_PAPI
         bool papi_started = false;
         int event_set = PAPI_NULL;
-        if (settings.use_pc) {
+        if (settings.use_pc >= 0 &&
+            (static_cast<std::size_t>(settings.use_pc) < event_names.size() - 4 ||
+             ctx.get_id() % settings.l3_groupsize == 0)) {
             papi_started = start_performance_counter(event_set);
             if (!papi_started) {
                 ctx.write(std::cerr) << "Failed to start counters\n";
@@ -153,11 +180,11 @@ class Benchmark {
             });
 #ifdef USE_PAPI
         if (papi_started) {
-            long long cache_misses;
-            if (int ret = PAPI_stop(event_set, &cache_misses); ret != PAPI_OK) {
+            long long counter{};
+            if (int ret = PAPI_stop(event_set, &counter); ret != PAPI_OK) {
                 ctx.write(std::cerr) << "Failed to stop counters\n";
             } else {
-                data.cache_misses += cache_misses;
+                data.counter += counter;
             }
         }
 #endif
@@ -253,7 +280,7 @@ int main(int argc, char* argv[]) {
 #endif
         ("x,no-work", "Don't perform the actual benchmark", cxxopts::value<bool>(settings.no_work))
 #ifdef USE_PAPI
-        ("r,pc", "Use performance counters to count L1 data cache misses", cxxopts::value<bool>(settings.use_pc))
+        ("r,pc", "Performance counter to count", cxxopts::value<int>(settings.use_pc))
 #endif
         // clang-format on
         ;
@@ -289,7 +316,11 @@ int main(int argc, char* argv[]) {
               << '\n';
 
 #ifdef USE_PAPI
-    if (settings.use_pc) {
+    if (settings.use_pc >= 0) {
+        if (static_cast<std::size_t>(settings.use_pc) >= event_names.size()) {
+            std::cerr << "Invalid event!\n";
+            return 1;
+        }
         if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
             std::cerr << "Error initializing PAPI\n";
             return 1;
@@ -298,8 +329,8 @@ int main(int argc, char* argv[]) {
             std::cerr << "Error initializing threads for PAPI\n";
             return 1;
         }
-        if (int ret = PAPI_query_named_event("perf::L1-DCACHE-LOAD-MISSES"); ret != PAPI_OK) {
-            std::cerr << "Cannot measure L1 data cache misses\n";
+        if (int ret = PAPI_query_named_event(event_names[static_cast<std::size_t>(settings.use_pc)]); ret != PAPI_OK) {
+            std::cerr << "Cannot measure event '" << event_names[static_cast<std::size_t>(settings.use_pc)] << "'\n";
             return 1;
         }
     }
@@ -307,7 +338,8 @@ int main(int argc, char* argv[]) {
 
 #ifdef PQ_MQ
     mq_config.seed = settings.seed;
-    auto pq = PriorityQueue(settings.num_threads, mq_config);
+    auto pq = PriorityQueue(settings.num_threads,
+                            settings.prefill_per_thread * static_cast<unsigned int>(settings.num_threads), mq_config);
 #else
     auto pq = PriorityQueue(settings.num_threads);
 #endif
@@ -319,7 +351,7 @@ int main(int argc, char* argv[]) {
     Benchmark::Data benchmark_data(static_cast<std::size_t>(settings.num_threads) * settings.operations_per_thread);
 
     thread_coordination::TaskHandle task_handle(settings.num_threads, Benchmark::run, std::ref(benchmark_data),
-                                                           std::ref(pq));
+                                                std::ref(pq));
 
     task_handle.wait();
 
@@ -329,8 +361,8 @@ int main(int argc, char* argv[]) {
               << std::chrono::duration<double>(benchmark_data.work_time).count() << '\n';
     std::clog << "Failed pops: " << benchmark_data.num_failed_pops << '\n';
 #ifdef USE_PAPI
-    if (settings.use_pc) {
-        std::clog << "L1 data cache misses: " << benchmark_data.cache_misses << '\n';
+    if (settings.use_pc >= 0) {
+        std::clog << event_names[static_cast<std::size_t>(settings.use_pc)] << ": " << benchmark_data.counter << '\n';
     }
 #endif
 #ifdef MQ_COUNT_STATS
@@ -350,8 +382,8 @@ int main(int argc, char* argv[]) {
               << std::setprecision(3) << std::chrono::duration<double>(benchmark_data.work_time).count() << ','
               << benchmark_data.num_failed_pops;
 #ifdef USE_PAPI
-    if (settings.use_pc) {
-        std::cout << ',' << benchmark_data.cache_misses;
+    if (settings.use_pc >= 0) {
+        std::cout << ',' << benchmark_data.counter;
     } else {
         std::cout << ",n/a";
     }

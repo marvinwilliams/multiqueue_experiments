@@ -252,7 +252,7 @@ int main(int argc, char* argv[]) {
 
 #ifdef PQ_MQ
     mq_config.seed = settings.seed;
-    auto pq = PriorityQueue(settings.num_threads, mq_config);
+    auto pq = PriorityQueue(settings.num_threads, settings.prefill, mq_config);
 #else
     auto pq = PriorityQueue(settings.num_threads);
 #endif
