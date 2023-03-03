@@ -25,12 +25,12 @@
       "binaryDir": "build/debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
+        "CMAKE_CXX_FLAGS_DEBUG": "-Og -g",
         "MULTIQUEUE_EXP_PC": "OFF",
         "MULTIQUEUE_BUILD_TESTS": "ON",
         "MULTIQUEUE_BUILD_BENCHMARKS": "OFF",
         "MULTIQUEUE_BUILD_EXAMPLES": "ON",
         "MULTIQUEUE_EXP_BUILD_TESTS": "ON",
-        "MULTIQUEUE_EXP_PROFILING": "ON",
         "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
       }
     },

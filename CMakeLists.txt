@@ -8,13 +8,17 @@ list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(utils)
 disable_intree_builds()
 
+set(CMAKE_CXX_FLAGS_DEBUG "-g -0g" CACHE STRING "")
+
 # Read the system's L1 cache-line size and page size
 execute_process(COMMAND getconf LEVEL1_DCACHE_LINESIZE OUTPUT_VARIABLE DEFAULT_L1_CACHE_LINESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(COMMAND getconf PAGESIZE OUTPUT_VARIABLE DEFAULT_PAGESIZE OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 option("MULTIQUEUE_EXP_BUILD_TESTS" "Build unit tests for experiment tools" OFF)
 option("MULTIQUEUE_EXP_PC" "Enable performance counters in benchmarks" OFF)
-option("MULTIQUEUE_EXP_PROFILING" "Add profiling compiler flags" OFF)
+option("MULTIQUEUE_EXP_PGO" "Enable instrumentation for profile-guided optimizations" OFF)
+option("MULTIQUEUE_EXP_PGO_USE" "Enable profile-guided optimizations" OFF)
+option("MULTIQUEUE_EXP_COVERAGE" "Enable flags for coverage tests" OFF)
 option("MULTIQUEUE_EXP_ASAN" "Instrucment benchmarks with the address sanitizer" OFF)
 option("MULTIQUEUE_EXP_UBSAN" "Instrument benchmarks with the undefined behaviour sanitizer" OFF)
 option("MULTIQUEUE_EXP_TSAN" "Instrument benchmarks with the thread sanitizer" OFF)
