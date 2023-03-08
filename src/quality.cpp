@@ -252,10 +252,13 @@ int main(int argc, char* argv[]) {
 
 #ifdef PQ_MQ
     mq_config.seed = settings.seed;
-    auto pq = PriorityQueue(settings.num_threads, settings.prefill, mq_config);
-#else
-    auto pq = PriorityQueue(settings.num_threads);
 #endif
+    auto pq = PriorityQueue(settings.num_threads, settings.prefill
+#ifdef PQ_MQ
+                            ,
+                            mq_config
+#endif
+    );
 
     std::clog << "Data structure: ";
     util::describe::describe(std::clog, pq);
