@@ -17,7 +17,7 @@
 #include "multiqueue/stick_policy.hpp"
 #elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
-#elif defined PQ_KLSM256 || defined PQ_KLSM1024 || defined PQ_KLSM4096
+#elif defined PQ_KLSM4 || defined PQ_KLSM256 || defined PQ_KLSM1024 || defined PQ_KLSM4096
 #include "wrapper/klsm.hpp"
 #elif defined PQ_LINDEN
 #include "wrapper/linden.hpp"
@@ -90,6 +90,8 @@ template <typename KeyType, typename ValueType, bool Min = true>
 struct PriorityQueueTypeFactory {
 #if defined PQ_MQ
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, SeqPriorityQueue>;
+#elif defined PQ_KLSM4
+    using type = wrapper::Klsm<KeyType, ValueType, 4>;
 #elif defined PQ_KLSM256
     using type = wrapper::Klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024
@@ -122,6 +124,8 @@ struct PriorityQueueTypeFactory<unsigned long, unsigned long, true> {
     using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>, stick_policy, SeqPriorityQueue>;
 #elif defined PQ_CAPQ
     using type = wrapper::Capq<true, true, true>;
+#elif defined PQ_KLSM4
+    using type = wrapper::Klsm<KeyType, ValueType, 4>;
 #elif defined PQ_KLSM256
     using type = wrapper::Klsm<KeyType, ValueType, 256>;
 #elif defined PQ_KLSM1024

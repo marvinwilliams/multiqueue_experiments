@@ -13,13 +13,17 @@ target_link_libraries(thread_coordination INTERFACE threading)
 target_sources(thread_coordination INTERFACE util/thread_coordination.hpp)
 
 add_library(benchmark_base INTERFACE)
-target_include_directories(benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/third_party" "${CMAKE_CURRENT_SOURCE_DIR}/util")
-target_compile_options(benchmark_base INTERFACE $<$<CONFIG:Release>:-march=native>)
+target_include_directories(
+  benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/third_party"
+                           "${CMAKE_CURRENT_SOURCE_DIR}/util")
+target_compile_options(benchmark_base
+                       INTERFACE $<$<CONFIG:Release>:-march=native>)
 if(CMAKE_COMPILER_IS_GNUCXX)
   target_link_options(benchmark_base INTERFACE $<$<CONFIG:Release>:-flto>)
 endif()
 target_compile_options(benchmark_base INTERFACE ${WARNING_FLAGS})
-target_compile_definitions(benchmark_base INTERFACE L1_CACHE_LINESIZE=${L1_CACHE_LINESIZE})
+target_compile_definitions(benchmark_base
+                           INTERFACE L1_CACHE_LINESIZE=${L1_CACHE_LINESIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGESIZE=${PAGESIZE})
 target_compile_features(benchmark_base INTERFACE cxx_std_17)
 
@@ -36,7 +40,8 @@ if(MULTIQUEUE_EXP_PGO)
   target_link_options(benchmark_base INTERFACE "-fprofile-generate")
 endif()
 if(MULTIQUEUE_EXP_PGO_USE)
-  target_compile_options(benchmark_base INTERFACE "-fprofile-use" "-fprofile-correction")
+  target_compile_options(benchmark_base INTERFACE "-fprofile-use"
+                                                  "-fprofile-correction")
 endif()
 if(MULTIQUEUE_EXP_COVERAGE)
   target_compile_options(benchmark_base INTERFACE "--coverage")
@@ -66,20 +71,34 @@ target_compile_definitions(mq_interface INTERFACE PQ_MQ)
 function(add_tuning_variant bs d)
   set(name mq_bs_${bs}_d_${d})
   add_library(${name} INTERFACE)
-  target_compile_definitions(${name} INTERFACE STICK_POLICY_NONE INSERTION_BUFFERSIZE=${bs} DELETION_BUFFERSIZE=${bs} HEAP_ARITY=${d})
+  target_compile_definitions(
+    ${name} INTERFACE STICK_POLICY_NONE INSERTION_BUFFERSIZE=${bs}
+                      DELETION_BUFFERSIZE=${bs} HEAP_ARITY=${d})
   target_link_libraries(${name} INTERFACE mq_interface)
   list(APPEND mq_tuning_targets ${name})
-  set(mq_tuning_targets ${mq_tuning_targets} PARENT_SCOPE)
+  set(mq_tuning_targets
+      ${mq_tuning_targets}
+      PARENT_SCOPE)
 endfunction()
 
-foreach(bs 0 4 8 16 64 128 512)
+foreach(
+  bs
+  0
+  4
+  8
+  16
+  64
+  128
+  512)
   foreach(d 2 4 8 16 64)
     add_tuning_variant(${bs} ${d})
   endforeach()
 endforeach()
 
 add_library(mq_bs_0_std INTERFACE)
-target_compile_definitions(mq_bs_0_std INTERFACE STICK_POLICY_NONE USE_STD_PQ INSERTION_BUFFERSIZE=0 DELETION_BUFFERSIZE=0)
+target_compile_definitions(
+  mq_bs_0_std INTERFACE STICK_POLICY_NONE USE_STD_PQ INSERTION_BUFFERSIZE=0
+                        DELETION_BUFFERSIZE=0)
 target_link_libraries(mq_bs_0_std INTERFACE mq_interface)
 list(APPEND mq_tuning_targets mq_bs_0_std)
 
@@ -89,22 +108,26 @@ target_link_libraries(mq_none INTERFACE mq_interface)
 list(APPEND mq_targets mq_none)
 
 add_library(mq_none1 INTERFACE)
-target_compile_definitions(mq_none1 INTERFACE STICK_POLICY_NONE MQ_NUM_COMPARE=1)
+target_compile_definitions(mq_none1 INTERFACE STICK_POLICY_NONE
+                                              MQ_NUM_COMPARE=1)
 target_link_libraries(mq_none1 INTERFACE mq_interface)
 list(APPEND mq_targets mq_none1)
 
 add_library(mq_none2 INTERFACE)
-target_compile_definitions(mq_none2 INTERFACE STICK_POLICY_NONE MQ_NUM_COMPARE=2)
+target_compile_definitions(mq_none2 INTERFACE STICK_POLICY_NONE
+                                              MQ_NUM_COMPARE=2)
 target_link_libraries(mq_none2 INTERFACE mq_interface)
 list(APPEND mq_targets mq_none2)
 
 add_library(mq_none4 INTERFACE)
-target_compile_definitions(mq_none4 INTERFACE STICK_POLICY_NONE MQ_NUM_COMPARE=4)
+target_compile_definitions(mq_none4 INTERFACE STICK_POLICY_NONE
+                                              MQ_NUM_COMPARE=4)
 target_link_libraries(mq_none4 INTERFACE mq_interface)
 list(APPEND mq_targets mq_none4)
 
 add_library(mq_none8 INTERFACE)
-target_compile_definitions(mq_none8 INTERFACE STICK_POLICY_NONE MQ_NUM_COMPARE=8)
+target_compile_definitions(mq_none8 INTERFACE STICK_POLICY_NONE
+                                              MQ_NUM_COMPARE=8)
 target_link_libraries(mq_none8 INTERFACE mq_interface)
 list(APPEND mq_targets mq_none8)
 
@@ -114,9 +137,9 @@ target_link_libraries(mq_random INTERFACE mq_interface)
 list(APPEND mq_targets mq_random)
 
 # add_library(mq_random_strict INTERFACE)
-# target_compile_definitions(mq_random_strict INTERFACE STICK_POLICY_RANDOM_STRICT)
-# target_link_libraries(mq_random_strict INTERFACE mq_interface)
-# list(APPEND mq_targets mq_random_strict)
+# target_compile_definitions(mq_random_strict INTERFACE
+# STICK_POLICY_RANDOM_STRICT) target_link_libraries(mq_random_strict INTERFACE
+# mq_interface) list(APPEND mq_targets mq_random_strict)
 
 add_library(mq_swapping INTERFACE)
 target_compile_definitions(mq_swapping INTERFACE STICK_POLICY_SWAPPING)
@@ -124,25 +147,32 @@ target_link_libraries(mq_swapping INTERFACE mq_interface)
 list(APPEND mq_targets mq_swapping)
 
 # add_library(mq_swapping_lazy INTERFACE)
-# target_compile_definitions(mq_swapping_lazy INTERFACE STICK_POLICY_SWAPPING_LAZY)
-# target_link_libraries(mq_swapping_lazy INTERFACE mq_interface)
-# list(APPEND mq_targets mq_swapping_lazy)
+# target_compile_definitions(mq_swapping_lazy INTERFACE
+# STICK_POLICY_SWAPPING_LAZY) target_link_libraries(mq_swapping_lazy INTERFACE
+# mq_interface) list(APPEND mq_targets mq_swapping_lazy)
 
 # add_library(mq_swapping_blocking INTERFACE)
-# target_compile_definitions(mq_swapping_blocking INTERFACE STICK_POLICY_SWAPPING_BLOCKING)
-# target_link_libraries(mq_swapping_blocking INTERFACE mq_interface)
-# list(APPEND mq_targets mq_swapping_blocking)
+# target_compile_definitions(mq_swapping_blocking INTERFACE
+# STICK_POLICY_SWAPPING_BLOCKING) target_link_libraries(mq_swapping_blocking
+# INTERFACE mq_interface) list(APPEND mq_targets mq_swapping_blocking)
 
-# add_library(mq_perm INTERFACE)
-# target_compile_definitions(mq_perm INTERFACE STICK_POLICY_PERMUTATION)
-# target_link_libraries(mq_perm INTERFACE mq_interface)
-# list(APPEND mq_targets mq_perm)
+# add_library(mq_perm INTERFACE) target_compile_definitions(mq_perm INTERFACE
+# STICK_POLICY_PERMUTATION) target_link_libraries(mq_perm INTERFACE
+# mq_interface) list(APPEND mq_targets mq_perm)
 
 add_library(throughput INTERFACE)
 target_sources(throughput INTERFACE throughput.cpp)
 target_link_libraries(throughput INTERFACE thread_coordination benchmark_base)
 
-set(wrapper_targets capq klsm256 klsm1024 klsm4096 linden spraylist tbb_pq)
+set(wrapper_targets
+    klsm4
+    klsm256
+    klsm1024
+    klsm4096
+    linden
+    capq
+    spraylist
+    tbb_pq)
 
 foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   add_executable(throughput_${target})
@@ -177,8 +207,18 @@ foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   add_executable(quality_${target})
   target_link_libraries(quality_${target} PRIVATE ${target} quality)
   if(BUILD_TESTING)
-    add_test(NAME quality_${target}_small COMMAND /bin/bash -c "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 | $<TARGET_FILE:evaluate_quality> -v")
-    add_test(NAME quality_${target}_large COMMAND /bin/bash -c "$<TARGET_FILE:quality_${target}> -j 8 | $<TARGET_FILE:evaluate_quality> -v")
+    add_test(
+      NAME quality_${target}_small
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 | $<TARGET_FILE:evaluate_quality> -v"
+    )
+    add_test(
+      NAME quality_${target}_large
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:quality_${target}> -j 8 | $<TARGET_FILE:evaluate_quality> -v"
+    )
   endif()
 endforeach()
 
@@ -194,7 +234,8 @@ endforeach()
 
 add_library(insert_delete INTERFACE)
 target_sources(insert_delete INTERFACE insert_delete.cpp)
-target_link_libraries(insert_delete INTERFACE thread_coordination benchmark_base)
+target_link_libraries(insert_delete INTERFACE thread_coordination
+                                              benchmark_base)
 
 foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   add_executable(insert_delete_${target})
@@ -209,52 +250,98 @@ foreach(target ${mq_targets} ${wrapper_targets} tbb_q mf)
   add_executable(sssp_${target})
   target_link_libraries(sssp_${target} PRIVATE ${target} sssp)
   if(BUILD_TESTING)
-    add_test(NAME sssp_${target}_small COMMAND /bin/bash -c "$<TARGET_FILE:sssp_${target}> -j 1 -f data/NY_graph.gr -c data/NY_solution.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(NAME sssp_${target}_large COMMAND /bin/bash -c "$<TARGET_FILE:sssp_${target}> -j 8 -f data/CAL_graph.gr -c data/CAL_solution.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME sssp_${target}_small
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:sssp_${target}> -j 1 -f data/NY_graph.gr -c data/NY_solution.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME sssp_${target}_large
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:sssp_${target}> -j 8 -f data/CAL_graph.gr -c data/CAL_solution.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
 
 add_library(knapsack_packed INTERFACE)
 target_sources(knapsack_packed INTERFACE knapsack.cpp)
-target_link_libraries(knapsack_packed INTERFACE thread_coordination benchmark_base)
+target_link_libraries(knapsack_packed INTERFACE thread_coordination
+                                                benchmark_base)
 target_compile_definitions(knapsack_packed INTERFACE HINT_MODE PACKED_VALUE)
 
 add_library(knapsack_heap INTERFACE)
 target_sources(knapsack_heap INTERFACE knapsack.cpp)
-target_link_libraries(knapsack_heap INTERFACE thread_coordination benchmark_base)
+target_link_libraries(knapsack_heap INTERFACE thread_coordination
+                                              benchmark_base)
 target_compile_definitions(knapsack_heap INTERFACE HINT_MODE HEAP_VALUE)
 
 add_library(knapsack_explicit INTERFACE)
 target_sources(knapsack_explicit INTERFACE knapsack.cpp)
-target_link_libraries(knapsack_explicit INTERFACE thread_coordination benchmark_base)
+target_link_libraries(knapsack_explicit INTERFACE thread_coordination
+                                                  benchmark_base)
 target_compile_definitions(knapsack_explicit INTERFACE HINT_MODE EXPLICIT_VALUE)
 
 foreach(target ${targets})
   add_executable(knapsack_packed_${target})
-  target_link_libraries(knapsack_packed_${target} PRIVATE ${target} knapsack_packed)
+  target_link_libraries(knapsack_packed_${target} PRIVATE ${target}
+                                                          knapsack_packed)
   add_dependencies(knapsack_all knapsack_packed_${target})
   if(BUILD_TESTING)
-    add_test(NAME knapsack_packed_${target}_small COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_packed_${target}> -j 1 -f  data/knapsack_small.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(NAME knapsack_packed_${target}_large COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_packed_${target}> -j 8 -f data/knapsack_large.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME knapsack_packed_${target}_small
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:knapsack_packed_${target}> -j 1 -f  data/knapsack_small.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME knapsack_packed_${target}_large
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:knapsack_packed_${target}> -j 8 -f data/knapsack_large.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
 
 foreach(target ${targets})
   add_executable(knapsack_heap_${target})
-  target_link_libraries(knapsack_heap_${target} PRIVATE ${target} knapsack_heap tbbmalloc)
+  target_link_libraries(knapsack_heap_${target} PRIVATE ${target} knapsack_heap
+                                                        tbbmalloc)
   add_dependencies(knapsack_all knapsack_heap_${target})
   if(BUILD_TESTING)
-    add_test(NAME knapsack_heap_${target}_small COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_heap_${target}> -j 1 -f  data/knapsack_small.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(NAME knapsack_heap_${target}_large COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_heap_${target}> -j 8 -f data/knapsack_large.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME knapsack_heap_${target}_small
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:knapsack_heap_${target}> -j 1 -f  data/knapsack_small.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME knapsack_heap_${target}_large
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:knapsack_heap_${target}> -j 8 -f data/knapsack_large.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
 
 foreach(target ${targets})
   add_executable(knapsack_explicit_${target})
-  target_link_libraries(knapsack_explicit_${target} PRIVATE ${target} knapsack_explicit)
+  target_link_libraries(knapsack_explicit_${target} PRIVATE ${target}
+                                                            knapsack_explicit)
   add_dependencies(knapsack_all knapsack_explicit_${target})
   if(BUILD_TESTING)
-    add_test(NAME knapsack_explicit_${target}_small COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_explicit_${target}> -j 1 -f  data/knapsack_small.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(NAME knapsack_explicit_${target}_large COMMAND /bin/bash -c "$<TARGET_FILE:knapsack_explicit_${target}> -j 8 -f data/knapsack_large.txt" WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME knapsack_explicit_${target}_small
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:knapsack_explicit_${target}> -j 1 -f  data/knapsack_small.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
+    add_test(
+      NAME knapsack_explicit_${target}_large
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:knapsack_explicit_${target}> -j 8 -f data/knapsack_large.txt"
+      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
