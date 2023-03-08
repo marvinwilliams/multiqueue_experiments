@@ -45,12 +45,9 @@ class Linden {
     alignas(64) std::unique_ptr<linden_pq_t, pq_deleter> pq_;
 
    public:
-    Linden(unsigned int num_threads);
+    Linden(int num_threads, std::size_t initial_capacity);
 
-    Handle get_handle();
-
-    void push(value_type const& value) const;
-    bool try_pop(value_type& retval) const;
+    Handle get_handle(int id);
 
     static std::ostream& describe(std::ostream& out) {
         out << "linden\n";

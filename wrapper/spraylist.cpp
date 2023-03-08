@@ -19,58 +19,39 @@ __thread unsigned long* seeds;
 
 namespace wrapper {
 
-void Spraylist::sl_intset_deleter::operator()(sl_intset_t* p) { sl_set_delete(p); }
-void Spraylist::thread_data_deleter::operator()(thread_data_t* p) { delete p; }
-
-Spraylist::Spraylist(unsigned int num_threads) : num_threads_(num_threads) {
-  ssalloc_init(num_threads_);
-  seeds = seed_rand();
-  thread_data_ = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
-  thread_data_->seed = rand();
-  thread_data_->seed2 = rand();
-  *levelmax = floor_log_2(1'000'000);
-  pq_.reset(sl_set_new());
-  thread_data_->nb_threads = num_threads_;
+void Spraylist::sl_intset_deleter::operator()(sl_intset_t* p) {
+    sl_set_delete(p);
+}
+void Spraylist::thread_data_deleter::operator()(thread_data_t* p) {
+    delete p;
 }
 
-Spraylist::Handle Spraylist::get_handle() {
-  ssalloc_init(num_threads_);
-  seeds = seed_rand();
-  auto thread_data = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
-  thread_data->seed = rand();
-  thread_data->seed2 = rand();
-  thread_data->nb_threads = num_threads_;
-  return Handle{std::move(thread_data), pq_.get()};
+Spraylist::Spraylist(int num_threads, std::size_t initial_capacity) : num_threads_(num_threads) {
+    ssalloc_init(num_threads_);
+    *levelmax = floor_log_2(initial_capacity);
+    pq_.reset(sl_set_new());
+}
+
+Spraylist::Handle Spraylist::get_handle(int /*unused*/) {
+    ssalloc_init(num_threads_);
+    seeds = seed_rand();
+    auto thread_data = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
+    thread_data->seed = rand();
+    thread_data->seed2 = rand();
+    thread_data->nb_threads = num_threads_;
+    return Handle{std::move(thread_data), pq_.get()};
 }
 
 void Spraylist::Handle::push(value_type const& value) const {
-  sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
+    sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
 }
 
 bool Spraylist::Handle::try_pop(value_type& retval) const {
-  retval.first = 0;
-  while (true) {
-    bool success = spray_delete_min_key(pq_, &retval.first, &retval.second,
-                                        data_.get()) != 0;
-    if (success || retval.first == std::numeric_limits<key_type>::max()) {
-      return success;
-}
-  }
-}
-
-void Spraylist::push(value_type const& value) const {
-  sl_add_val(pq_.get(), value.first, value.second, TRANSACTIONAL);
-}
-
-bool Spraylist::try_pop(value_type& retval) const {
-  retval.first = 0;
-  while (true) {
-    bool success = spray_delete_min_key(pq_.get(), &retval.first, &retval.second,
-                                        thread_data_.get()) != 0;
-    if (success || retval.first == std::numeric_limits<key_type>::max()) {
-      return success;
-}
-  }
+    int ret;
+    do {
+        ret = spray_delete_min_key(pq_, &retval.first, &retval.second, data_.get());
+    } while (ret == 0 && retval.first != std::numeric_limits<key_type>::max());
+    return retval.first != std::numeric_limits<key_type>::max();
 }
 
 }  // namespace wrapper

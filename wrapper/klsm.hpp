@@ -47,19 +47,9 @@ class Klsm {
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    Klsm(unsigned int /* num_threads */) : pq_(new pq_type) {
-    }
+    Klsm(int num_threads, std::size_t initial_capacity);
 
-    Handle get_handle() {
-        return Handle{*pq_.get()};
-    }
-
-    void push(value_type const& value) {
-        pq_->insert(value.first, value.second);
-    }
-    bool try_pop(value_type& retval) {
-        return pq_->delete_min(retval.first, retval.second);
-    }
+    Handle get_handle(int id);
 
     static std::ostream& describe(std::ostream& out) {
         out << "klsm\n";
@@ -68,4 +58,12 @@ class Klsm {
     }
 };
 
+template <typename KeyType, typename T, int Relaxation>
+Klsm<KeyType, T, Relaxation>::Klsm(int /*unused*/, std::size_t /*unused*/) : pq_(new pq_type()) {
+}
+
+template <typename KeyType, typename T, int Relaxation>
+typename Klsm<KeyType, T, Relaxation>::Handle Klsm<KeyType, T, Relaxation>::get_handle(int /*unused*/) {
+    return Handle{*pq_.get()};
+}
 }  // namespace wrapper

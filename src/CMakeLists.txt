@@ -111,25 +111,25 @@ add_library(mq_none1 INTERFACE)
 target_compile_definitions(mq_none1 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=1)
 target_link_libraries(mq_none1 INTERFACE mq_interface)
-list(APPEND mq_targets mq_none1)
+list(APPEND mq_tuning_targets mq_none1)
 
 add_library(mq_none2 INTERFACE)
 target_compile_definitions(mq_none2 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=2)
 target_link_libraries(mq_none2 INTERFACE mq_interface)
-list(APPEND mq_targets mq_none2)
+list(APPEND mq_tuning_targets mq_none2)
 
 add_library(mq_none4 INTERFACE)
 target_compile_definitions(mq_none4 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=4)
 target_link_libraries(mq_none4 INTERFACE mq_interface)
-list(APPEND mq_targets mq_none4)
+list(APPEND mq_tuning_targets mq_none4)
 
 add_library(mq_none8 INTERFACE)
 target_compile_definitions(mq_none8 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=8)
 target_link_libraries(mq_none8 INTERFACE mq_interface)
-list(APPEND mq_targets mq_none8)
+list(APPEND mq_tuning_targets mq_none8)
 
 add_library(mq_random INTERFACE)
 target_compile_definitions(mq_random INTERFACE STICK_POLICY_RANDOM)

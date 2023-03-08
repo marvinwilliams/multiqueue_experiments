@@ -13,14 +13,14 @@ void CAPQ_deleter::operator()(CAPQ* p) {
 namespace wrapper {
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-Capq<remove_min_relax, put_relax, catree_adapt>::Capq(unsigned int /* num_threads */) {
+Capq<remove_min_relax, put_relax, catree_adapt>::Capq(int /*unused*/, std::size_t /*unused*/) {
     _init_gc_subsystem();
     pq_.reset(capq_new());
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 typename Capq<remove_min_relax, put_relax, catree_adapt>::Handle
-Capq<remove_min_relax, put_relax, catree_adapt>::get_handle() {
+Capq<remove_min_relax, put_relax, catree_adapt>::get_handle(int /*unused*/) {
     return Handle{pq_.get()};
 }
 
@@ -32,17 +32,6 @@ void Capq<remove_min_relax, put_relax, catree_adapt>::Handle::push(value_type co
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
 bool Capq<remove_min_relax, put_relax, catree_adapt>::Handle::try_pop(value_type& retval) {
     retval.second = capq_remove_min_param(pq_, &retval.first, remove_min_relax, put_relax, catree_adapt);
-    return retval.first != sentinel_;
-}
-
-template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-void Capq<remove_min_relax, put_relax, catree_adapt>::push(value_type const& value) {
-    capq_put_param(pq_.get(), value.first, value.second, catree_adapt);
-}
-
-template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-bool Capq<remove_min_relax, put_relax, catree_adapt>::try_pop(value_type& retval) {
-    retval.second = capq_remove_min_param(pq_.get(), &retval.first, remove_min_relax, put_relax, catree_adapt);
     return retval.first != sentinel_;
 }
 

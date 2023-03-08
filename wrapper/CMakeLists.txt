@@ -79,7 +79,8 @@ target_compile_definitions(
   PRIVATE INTEL
   PRIVATE LOCKFREE
   PRIVATE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE}
-  PRIVATE SSALLOC_USE_MALLOC)
+  # PRIVATE SSALLOC_USE_MALLOC
+  )
 target_include_directories(
   spraylist
   PRIVATE ${EXTERNAL_DIR}/klsm/lib

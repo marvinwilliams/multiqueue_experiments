@@ -45,12 +45,9 @@ class Capq {
     alignas(64) std::unique_ptr<CAPQ, CAPQ_deleter> pq_;
 
    public:
-    Capq(unsigned int /*num_threads*/);
+    Capq(int num_threads, std::size_t initial_capacity);
 
-    Handle get_handle();
-
-    void push(value_type const& value);
-    bool try_pop(value_type& retval);
+    Handle get_handle(int id);
 
     static std::ostream& describe(std::ostream& out) {
         out << "capq\n";

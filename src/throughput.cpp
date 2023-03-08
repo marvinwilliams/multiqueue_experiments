@@ -68,9 +68,9 @@ std::array const event_names{"PAPI_L1_DCA",
                              "perf::L1-DCACHE-LOAD-MISSES",
                              "perf::L1-DCACHE-STORES",
                              "perf::L1-DCACHE-STORE-MISSES",
-                             "perf_raw::r0729", // L1 data cache accesses
-                             "perf_raw::rc860", // L2 accesses due to data cache misses
-                             "perf_raw::r0864", // L2 miss from data cache miss
+                             "perf_raw::r0729",  // L1 data cache accesses
+                             "perf_raw::rc860",  // L2 accesses due to data cache misses
+                             "perf_raw::r0864",  // L2 miss from data cache miss
                              "perf::LLC-LOADS",
                              "perf::LLC-LOAD-MISSES",
                              "perf::LLC-STORES",
@@ -134,16 +134,14 @@ class Benchmark {
         }
         int code{};
         // L1d cache misses
-        if (int ret = PAPI_event_name_to_code("perf_raw::rc860", &code);
-            ret != PAPI_OK) {
+        if (int ret = PAPI_event_name_to_code("perf_raw::rc860", &code); ret != PAPI_OK) {
             return false;
         }
         if (int ret = PAPI_add_event(event_set, code); ret != PAPI_OK) {
             return false;
         }
         // L2 cache misses due to L1d cache misses
-        if (int ret = PAPI_event_name_to_code("perf_raw::r0864", &code);
-            ret != PAPI_OK) {
+        if (int ret = PAPI_event_name_to_code("perf_raw::r0864", &code); ret != PAPI_OK) {
             return false;
         }
         if (int ret = PAPI_add_event(event_set, code); ret != PAPI_OK) {
@@ -344,13 +342,16 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-#ifdef PQ_MQ
+#if defined PQ_MQ
     mq_config.seed = settings.seed;
-    auto pq = PriorityQueue(settings.num_threads,
-                            settings.prefill_per_thread * static_cast<unsigned int>(settings.num_threads), mq_config);
-#else
-    auto pq = PriorityQueue(settings.num_threads);
 #endif
+    auto pq = PriorityQueue(settings.num_threads,
+                            settings.prefill_per_thread * static_cast<unsigned int>(settings.num_threads)
+#if defined PQ_MQ
+                                ,
+                            mq_config
+#endif
+    );
 
     std::clog << "Data structure: ";
     util::describe::describe(std::clog, pq);
