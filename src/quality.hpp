@@ -43,13 +43,10 @@ struct PopLogEntry {
         std::size_t op_id;
     };
     tick_type tick;
-    std::optional<Payload> payload{};
+    Payload payload{};
 
     PopLogEntry(tick_type t, value_type v)
         : tick{t}, payload{Payload{packed_value::thread_id(v), packed_value::op_id(v)}} {
-    }
-
-    PopLogEntry(tick_type t) : tick{t} {
     }
 };
 

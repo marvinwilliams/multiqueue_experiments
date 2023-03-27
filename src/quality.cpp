@@ -106,13 +106,10 @@ class Benchmark {
                 for (auto it = block_begin; it != block_end; ++it) {
                     if (it->is_pop()) {
                         PriorityQueue::value_type retval;
-                        bool success = handle.try_pop(retval);
-                        auto tick = get_tick();
-                        if (success) {
-                            data.pop_log[static_cast<std::size_t>(ctx.get_id())].emplace_back(tick, retval.second);
-                        } else {
-                            data.pop_log[static_cast<std::size_t>(ctx.get_id())].emplace_back(tick);
+                        while (!handle.try_pop(retval)) {
                         }
+                        auto tick = get_tick();
+                        data.pop_log[static_cast<std::size_t>(ctx.get_id())].emplace_back(tick, retval.second);
                     } else {
                         key_type key = it->get_insert_key();
                         handle.push({key,
@@ -152,7 +149,7 @@ class Benchmark {
         }
 
         data.pop_log[static_cast<std::size_t>(ctx.get_id())].reserve(settings.operations);
-        data.push_log[static_cast<std::size_t>(ctx.get_id())].reserve(settings.prefill);
+        data.push_log[static_cast<std::size_t>(ctx.get_id())].reserve(settings.prefill + settings.operations);
         Handle handle = pq.get_handle(ctx.get_id());
 
         ctx.execute_synchronized_timed(data.prefill_time, [id = ctx.get_id(), &handle, &prefill_keys, &data]() {
