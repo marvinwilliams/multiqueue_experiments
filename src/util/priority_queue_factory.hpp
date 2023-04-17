@@ -8,66 +8,50 @@
 *******************************************************************************
 **/
 #pragma once
+#define STRINGIFY(x) #x
+#define TOSTRING(x) STRINGIFY(x)
 
 #if defined PQ_MQ
 #include "multiqueue/buffered_pq.hpp"
-#include "multiqueue/build_config.hpp"
-#include "multiqueue/heap.hpp"
+#include "multiqueue/config.hpp"
 #include "multiqueue/multiqueue.hpp"
 #include "multiqueue/stick_policy.hpp"
-#elif defined PQ_CAPQ
-#include "wrapper/capq.hpp"
-#elif defined PQ_KLSM4 || defined PQ_KLSM256 || defined PQ_KLSM1024 || defined PQ_KLSM4096
-#include "wrapper/klsm.hpp"
-#elif defined PQ_LINDEN
-#include "wrapper/linden.hpp"
-#elif defined PQ_SPRAYLIST
-#include "wrapper/spraylist.hpp"
-#elif defined PQ_TBB_Q
-#include "wrapper/tbb_queue.hpp"
-#elif defined PQ_TBB_PQ
-#include "wrapper/tbb_priority_queue.hpp"
-#else
-#error No valid PQ specified
-#endif
 
-#if defined PQ_MQ && defined USE_STD_PQ
-#include <queue>
-#endif
+#include "cxxopts.hpp"
 
-#include <cstddef>
-#include <cstdint>
-#include <functional>
-#include <optional>
-#include <ostream>
-#include <type_traits>
-#include <utility>
-
-namespace util {
-
+#define PQ_HAS_GENERIC
+#define PQ_HAS_MAX
+#define PQ_HAS_MAX_GENERIC
 namespace detail {
-
-#if defined PQ_MQ
-static constexpr multiqueue::StickPolicy stick_policy =
 #ifdef STICK_POLICY_NONE
-    multiqueue::StickPolicy::None
+static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::None;
+#define STICK_POLICY_NAME None
 #elif defined STICK_POLICY_RANDOM
-    multiqueue::StickPolicy::Random
+static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Random;
+#define STICK_POLICY_NAME Random
 #elif defined STICK_POLICY_RANDOM_STRICT
-    multiqueue::StickPolicy::RandomStrict
+static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::RandomStrict;
+#define STICK_POLICY_NAME Random(strict)
 #elif defined STICK_POLICY_SWAPPING
-    multiqueue::StickPolicy::Swapping
+static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Swapping;
+#define STICK_POLICY_NAME Swapping
 #elif defined STICK_POLICY_SWAPPING_LAZY
-    multiqueue::StickPolicy::SwappingLazy
+static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::SwappingLazy;
+#define STICK_POLICY_NAME Swapping(lazy)
 #elif defined STICK_POLICY_SWAPPING_BLOCKING
-    multiqueue::StickPolicy::SwappingBlocking
+static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::SwappingBlocking;
+#define STICK_POLICY_NAME Swapping(blocking)
 #elif defined STICK_POLICY_PERMUTATION
-    multiqueue::StickPolicy::Permutation
+static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Permutation;
+#define STICK_POLICY_NAME Permutation
 #else
-    multiqueue::StickPolicy::None
+#error No valid stick policy specified
 #endif
-    ;
-
+#ifdef USE_STD_PQ
+#include <queue>
+#else
+#include "multiqueue/heap.hpp"
+#endif
 template <typename T, typename Compare>
 using SeqPriorityQueue = ::multiqueue::BufferedPQ<
 #ifdef USE_STD_PQ
@@ -84,160 +68,102 @@ using SeqPriorityQueue = ::multiqueue::BufferedPQ<
 #error Must specify either both buffersizes or none
 #endif
     >;
-#endif
-
-template <typename KeyType, typename ValueType, bool Min = true>
-struct PriorityQueueTypeFactory {
-#if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<KeyType>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_KLSM4
-    using type = wrapper::Klsm<KeyType, ValueType, 4>;
-#elif defined PQ_KLSM256
-    using type = wrapper::Klsm<KeyType, ValueType, 256>;
-#elif defined PQ_KLSM1024
-    using type = wrapper::Klsm<KeyType, ValueType, 1024>;
-#elif defined PQ_KLSM4096
-    using type = wrapper::Klsm<KeyType, ValueType, 4096>;
-#elif defined PQ_TBB_Q
-    using type = wrapper::TBBQueue<KeyType, ValueType>;
-#elif defined PQ_TBB_PQ
-    using type = wrapper::TBBPriorityQueue<KeyType, ValueType, std::greater<>>;
-#endif
-};
-
-template <typename KeyType, typename ValueType>
-struct PriorityQueueTypeFactory<KeyType, ValueType, false> {
-#if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<KeyType>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_TBB_Q
-    using type = wrapper::TBBQueue<KeyType, ValueType>;
-#elif defined PQ_TBB_PQ
-    using type = wrapper::TBBPriorityQueue<KeyType, ValueType, std::less<>>;
-#endif
-};
-
-template <>
-struct PriorityQueueTypeFactory<unsigned long, unsigned long, true> {
-    using KeyType = unsigned long;
-    using ValueType = unsigned long;
-#if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::greater<>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_CAPQ
-    using type = wrapper::Capq<true, true, true>;
-#elif defined PQ_KLSM4
-    using type = wrapper::Klsm<KeyType, ValueType, 4>;
-#elif defined PQ_KLSM256
-    using type = wrapper::Klsm<KeyType, ValueType, 256>;
-#elif defined PQ_KLSM1024
-    using type = wrapper::Klsm<KeyType, ValueType, 1024>;
-#elif defined PQ_KLSM4096
-    using type = wrapper::Klsm<KeyType, ValueType, 4096>;
-#elif defined PQ_LINDEN
-    using type = wrapper::Linden;
-#elif defined PQ_SPRAYLIST
-    using type = wrapper::Spraylist;
-#elif defined PQ_TBB_Q
-    using type = wrapper::TBBQueue<KeyType, ValueType>;
-#elif defined PQ_TBB_PQ
-    using type = wrapper::TBBPriorityQueue<KeyType, ValueType, std::greater<>>;
-#endif
-};
-
-template <>
-struct PriorityQueueTypeFactory<unsigned long, unsigned long, false> {
-    using KeyType = unsigned long;
-    using ValueType = unsigned long;
-#if defined PQ_MQ
-    using type = multiqueue::MultiQueue<KeyType, ValueType, std::less<>, stick_policy, SeqPriorityQueue>;
-#elif defined PQ_TBB_Q
-    using type = wrapper::TBBQueue<KeyType, ValueType>;
-#elif defined PQ_TBB_PQ
-    using type = wrapper::TBBPriorityQueue<KeyType, ValueType, std::less<>>;
-#endif
-};
-
 }  // namespace detail
-
-template <typename KeyType, typename ValueType, bool Min>
-using priority_queue_type = typename detail::PriorityQueueTypeFactory<KeyType, ValueType, Min>::type;
-
-namespace describe {
-
-template <typename T>
-struct DescribeTag {};
-
-template <typename T>
-void describe_type(std::ostream &out, DescribeTag<T>) {
-    out << "unknown\n";
-}
-
-#ifdef PQ_MQ
-#ifdef USE_STD_PQ
-template <typename T, typename Container, typename Compare>
-void describe_type(std::ostream &out, DescribeTag<std::priority_queue<T, Container, Compare>>) {
-    out << "std::priority_queue\n";
-}
-#endif
-
-template <typename T, typename Compare, unsigned int Arity, typename Container>
-void describe_type(std::ostream &out, DescribeTag<multiqueue::Heap<T, Compare, Arity, Container>>) {
-    out << "Heap with arity " << Arity << '\n';
-}
-
-template <typename PQ, std::size_t I, std::size_t D>
-void describe_type(std::ostream &out, DescribeTag<multiqueue::BufferedPQ<PQ, I, D>>) {
-    out << "Buffered PQ\n";
-    out << "Buffer sizes (Insertion/Deletion): " << I << '/' << D << '\n';
-    out << "Backing PQ: ";
-    describe_type(out, DescribeTag<PQ>{});
-}
-
-inline std::string stick_policy_to_name(multiqueue::StickPolicy policy) {
-    switch (policy) {
-        case multiqueue::StickPolicy::None:
-            return "none";
-        case multiqueue::StickPolicy::RandomStrict:
-            return "random (strict)";
-        case multiqueue::StickPolicy::Random:
-            return "Random";
-        case multiqueue::StickPolicy::Swapping:
-            return "Swapping";
-        case multiqueue::StickPolicy::SwappingBlocking:
-            return "Swapping (blocking)";
-        case multiqueue::StickPolicy::SwappingLazy:
-            return "Swapping (lazy)";
-        case multiqueue::StickPolicy::Permutation:
-            return "Permutation";
-        default:
-            return "unknown";
-    }
-}
-
-template <typename Key, typename T, typename KeyCompare, multiqueue::StickPolicy P,
-          template <typename, typename> typename PriorityQueue, typename ValueTraits, typename SentinelTraits,
-          typename Allocator>
-void describe(
-    std::ostream &out,
-    multiqueue::MultiQueue<Key, T, KeyCompare, P, PriorityQueue, ValueTraits, SentinelTraits, Allocator> const &mq) {
-    out << "MultiQueue\n";
-    out << "Number of PQs: " << mq.num_pqs() << '\n';
-    out << "Sentinel: " << SentinelTraits::sentinel() << " (" << (SentinelTraits::is_implicit ? "implicit" : "explicit")
-        << ")\n";
-    out << "Stick policy: " << stick_policy_to_name(P) << '\n';
-    out << "Sequential PQ: ";
-    describe_type(out,
-                  DescribeTag<typename multiqueue::MultiQueue<Key, T, KeyCompare, P, PriorityQueue, ValueTraits,
-                                                              SentinelTraits, Allocator>::pq_type::pq_type>{});
-}
-
+template <typename Key, typename T>
+using GenericMinPriorityQueue =
+    multiqueue::MultiQueue<Key, T, std::greater<>, detail::STICK_POLICY, detail::SeqPriorityQueue>;
+template <typename Key, typename T>
+using GenericMaxPriorityQueue =
+    multiqueue::MultiQueue<Key, T, std::less<>, detail::STICK_POLICY, detail::SeqPriorityQueue>;
+using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
+using DefaultMaxPriorityQueue = GenericMaxPriorityQueue<unsigned long, unsigned long>;
+static constexpr auto pq_name =
+    "MultiQueue (buffer sizes: "
+#if defined INSERTION_BUFFERSIZE && defined DELETION_BUFFERSIZE
+    "i=" TOSTRING(INSERTION_BUFFERSIZE) " d=" TOSTRING(DELETION_BUFFERSIZE)
 #else
+                          "default"
+#endif
+        ", stick policy: " TOSTRING(STICK_POLICY_NAME)
+        ", heap: "
+#ifdef USE_STD_PQ
+        "std"
+#else
+    "default"
+#ifdef HEAP_ARITY
+                                   " (d=" TOSTRING(HEAP_ARITY) ")"
+#endif
+#endif
+        ")";
+#undef STICK_POLICY_NAME
+
+inline void add_pq_options(cxxopts::Options& options) {
+    options.add_options()("c,factor", "The factor for queues", cxxopts::value<int>(), "NUMBER")
+#ifndef PQ_MQ_NONE
+        ("k,stickiness", "The stickiness period", cxxopts::value<int>(), "NUMBER");
+#endif
+}
 
 template <typename PriorityQueue>
-void describe(std::ostream &out, PriorityQueue const &pq) {
-    pq.describe(out);
-}
-
+inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, const cxxopts::ParseResult& result) {
+    multiqueue::Config config;
+    if (result.count("factor")) {
+        config.c = result["factor"].as<int>();
+    }
+#ifndef PQ_MQ_NONE
+    if (result.count("stickiness")) {
+        config.stickiness = result["stickiness"].as<int>();
+    }
 #endif
-}  // namespace describe
+    return PriorityQueue(num_threads, initial_capacity, config);
+}
+#else
+#ifdef PQ_CAPQ
+#include "wrapper/capq.hpp"
+using DefaultMinPriorityQueue = wrapper::Capq<true, true, true>;
+static constexpr auto pq_name = "CA-PQ";
+#elif defined PQ_KLSM
+#ifndef KLSM_K
+#error KLSM_K not defined
+#endif
+#include "wrapper/klsm.hpp"
+#define PQ_HAS_GENERIC
+template <typename Key, typename T>
+using GenericMinPriorityQueue = wrapper::Klsm<Key, T, KLSM_K>;
+using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
+static constexpr auto pq_name = "KLSM (k=" TOSTRING(KLSM_K) ")";
+#elif defined PQ_LINDEN
+#include "wrapper/linden.hpp"
+using DefaultMinPriorityQueue = wrapper::Linden;
+static constexpr auto pq_name = "Linden";
+#elif defined PQ_SPRAYLIST
+#include "wrapper/spraylist.hpp"
+using DefaultMinPriorityQueue = wrapper::Spraylist;
+static constexpr auto pq_name = "Spraylist";
+#elif defined PQ_TBB_PQ
+#include "wrapper/tbb_priority_queue.hpp"
+#define PQ_HAS_GENERIC
+#define PQ_HAS_MAX
+#define PQ_HAS_MAX_GENERIC
+template <typename Key, typename T>
+using GenericMinPriorityQueue = wrapper::TBBPriorityQueue<Key, T, std::greater<>>;
+template <typename Key, typename T>
+using GenericMaxPriorityQueue = wrapper::TBBPriorityQueue<Key, T, std::less<>>;
+using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
+using DefaultMaxPriorityQueue = GenericMaxPriorityQueue<unsigned long, unsigned long>;
+static constexpr auto pq_name = "TBB priority_queue";
+#else
+#error No valid PQ specified
+#endif
+#include "cxxopts.hpp"
 
-}  // namespace util
+inline void add_pq_options(cxxopts::Options&) {
+}
+template <typename PriorityQueue>
+inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, const cxxopts::ParseResult&) {
+    return PriorityQueue(num_threads, initial_capacity);
+}
+#endif
+
+#undef STRINGIFY
+#undef TOSTRING

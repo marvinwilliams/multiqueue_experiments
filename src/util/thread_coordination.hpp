@@ -45,7 +45,6 @@ struct SharedData {
 
     int num_threads;
     utils::Barrier barrier;
-    clock_type::time_point timestamp;
     std::mutex write_mutex;
     alignas(64) std::atomic_size_t index{0};
 
@@ -91,27 +90,23 @@ class Context {
     }
 
     template <typename Work, typename... Args>
-    void execute_synchronized(Work work, Args&&... args) const {
+    duration_type execute_synchronized(Work work, Args&&... args) const {
         shared_data_.barrier.wait();
+        auto t1 = std::chrono::steady_clock::now();
         work(std::forward<Args>(args)...);
+        auto t2 = std::chrono::steady_clock::now();
         shared_data_.barrier.wait();
-    }
-
-    template <typename Work, typename... Args>
-    void execute_synchronized_timed(duration_type& duration, Work work, Args&&... args) const {
-        shared_data_.barrier.wait([this] { shared_data_.timestamp = std::chrono::steady_clock::now(); });
-        work(std::forward<Args>(args)...);
-        shared_data_.barrier.wait(
-            [this, &duration] { duration = std::chrono::steady_clock::now() - shared_data_.timestamp; });
+        return t2 - t1;
     }
 
     template <typename Iter, typename Work>
-    void execute_synchronized_blockwise(Iter begin, Iter end, Work work) const {
+    duration_type execute_synchronized_blockwise(Iter begin, Iter end, Work work) const {
         using difference_type = typename std::iterator_traits<Iter>::difference_type;
         static constexpr difference_type block_size = 1 << 12;
 
         difference_type n = end - begin;
         shared_data_.barrier.wait();
+        auto t1 = std::chrono::steady_clock::now();
         while (true) {
             auto block_begin =
                 static_cast<difference_type>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
@@ -121,29 +116,9 @@ class Context {
             auto block_end = std::min(block_begin + block_size, n);
             work(begin + block_begin, begin + block_end);
         }
+        auto t2 = std::chrono::steady_clock::now();
         shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });
-    }
-
-    template <typename Iter, typename Work>
-    void execute_synchronized_blockwise_timed(duration_type& duration, Iter begin, Iter end, Work work) const {
-        using difference_type = typename std::iterator_traits<Iter>::difference_type;
-        static constexpr difference_type block_size = 1 << 12;
-
-        difference_type n = end - begin;
-        shared_data_.barrier.wait([this] { shared_data_.timestamp = std::chrono::steady_clock::now(); });
-        while (true) {
-            auto block_begin =
-                static_cast<difference_type>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
-            if (block_begin >= n) {
-                break;
-            }
-            auto block_end = std::min(block_begin + block_size, n);
-            work(begin + block_begin, begin + block_end);
-        }
-        shared_data_.barrier.wait([this, &duration] {
-            duration = std::chrono::steady_clock::now() - shared_data_.timestamp;
-            shared_data_.index.store(0, std::memory_order_relaxed);
-        });
+        return t2 - t1;
     }
 };
 

@@ -10,19 +10,19 @@ target_include_directories(klsm SYSTEM INTERFACE ${EXTERNAL_DIR}/klsm/src
 add_library(klsm4 INTERFACE)
 target_link_libraries(klsm4 INTERFACE klsm)
 set_property(TARGET klsm4 PROPERTY pq_name klsm4)
-target_compile_definitions(klsm4 INTERFACE PQ_KLSM4)
+target_compile_definitions(klsm4 INTERFACE PQ_KLSM INTERFACE KLSM_K=4)
 add_library(klsm256 INTERFACE)
 target_link_libraries(klsm256 INTERFACE klsm)
 set_property(TARGET klsm256 PROPERTY pq_name klsm256)
-target_compile_definitions(klsm256 INTERFACE PQ_KLSM256)
+target_compile_definitions(klsm256 INTERFACE PQ_KLSM INTERFACE KLSM_K=256)
 add_library(klsm1024 INTERFACE)
 target_link_libraries(klsm1024 INTERFACE klsm)
 set_property(TARGET klsm1024 PROPERTY pq_name klsm1024)
-target_compile_definitions(klsm1024 INTERFACE PQ_KLSM1024)
+target_compile_definitions(klsm1024 INTERFACE PQ_KLSM INTERFACE KLSM_K=1024)
 add_library(klsm4096 INTERFACE)
 target_link_libraries(klsm4096 INTERFACE klsm)
 set_property(TARGET klsm4096 PROPERTY pq_name klsm4096)
-target_compile_definitions(klsm4096 INTERFACE PQ_KLSM4096)
+target_compile_definitions(klsm4096 INTERFACE PQ_KLSM INTERFACE PQ_KLSM_K=4096)
 
 add_library(
   linden STATIC
@@ -80,7 +80,7 @@ target_compile_definitions(
   PRIVATE LOCKFREE
   PRIVATE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE}
   # PRIVATE SSALLOC_USE_MALLOC
-  )
+)
 target_include_directories(
   spraylist
   PRIVATE ${EXTERNAL_DIR}/klsm/lib
