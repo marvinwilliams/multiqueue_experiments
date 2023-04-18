@@ -11,12 +11,22 @@
       "binaryDir": "build/release",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Release",
-        "MULTIQUEUE_EXP_PC": "OFF",
         "MULTIQUEUE_BUILD_TESTS": "OFF",
         "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
         "MULTIQUEUE_BUILD_EXAMPLES": "OFF",
-        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF",
-        "MULTIQUEUE_EXP_PROFILING": "OFF"
+        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF"
+      }
+    },
+    {
+      "name": "profile",
+      "displayName": "Profile Preset",
+      "binaryDir": "build/profile",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Profile",
+        "MULTIQUEUE_BUILD_TESTS": "OFF",
+        "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
+        "MULTIQUEUE_BUILD_EXAMPLES": "OFF",
+        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF"
       }
     },
     {
@@ -25,8 +35,6 @@
       "binaryDir": "build/debug",
       "cacheVariables": {
         "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS_DEBUG": "-Og -g",
-        "MULTIQUEUE_EXP_PC": "OFF",
         "MULTIQUEUE_BUILD_TESTS": "ON",
         "MULTIQUEUE_BUILD_BENCHMARKS": "OFF",
         "MULTIQUEUE_BUILD_EXAMPLES": "ON",
@@ -61,6 +69,11 @@
       "name": "release",
       "displayName": "Release Build preset",
       "configurePreset": "release"
+    },
+    {
+      "name": "profile",
+      "displayName": "Profile Build preset",
+      "configurePreset": "profile"
     },
     {
       "name": "debug",

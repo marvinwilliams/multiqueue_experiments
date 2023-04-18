@@ -151,7 +151,7 @@ template <typename Key, typename T>
 using GenericMaxPriorityQueue = wrapper::TBBPriorityQueue<Key, T, std::less<>>;
 using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
 using DefaultMaxPriorityQueue = GenericMaxPriorityQueue<unsigned long, unsigned long>;
-static constexpr auto pq_name = "TBB priority_queue";
+static constexpr auto pq_name = "TBB";
 #else
 #error No valid PQ specified
 #endif

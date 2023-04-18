@@ -1,19 +1,22 @@
 cmake_minimum_required(VERSION 3.16)
 
+set(CMAKE_CONFIGURATION_TYPES "Debug;Release;Profile" CACHE STRING "")
+set(CMAKE_CXX_FLAGS_DEBUG "-0g -ggdb" CACHE STRING "")
+set(CMAKE_C_FLAGS_DEBUG "-0g -ggdb" CACHE STRING "")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native" CACHE STRING "")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -march=native" CACHE STRING "")
+set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE} -g -fno-omit-frame-pointer" CACHE STRING "")
+set(CMAKE_C_FLAGS_PROFILE "${CMAKE_C_FLAGS_RELEASE} -g -fno-omit-frame-pointer" CACHE STRING "")
+
 project(
   multiqueue_experiments
   VERSION 3.0
   LANGUAGES CXX C)
 
-set_property(GLOBAL PROPERTY USE_FOLDERS ON)
-
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(utils)
-disable_intree_builds()
 
-set(CMAKE_CXX_FLAGS_DEBUG
-    "-g -0g"
-    CACHE STRING "")
+disable_intree_builds()
 
 # Read the system's L1 cache-line size and page size
 execute_process(
@@ -25,9 +28,18 @@ execute_process(
   OUTPUT_VARIABLE DEFAULT_PAGESIZE
   OUTPUT_STRIP_TRAILING_WHITESPACE)
 
+find_package(PAPI)
+set(THREADS_PREFER_PTHREAD_FLAG ON)
+find_package(Threads)
+find_package(TBB)
+
 option("MULTIQUEUE_EXP_BUILD_TESTS" "Build unit tests for experiment tools" OFF)
-option("MULTIQUEUE_EXP_PC" "Enable performance counters in benchmarks" OFF)
-option("MULTIQUEUE_EXP_PGO"
+if(PAPI_FOUND)
+  option("MULTIQUEUE_EXP_PERFORMANCE_COUNTERS" "Enable performance counters in benchmarks" ON)
+else()
+  message(STATUS "PAPI library not found, performance counters disabled")
+endif()
+option("MULTIQUEUE_EXP_PGO_GENERATE"
        "Enable instrumentation for profile-guided optimizations" OFF)
 option("MULTIQUEUE_EXP_PGO_USE" "Enable profile-guided optimizations" OFF)
 option("MULTIQUEUE_EXP_COVERAGE" "Enable flags for coverage tests" OFF)
@@ -79,7 +91,6 @@ string(
 set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
 
 add_subdirectory(multiqueue)
-add_subdirectory(multififo)
 add_subdirectory(src)
 add_subdirectory(tools)
 add_subdirectory(wrapper)

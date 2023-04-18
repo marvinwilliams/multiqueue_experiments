@@ -103,6 +103,26 @@ struct Settings {
     bool enable_performance_counter = false;
 #endif
     int seed = 1;
+    [[nodiscard]] bool validate() const {
+        if (num_threads <= 0) {
+            return false;
+        }
+        if (min_key > max_key) {
+            return false;
+        }
+        if (work_mode == WorkMode::Mixed && (pop_probability < 0 || pop_probability > 1)) {
+            return false;
+        }
+        if (work_mode == WorkMode::Split &&
+            ((num_push_threads < 0 || num_push_threads > num_threads) ||
+             (num_push_threads == 0 && operations_per_thread > 0))) {
+            return false;
+        }
+        if (work_mode == WorkMode::Split && num_push_threads == 0 && operations_per_thread > 0) {
+            return false;
+        }
+        return true;
+    }
 };
 
 struct Result {
@@ -164,7 +184,6 @@ void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, OpIt
                     while (!handle.try_pop(retval)) {
                         ++num_failed_pops;
                     }
-                    /* val = retval.second; */
                 } else {
                     key_type key = it->get_key();
                     handle.push({key, key});
@@ -192,18 +211,24 @@ void execute_split_pop(thread_coordination::Context const& ctx, Handle& handle, 
                        std::size_t num_elements) {
     long long num_failed_pops = 0;
     auto [t_start, t_end] = ctx.execute_synchronized([&handle, &result, &num_failed_pops, num_elements]() {
-        volatile DefaultMinPriorityQueue::mapped_type val;
-        DefaultMinPriorityQueue::value_type retval;
-        long long num_pops;
         do {
-            num_pops = 0;
+            long long num_pops = 0;
+            DefaultMinPriorityQueue::value_type retval;
             while (handle.try_pop(retval)) {
-                val = retval.second;
                 ++num_pops;
             }
             ++num_failed_pops;
-        } while (result.num_pops.fetch_add(num_pops, std::memory_order_relaxed) + num_pops <
-                 static_cast<long long>(num_elements));
+            if (num_pops == 0) {
+                if (result.num_pops.load(std::memory_order_relaxed) >= static_cast<long long>(num_elements)) {
+                    break;
+                }
+            } else {
+                if (result.num_pops.fetch_add(num_pops, std::memory_order_relaxed) + num_pops >=
+                    static_cast<long long>(num_elements)) {
+                    break;
+                }
+            }
+        } while (true);
     });
     assert(result.num_pops.load(std::memory_order_relaxed) == static_cast<long long>(num_elements));
     result.update_work_time(t_start, t_end);
@@ -242,13 +267,11 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
         }
     }
 
-    ctx.synchronize([]() { std::clog << "done\n"; });
-
     Handle handle = pq.get_handle(ctx.get_id());
-
-    if (settings.work_mode == Settings::WorkMode::Mixed && settings.prefill_per_thread > 0) {
+    ctx.synchronize();
+    if (settings.prefill_per_thread > 0) {
         if (ctx.get_id() == 0) {
-            std::clog << "Prefilling..." << std::flush;
+            std::clog << "done\nPrefilling..." << std::flush;
         }
         ctx.execute_synchronized([&handle, &key_dist, &rng, &settings]() {
             for (std::size_t i = 0; i < settings.prefill_per_thread; ++i) {
@@ -256,14 +279,10 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
                 handle.push({key, key});
             }
         });
-        if (ctx.get_id() == 0) {
-            std::clog << "done\n";
-        }
     }
     if (ctx.get_id() == 0) {
-        std::clog << "Working..." << std::flush;
+        std::clog << "done\nWorking..." << std::flush;
     }
-
 #ifdef MQ_COUNT_STATS
     handle.stats.num_locking_failed = 0;
     handle.stats.num_resets = 0;
@@ -285,7 +304,9 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
         if (ctx.get_id() < settings.num_push_threads) {
             execute_split_push(ctx, handle, operations.begin(), operations.end(), result);
         } else {
-            execute_split_pop(ctx, handle, result, operations.size());
+            execute_split_pop(ctx, handle, result,
+                              (settings.prefill_per_thread + settings.operations_per_thread) *
+                                  static_cast<std::size_t>(settings.num_threads));
         }
     }
 #ifdef WITH_PAPI
@@ -300,9 +321,9 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
     }
 #endif
 #ifdef MQ_COUNT_STATS
-    data.num_locking_failed += handle.stats.num_locking_failed;
-    data.num_resets += handle.stats.num_resets;
-    data.use_counts += handle.stats.use_counts;
+    result.num_locking_failed += handle.stats.num_locking_failed;
+    result.num_resets += handle.stats.num_resets;
+    result.use_counts += handle.stats.use_counts;
 #endif
     if (ctx.get_id() == 0) {
         std::clog << "done\n" << std::endl;
@@ -322,13 +343,15 @@ int main(int argc, char* argv[]) {
 #endif
     std::clog << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
     std::clog << "Pagesize (bytes): " << PAGESIZE << '\n';
+    std::clog << "Priority queue: " << pq_name << '\n';
+
     std::clog << '\n';
 
     std::clog << "Command line:";
     for (int i = 0; i < argc; ++i) {
         std::clog << ' ' << argv[i];
     }
-    std::clog << '\n';
+    std::clog << '\n' << '\n';
 
     Settings settings{};
     cxxopts::Options options(argv[0]);
@@ -428,8 +451,6 @@ int main(int argc, char* argv[]) {
     auto pq = create_pq<DefaultMinPriorityQueue>(
         settings.num_threads, settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads), args);
 
-    std::clog << "Priority queue: " << pq_name << '\n';
-
     Result result;
     std::vector<Operation> operations(static_cast<std::size_t>(settings.num_threads) * settings.operations_per_thread);
     thread_coordination::TaskHandle task_handle(settings.num_threads, benchmark_thread, settings, std::ref(pq),
@@ -448,7 +469,7 @@ int main(int argc, char* argv[]) {
 #ifdef MQ_COUNT_STATS
     std::clog << "Failed locks per operation: "
               << static_cast<double>(result.num_locking_failed) /
-            static_cast<double>(settings.num_threads * settings.operations_per_thread)
+            static_cast<double>(static_cast<std::size_t>(settings.num_threads) * settings.operations_per_thread)
               << '\n';
     std::clog << "Average queue use count: "
               << static_cast<double>(result.use_counts) / static_cast<double>(result.num_resets) << '\n';
@@ -463,7 +484,7 @@ int main(int argc, char* argv[]) {
               << result.num_failed_pops;
 #ifdef WITH_PAPI
     if (settings.enable_performance_counter) {
-        std::cout << ',' << benchmark_data.l1d_cache_misses << ',' << benchmark_data.l2_cache_misses;
+        std::cout << ',' << result.l1d_cache_misses << ',' << result.l2_cache_misses;
     } else {
         std::cout << ",n/a,n/a";
     }
@@ -471,7 +492,7 @@ int main(int argc, char* argv[]) {
     std::cout << ",n/a,n/a";
 #endif
 #ifdef MQ_COUNT_STATS
-    std::cout << ',' << benchmark_data.num_resets << ',' << benchmark_data.use_counts;
+    std::cout << ',' << result.num_resets << ',' << result.use_counts;
 #else
     std::cout << ",n/a,n/a";
 #endif

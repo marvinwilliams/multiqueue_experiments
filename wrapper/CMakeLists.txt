@@ -22,7 +22,7 @@ target_compile_definitions(klsm1024 INTERFACE PQ_KLSM INTERFACE KLSM_K=1024)
 add_library(klsm4096 INTERFACE)
 target_link_libraries(klsm4096 INTERFACE klsm)
 set_property(TARGET klsm4096 PROPERTY pq_name klsm4096)
-target_compile_definitions(klsm4096 INTERFACE PQ_KLSM INTERFACE PQ_KLSM_K=4096)
+target_compile_definitions(klsm4096 INTERFACE PQ_KLSM INTERFACE KLSM_K=4096)
 
 add_library(
   linden STATIC

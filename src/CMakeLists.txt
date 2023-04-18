@@ -1,23 +1,8 @@
-set(THREADS_PREFER_PTHREAD_FLAG ON)
-find_package(Threads)
-find_package(TBB)
-find_package(PAPI)
-
-add_library(threading STATIC EXCLUDE_FROM_ALL util/threading.cpp)
-target_compile_features(threading PUBLIC cxx_std_17)
-target_include_directories(threading PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/util)
-target_link_libraries(threading PUBLIC Threads::Threads)
-
-add_library(thread_coordination INTERFACE)
-target_link_libraries(thread_coordination INTERFACE threading)
-target_sources(thread_coordination INTERFACE util/thread_coordination.hpp)
-
+add_subdirectory(util)
 add_library(benchmark_base INTERFACE)
 target_include_directories(
   benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/third_party"
                            "${CMAKE_CURRENT_SOURCE_DIR}/util")
-target_compile_options(benchmark_base
-                       INTERFACE $<$<CONFIG:Release>:-march=native>)
 if(CMAKE_COMPILER_IS_GNUCXX)
   target_link_options(benchmark_base INTERFACE $<$<CONFIG:Release>:-flto>)
 endif()
@@ -27,15 +12,11 @@ target_compile_definitions(benchmark_base
 target_compile_definitions(benchmark_base INTERFACE PAGESIZE=${PAGESIZE})
 target_compile_features(benchmark_base INTERFACE cxx_std_17)
 
-if(MULTIQUEUE_EXP_PC)
-  if(PAPI_FOUND)
-    target_link_libraries(benchmark_base INTERFACE PAPI::PAPI)
-    target_compile_definitions(benchmark_base INTERFACE USE_PAPI)
-  else()
-    message(SEND_ERROR "PAPI library not found")
-  endif()
+if(MULTIQUEUE_EXP_PERFORMANCE_COUNTERS)
+  target_link_libraries(benchmark_base INTERFACE PAPI::PAPI)
+  target_compile_definitions(benchmark_base INTERFACE WITH_PAPI)
 endif()
-if(MULTIQUEUE_EXP_PGO)
+if(MULTIQUEUE_EXP_PGO_GENERATE)
   target_compile_options(benchmark_base INTERFACE "-fprofile-generate")
   target_link_options(benchmark_base INTERFACE "-fprofile-generate")
 endif()
@@ -47,7 +28,6 @@ if(MULTIQUEUE_EXP_COVERAGE)
   target_compile_options(benchmark_base INTERFACE "--coverage")
   target_link_libraries(benchmark_base INTERFACE "gcov")
 endif()
-
 if(MULTIQUEUE_EXP_ASAN)
   target_compile_options(benchmark_base INTERFACE -fno-omit-frame-pointer)
   target_compile_options(benchmark_base INTERFACE -fsanitize=address)
@@ -62,6 +42,9 @@ if(MULTIQUEUE_EXP_TSAN)
   target_compile_options(benchmark_base INTERFACE -fno-omit-frame-pointer)
   target_compile_options(benchmark_base INTERFACE -fsanitize=thread)
   target_link_options(benchmark_base INTERFACE -fsanitize=thread)
+endif()
+if(MULTIQUEUE_EXP_PROFILE)
+  targe_compile_options(benchmark_base INTERFACE -g -fno-omit-frame-pointer)
 endif()
 
 add_library(mq_interface INTERFACE)
@@ -135,11 +118,6 @@ add_library(mq_random INTERFACE)
 target_compile_definitions(mq_random INTERFACE STICK_POLICY_RANDOM)
 target_link_libraries(mq_random INTERFACE mq_interface)
 list(APPEND mq_targets mq_random)
-
-# add_library(mq_random_strict INTERFACE)
-# target_compile_definitions(mq_random_strict INTERFACE
-# STICK_POLICY_RANDOM_STRICT) target_link_libraries(mq_random_strict INTERFACE
-# mq_interface) list(APPEND mq_targets mq_random_strict)
 
 add_library(mq_swapping INTERFACE)
 target_compile_definitions(mq_swapping INTERFACE STICK_POLICY_SWAPPING)
