@@ -30,6 +30,7 @@ extern "C" {
 
 using key_type = DefaultMinPriorityQueue::key_type;
 using Handle = DefaultMinPriorityQueue::Handle;
+using thread_coordination::timepoint_type;
 
 #ifdef WITH_PAPI
 // These are the event names used for the papi library to measure cache misses
@@ -68,7 +69,7 @@ struct Settings {
     enum class WorkMode { Mixed, Split };
     enum class ElementDistribution { Uniform, Ascending, Descending };
 
-    auto work_mode_str() const {
+    [[nodiscard]] auto work_mode_str() const {
         switch (work_mode) {
             case WorkMode::Mixed:
                 return "mixed";
@@ -77,7 +78,7 @@ struct Settings {
         }
         return "unknown";
     }
-    auto element_distribution_str() const {
+    [[nodiscard]] auto element_distribution_str() const {
         switch (element_distribution) {
             case ElementDistribution::Uniform:
                 return "uniform";
@@ -105,7 +106,8 @@ struct Settings {
 };
 
 struct Result {
-    std::atomic<thread_coordination::duration_type> work_time{};
+    std::atomic<timepoint_type> start_time{timepoint_type::max()};
+    std::atomic<timepoint_type> end_time{timepoint_type::min()};
     std::atomic<long long> num_failed_pops{0};
     std::atomic<long long> num_pops{0};
 #ifdef WITH_PAPI
@@ -118,9 +120,13 @@ struct Result {
     std::atomic<long long> use_counts{0};
 #endif
 
-    void update_work_time(thread_coordination::duration_type t) {
-        auto old = work_time.load(std::memory_order_relaxed);
-        while (t > old && !work_time.compare_exchange_weak(old, t, std::memory_order_relaxed)) {
+    void update_work_time(timepoint_type t_start, timepoint_type t_end) {
+        auto old_start = start_time.load(std::memory_order_relaxed);
+        while (t_start < old_start &&
+               !start_time.compare_exchange_weak(old_start, t_start, std::memory_order_relaxed)) {
+        }
+        auto old_end = start_time.load(std::memory_order_relaxed);
+        while (t_end > old_end && !end_time.compare_exchange_weak(old_end, t_end, std::memory_order_relaxed)) {
         }
     }
 };
@@ -150,16 +156,15 @@ class Operation {
 template <typename OpIt>
 void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, OpIt begin, OpIt end, Result& result) {
     long long num_failed_pops = 0;
-    volatile DefaultMinPriorityQueue::mapped_type val;
-    DefaultMinPriorityQueue::value_type retval;
-    auto t = ctx.execute_synchronized_blockwise(
-        begin, end, [&handle, &num_failed_pops, &val, &retval](auto block_begin, auto block_end) {
+    auto [t_start, t_end] =
+        ctx.execute_synchronized_blockwise(begin, end, [&handle, &num_failed_pops](auto block_begin, auto block_end) {
             for (auto it = block_begin; it != block_end; ++it) {
                 if (it->is_pop()) {
+                    DefaultMinPriorityQueue::value_type retval;
                     while (!handle.try_pop(retval)) {
                         ++num_failed_pops;
                     }
-                    val = retval.second;
+                    /* val = retval.second; */
                 } else {
                     key_type key = it->get_key();
                     handle.push({key, key});
@@ -167,26 +172,26 @@ void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, OpIt
             }
         });
     result.num_failed_pops += num_failed_pops;
-    result.update_work_time(t);
+    result.update_work_time(t_start, t_end);
 }
 
 template <typename OpIt>
 void execute_split_push(thread_coordination::Context const& ctx, Handle& handle, OpIt begin, OpIt end, Result& result) {
     long long num_failed_pops = 0;
-    auto t =
+    auto [t_start, t_end] =
         ctx.execute_synchronized_blockwise(begin, end, [&handle, &num_failed_pops](auto block_begin, auto block_end) {
             for (auto it = block_begin; it != block_end; ++it) {
                 key_type key = it->get_key();
                 handle.push({key, key});
             }
         });
-    result.update_work_time(t);
+    result.update_work_time(t_start, t_end);
 }
 
 void execute_split_pop(thread_coordination::Context const& ctx, Handle& handle, Result& result,
                        std::size_t num_elements) {
     long long num_failed_pops = 0;
-    auto t = ctx.execute_synchronized([&handle, &result, &num_failed_pops, num_elements]() {
+    auto [t_start, t_end] = ctx.execute_synchronized([&handle, &result, &num_failed_pops, num_elements]() {
         volatile DefaultMinPriorityQueue::mapped_type val;
         DefaultMinPriorityQueue::value_type retval;
         long long num_pops;
@@ -201,12 +206,12 @@ void execute_split_pop(thread_coordination::Context const& ctx, Handle& handle, 
                  static_cast<long long>(num_elements));
     });
     assert(result.num_pops.load(std::memory_order_relaxed) == static_cast<long long>(num_elements));
-    result.update_work_time(t);
+    result.update_work_time(t_start, t_end);
     result.num_failed_pops += num_failed_pops;
 }
 
 void benchmark_thread(thread_coordination::Context ctx, Settings const& settings, DefaultMinPriorityQueue& pq,
-                      std::vector<Operation> operations, Result& result) {
+                      std::vector<Operation>& operations, Result& result) {
     ctx.synchronize([]() { std::clog << "Generating operations..." << std::flush; });
 
     std::seed_seq seed{settings.seed, ctx.get_id()};
@@ -386,12 +391,15 @@ int main(int argc, char* argv[]) {
     std::clog << "Threads: " << settings.num_threads << '\n'
               << "Prefill per thread: " << settings.prefill_per_thread << '\n'
               << "Operations per thread: " << settings.operations_per_thread << '\n'
+              << "Operation mode: " << settings.work_mode_str() << '\n';
+    if (settings.work_mode == Settings::WorkMode::Mixed) {
+        std::clog << "Pop probability: " << std::fixed << std::setprecision(2) << settings.pop_probability << '\n';
+    } else {
+        std::clog << "Push threads: " << settings.num_push_threads << '\n';
+    }
+    std::clog << "Element distribution: " << settings.element_distribution_str() << '\n'
               << "Min key: " << settings.min_key << '\n'
               << "Max key: " << settings.max_key << '\n'
-              << "Pop probability: " << std::fixed << std::setprecision(2) << settings.pop_probability << '\n'
-              << "Push threads: " << settings.num_push_threads << '\n'
-              << "Operation mode: " << settings.work_mode_str() << '\n'
-              << "Element distribution: " << settings.element_distribution_str() << '\n'
               << "Seed: " << settings.seed << '\n'
               << '\n';
 
@@ -416,7 +424,7 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-// TODO: Fix capacity
+    // TODO: Fix capacity
     auto pq = create_pq<DefaultMinPriorityQueue>(
         settings.num_threads, settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads), args);
 
@@ -429,7 +437,7 @@ int main(int argc, char* argv[]) {
     task_handle.wait();
 
     std::clog << "Work time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(result.work_time.load()).count() << '\n';
+              << std::chrono::duration<double>(result.end_time.load() - result.start_time.load()).count() << '\n';
     std::clog << "Failed pops: " << result.num_failed_pops << '\n';
 #ifdef WITH_PAPI
     if (settings.enable_performance_counter) {
@@ -450,7 +458,8 @@ int main(int argc, char* argv[]) {
               << ',' << settings.min_key << ',' << settings.max_key << ',' << settings.pop_probability << ','
               << settings.num_push_threads << ',' << settings.work_mode_str() << ','
               << settings.element_distribution_str() << ',' << settings.seed << ',' << std::fixed
-              << std::setprecision(3) << std::chrono::duration<double>(result.work_time.load()).count() << ','
+              << std::setprecision(3)
+              << std::chrono::duration<double>(result.end_time.load() - result.start_time.load()).count() << ','
               << result.num_failed_pops;
 #ifdef WITH_PAPI
     if (settings.enable_performance_counter) {

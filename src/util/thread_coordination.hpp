@@ -16,7 +16,8 @@
 
 namespace thread_coordination {
 
-using duration_type = std::chrono::steady_clock::duration;
+using clock_type = std::chrono::steady_clock;
+using timepoint_type = clock_type::time_point;
 
 namespace detail {
 template <class CharT, class Traits>
@@ -90,17 +91,17 @@ class Context {
     }
 
     template <typename Work, typename... Args>
-    duration_type execute_synchronized(Work work, Args&&... args) const {
+    std::pair<timepoint_type, timepoint_type> execute_synchronized(Work work, Args&&... args) const {
         shared_data_.barrier.wait();
         auto t1 = std::chrono::steady_clock::now();
         work(std::forward<Args>(args)...);
         auto t2 = std::chrono::steady_clock::now();
         shared_data_.barrier.wait();
-        return t2 - t1;
+        return {t1, t2};
     }
 
-    template <typename Iter, typename Work>
-    duration_type execute_synchronized_blockwise(Iter begin, Iter end, Work work) const {
+    template <typename Iter, typename Work, typename... Args>
+    std::pair<timepoint_type, timepoint_type> execute_synchronized_blockwise(Iter begin, Iter end, Work work, Args&&... args) const {
         using difference_type = typename std::iterator_traits<Iter>::difference_type;
         static constexpr difference_type block_size = 1 << 12;
 
@@ -114,11 +115,11 @@ class Context {
                 break;
             }
             auto block_end = std::min(block_begin + block_size, n);
-            work(begin + block_begin, begin + block_end);
+            work(begin + block_begin, begin + block_end, args...); // no perfect forwarding here
         }
         auto t2 = std::chrono::steady_clock::now();
         shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });
-        return t2 - t1;
+        return {t1, t2};
     }
 };
 
