@@ -100,22 +100,22 @@ class Context {
         return {t1, t2};
     }
 
-    template <typename Iter, typename Work, typename... Args>
-    std::pair<timepoint_type, timepoint_type> execute_synchronized_blockwise(Iter begin, Iter end, Work work, Args&&... args) const {
-        using difference_type = typename std::iterator_traits<Iter>::difference_type;
-        static constexpr difference_type block_size = 1 << 12;
+    template <typename Integer, typename Work, typename... Args>
+    std::pair<timepoint_type, timepoint_type> execute_synchronized_blockwise(Integer n, Work work,
+                                                                             Args&&... args) const {
+        static constexpr auto block_size = static_cast<std::size_t>(1) << 12;
 
-        difference_type n = end - begin;
         shared_data_.barrier.wait();
         auto t1 = std::chrono::steady_clock::now();
         while (true) {
-            auto block_begin =
-                static_cast<difference_type>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
-            if (block_begin >= n) {
+            auto start_index =
+                static_cast<Integer>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
+            if (start_index >= n) {
                 break;
             }
-            auto block_end = std::min(block_begin + block_size, n);
-            work(begin + block_begin, begin + block_end, args...); // no perfect forwarding here
+            auto count = std::min(static_cast<Integer>(block_size), n - start_index);
+            work(static_cast<Integer>(start_index), count,
+                 args...);  // no perfect forwarding here
         }
         auto t2 = std::chrono::steady_clock::now();
         shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });

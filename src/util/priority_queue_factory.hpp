@@ -25,25 +25,25 @@
 namespace detail {
 #ifdef STICK_POLICY_NONE
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::None;
-#define STICK_POLICY_NAME None
+#define STICK_POLICY_NAME none
 #elif defined STICK_POLICY_RANDOM
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Random;
-#define STICK_POLICY_NAME Random
+#define STICK_POLICY_NAME random
 #elif defined STICK_POLICY_RANDOM_STRICT
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::RandomStrict;
-#define STICK_POLICY_NAME Random(strict)
+#define STICK_POLICY_NAME random (strict)
 #elif defined STICK_POLICY_SWAPPING
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Swapping;
-#define STICK_POLICY_NAME Swapping
+#define STICK_POLICY_NAME swapping
 #elif defined STICK_POLICY_SWAPPING_LAZY
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::SwappingLazy;
-#define STICK_POLICY_NAME Swapping(lazy)
+#define STICK_POLICY_NAME swapping (lazy)
 #elif defined STICK_POLICY_SWAPPING_BLOCKING
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::SwappingBlocking;
-#define STICK_POLICY_NAME Swapping(blocking)
+#define STICK_POLICY_NAME swapping (blocking)
 #elif defined STICK_POLICY_PERMUTATION
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Permutation;
-#define STICK_POLICY_NAME Permutation
+#define STICK_POLICY_NAME permutation
 #else
 #error No valid stick policy specified
 #endif

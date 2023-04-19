@@ -173,11 +173,6 @@ int main(int argc, char* argv[]) {
 #else
     std::clog << "Build type: Release\n";
 #endif
-#ifdef USE_PAPI
-    std::clog << "Performance counter: enabled\n";
-#else
-    std::clog << "Performance counter: disabled\n";
-#endif
     std::clog << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
     std::clog << "Pagesize (bytes): " << PAGESIZE << '\n';
     std::clog << '\n';

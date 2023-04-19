@@ -1,13 +1,5 @@
 cmake_minimum_required(VERSION 3.16)
 
-set(CMAKE_CONFIGURATION_TYPES "Debug;Release;Profile" CACHE STRING "")
-set(CMAKE_CXX_FLAGS_DEBUG "-0g -ggdb" CACHE STRING "")
-set(CMAKE_C_FLAGS_DEBUG "-0g -ggdb" CACHE STRING "")
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -march=native" CACHE STRING "")
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -march=native" CACHE STRING "")
-set(CMAKE_CXX_FLAGS_PROFILE "${CMAKE_CXX_FLAGS_RELEASE} -g -fno-omit-frame-pointer" CACHE STRING "")
-set(CMAKE_C_FLAGS_PROFILE "${CMAKE_C_FLAGS_RELEASE} -g -fno-omit-frame-pointer" CACHE STRING "")
-
 project(
   multiqueue_experiments
   VERSION 3.0
@@ -15,6 +7,7 @@ project(
 
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 include(utils)
+include(CMakeDependentOption)
 
 disable_intree_builds()
 
@@ -39,9 +32,11 @@ if(PAPI_FOUND)
 else()
   message(STATUS "PAPI library not found, performance counters disabled")
 endif()
-option("MULTIQUEUE_EXP_PGO_GENERATE"
-       "Enable instrumentation for profile-guided optimizations" OFF)
-option("MULTIQUEUE_EXP_PGO_USE" "Enable profile-guided optimizations" OFF)
+option("MULTIQUEUE_EXP_PGO"
+       "Use profile-guided optimizations" OFF)
+     cmake_dependent_option("MULTIQUEUE_EXP_PGO_USE"
+                       "Use the generated profile for optimizations" OFF
+                       "MULTIQUEUE_EXP_PGO" OFF)
 option("MULTIQUEUE_EXP_COVERAGE" "Enable flags for coverage tests" OFF)
 option("MULTIQUEUE_EXP_ASAN"
        "Instrucment benchmarks with the address sanitizer" OFF)

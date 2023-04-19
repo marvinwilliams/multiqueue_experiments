@@ -14,7 +14,9 @@
         "MULTIQUEUE_BUILD_TESTS": "OFF",
         "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
         "MULTIQUEUE_BUILD_EXAMPLES": "OFF",
-        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF"
+        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF",
+        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -flto=auto",
+        "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -flto=auto"
       }
     },
     {
@@ -26,7 +28,9 @@
         "MULTIQUEUE_BUILD_TESTS": "OFF",
         "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
         "MULTIQUEUE_BUILD_EXAMPLES": "OFF",
-        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF"
+        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF",
+        "CMAKE_CXX_FLAGS_PROFILE": "-O3 -DNDEBUG -march=native -flto=auto -g -fno-omit-frame-pointer",
+        "CMAKE_C_FLAGS_PROFILE": "-O3 -DNDEBUG -march=native -flto=auto -g -fno-omit-frame-pointer"
       }
     },
     {
@@ -39,11 +43,28 @@
         "MULTIQUEUE_BUILD_BENCHMARKS": "OFF",
         "MULTIQUEUE_BUILD_EXAMPLES": "ON",
         "MULTIQUEUE_EXP_BUILD_TESTS": "ON",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON"
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_FLAGS_DEBUG": "-Og -ggdb",
+        "CMAKE_C_FLAGS_DEBUG": "-Og -ggdb"
       }
     },
     {
-      "name": "sanitize",
+      "name": "pgo",
+      "inherits": "release",
+      "displayName": "PGO Preset",
+      "binaryDir": "build/pgo",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "MULTIQUEUE_BUILD_TESTS": "ON",
+        "MULTIQUEUE_BUILD_BENCHMARKS": "OFF",
+        "MULTIQUEUE_BUILD_EXAMPLES": "ON",
+        "MULTIQUEUE_EXP_BUILD_TESTS": "ON",
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "MULTIQUEUE_EXP_PGO": "ON"
+      }
+    },
+    {
+      "name": "san",
       "inherits": "debug",
       "displayName": "UBSAN/ASAN Preset",
       "binaryDir": "build/sanitize",
@@ -54,7 +75,7 @@
       }
     },
     {
-      "name": "thread_sanitize",
+      "name": "tsan",
       "inherits": "debug",
       "displayName": "TSAN Preset",
       "binaryDir": "build/thread_sanitize",
@@ -76,19 +97,24 @@
       "configurePreset": "profile"
     },
     {
+      "name": "pgo",
+      "displayName": "PGO Build preset",
+      "configurePreset": "pgo"
+    },
+    {
       "name": "debug",
       "displayName": "Debug Build preset",
       "configurePreset": "debug"
     },
     {
-      "name": "sanitize",
+      "name": "san",
       "displayName": "UBSAN/ASAN Build Preset",
-      "configurePreset": "sanitize"
+      "configurePreset": "san"
     },
     {
-      "name": "thread_sanitize",
+      "name": "tsan",
       "displayName": "TSAN Build Preset",
-      "configurePreset": "thread_sanitize"
+      "configurePreset": "tsan"
     }
  ]
 }
