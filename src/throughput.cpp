@@ -1,3 +1,6 @@
+#ifdef QUALITY
+#include "quality.hpp"
+#endif
 #include "priority_queue_factory.hpp"
 #include "thread_coordination.hpp"
 
@@ -63,6 +66,15 @@ bool start_performance_counter(int& event_set) {
         return false;
     }
     return true;
+}
+#endif
+
+#ifdef QUALITY
+[[nodiscard]] tick_type get_tick() noexcept {
+    static constexpr long nsec_per_s = 1000000000;
+    timespec ts{};
+    clock_gettime(CLOCK_REALTIME, &ts);
+    return static_cast<tick_type>(ts.tv_sec * nsec_per_s + ts.tv_nsec);
 }
 #endif
 
@@ -180,25 +192,47 @@ struct Result {
 void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, std::vector<key_type> const& keys,
                    Result& result) {
     long long num_failed_pops = 0;
-    auto work_time = ctx.execute_synchronized_blockwise(
-        keys.size(), [&handle, &keys, &num_failed_pops](auto start_index, auto count) {
-            for (auto i = start_index; i < start_index + count; ++i) {
+#ifdef QUALITY
+    auto& push_log = result.push_log[static_cast<std::size_t>(ctx.get_id())];
+    auto& pop_log = result.pop_log[static_cast<std::size_t>(ctx.get_id())];
+#endif
+    auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
+        for (auto i = start_index; i < start_index + count; ++i) {
+#ifdef QUALITY
+            handle.push({keys[i], packed_value::pack(ctx.get_id(), push_log.size())});
+            auto tick = get_tick();
+            push_log.push_back({tick, key});
+#else
                 handle.push({keys[i], keys[i]});
-                DefaultMinPriorityQueue::value_type retval;
-                while (!handle.try_pop(retval)) {
-                    ++num_failed_pops;
-                }
+#endif
+            DefaultMinPriorityQueue::value_type retval;
+            while (!handle.try_pop(retval)) {
+                ++num_failed_pops;
             }
-        });
+#ifdef QUALITY
+            auto tick = get_tick();
+            pop_log.emplace_back(tick, retval.second);
+#endif
+        }
+    });
     result.num_failed_pops += num_failed_pops;
     result.update_work_time(work_time);
 }
 
 void execute_split_push(thread_coordination::Context const& ctx, Handle& handle, std::vector<key_type> const& keys,
                         Result& result) {
-    auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&handle, &keys](auto start_index, auto count) {
+#ifdef QUALITY
+    auto& push_log = result.push_log[static_cast<std::size_t>(ctx.get_id())];
+#endif
+    auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
         for (auto i = start_index; i < start_index + count; ++i) {
-            handle.push({keys[i], keys[i]});
+#ifdef QUALITY
+            handle.push({keys[i], packed_value::pack(ctx.get_id(), push_log.size())});
+            auto tick = get_tick();
+            push_log.push_back({tick, key});
+#else
+                handle.push({keys[i], keys[i]});
+#endif
         }
     });
     result.update_work_time(work_time);
@@ -207,11 +241,18 @@ void execute_split_push(thread_coordination::Context const& ctx, Handle& handle,
 void execute_split_pop(thread_coordination::Context const& ctx, Handle& handle, Result& result,
                        std::size_t num_elements) {
     long long num_failed_pops = 0;
-    auto work_time = ctx.execute_synchronized([&handle, &result, &num_failed_pops, num_elements]() {
+#ifdef QUALITY
+    auto& pop_log = result.pop_log[static_cast<std::size_t>(ctx.get_id())];
+#endif
+    auto work_time = ctx.execute_synchronized([&, num_elements]() {
         do {
             long long num_pops = 0;
             DefaultMinPriorityQueue::value_type retval;
             while (handle.try_pop(retval)) {
+#ifdef QUALITY
+                auto tick = get_tick();
+                pop_log.emplace_back(tick, retval.second);
+#endif
                 ++num_pops;
             }
             ++num_failed_pops;
@@ -257,19 +298,6 @@ void generate_workload(Settings const& settings, std::vector<key_type>& keys, in
     }
 }
 
-template <typename RNG>
-void prefill(Settings const& settings, thread_coordination::Context ctx, Handle& handle, RNG& rng) {
-    if (settings.prefill_per_thread > 0) {
-        auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
-        ctx.execute_synchronized([&handle, &key_dist, &rng, n = settings.prefill_per_thread]() {
-            for (std::size_t i = 0; i < n; ++i) {
-                auto key = key_dist(rng);
-                handle.push({key, key});
-            }
-        });
-    }
-}
-
 void benchmark_thread(thread_coordination::Context ctx, Settings const& settings, DefaultMinPriorityQueue& pq,
                       std::vector<key_type>& keys, Result& result) {
     std::seed_seq seed{settings.seed, ctx.get_id()};
@@ -285,7 +313,21 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
 
     Handle handle = pq.get_handle(ctx.get_id());
 
-    prefill(settings, ctx, handle, rng);
+    if (settings.prefill_per_thread > 0) {
+#ifdef QUALITY
+        auto& push_log = result.push_log[static_cast<std::size_t>(ctx.get_id())];
+#endif
+        auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
+        ctx.execute_synchronized([&handle, &key_dist, &rng, n = settings.prefill_per_thread]() {
+            for (std::size_t i = 0; i < n; ++i) {
+                auto key = key_dist(rng);
+                handle.push({key, key});
+#ifdef QUALITY
+                push_log.push_back({0, k});
+#endif
+            }
+        });
+    }
 
     if (ctx.get_id() == 0) {
         std::clog << "done\nWorking..." << std::flush;
