@@ -477,6 +477,8 @@ int main(int argc, char* argv[]) {
               << static_cast<double>(result.use_counts) / static_cast<double>(result.num_resets) << '\n';
 #endif
 
+    std::cout << "# thread,prefill,elements,work-mode,push-threads,element-distribution,min-key,max-key,seed,work-time,"
+                 "failed-pops,l1d-cache-misses,l2-cache-misses,num-resets-use-counts\n";
     std::cout << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.elements_per_thread
               << ',' << settings.work_mode_str() << ',' << settings.num_push_threads << ','
               << settings.element_distribution_str() << ',' << settings.min_key << ',' << settings.max_key << ','
