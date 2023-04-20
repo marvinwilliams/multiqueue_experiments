@@ -1494,7 +1494,7 @@ class ReplayTree {
             result_t found_result;
             unsigned short slot = find_lower(inner, iter.key());
 
-            std::int64_t found_delay;
+            std::int64_t found_delay{};
             while (slot <= inner->slotuse) {
                 node *myleft, *myright;
                 InnerNode *myleft_parent, *myright_parent;

@@ -134,10 +134,6 @@ list(APPEND mq_targets mq_swapping)
 # STICK_POLICY_PERMUTATION) target_link_libraries(mq_perm INTERFACE
 # mq_interface) list(APPEND mq_targets mq_perm)
 
-add_library(throughput INTERFACE)
-target_sources(throughput INTERFACE throughput.cpp)
-target_link_libraries(throughput INTERFACE thread_coordination benchmark_base)
-
 set(wrapper_targets
     klsm4
     klsm256
@@ -147,6 +143,10 @@ set(wrapper_targets
     capq
     spraylist
     tbb_pq)
+
+add_library(throughput INTERFACE)
+target_sources(throughput INTERFACE benchmark.cpp)
+target_link_libraries(throughput INTERFACE thread_coordination benchmark_base)
 
 foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   add_executable(throughput_${target})
@@ -174,7 +174,8 @@ foreach(t ${mq_targets} ${wrapper_targets})
 endforeach()
 
 add_library(quality INTERFACE)
-target_sources(quality INTERFACE quality.cpp evaluate_quality.cpp)
+target_sources(quality INTERFACE benchmark.cpp evaluate_quality.cpp)
+target_compile_definitions(quality INTERFACE -DQUALITY)
 target_link_libraries(quality INTERFACE thread_coordination benchmark_base)
 
 foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
@@ -205,11 +206,6 @@ add_custom_target(quality_all)
 foreach(t ${mq_targets} ${wrapper_targets})
   add_dependencies(quality_all quality_${t})
 endforeach()
-
-add_library(insert_delete INTERFACE)
-target_sources(insert_delete INTERFACE insert_delete.cpp)
-target_link_libraries(insert_delete INTERFACE thread_coordination
-                                              benchmark_base)
 
 foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   add_executable(insert_delete_${target})

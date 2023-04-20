@@ -186,8 +186,8 @@ struct Result {
     std::atomic<long long> num_failed_pops{0};
     std::atomic<long long> num_pops{0};
 #ifdef QUALITY
-    PushLogType push_log;
-    PopLogType pop_log;
+    quality::PushLogType push_log;
+    quality::PopLogType pop_log;
 #endif
 #ifdef WITH_PAPI
     std::atomic<long long> l1d_cache_misses{0};
@@ -224,7 +224,7 @@ void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, std:
 #ifdef QUALITY
                 handle.push({keys[i], quality::packed_value::pack(ctx.get_id(), push_log.size())});
                 auto tick = quality::clock_type::now();
-                push_log.push_back({tick, key});
+                push_log.push_back({tick, keys[i]});
 #else
                 handle.push({keys[i], keys[i]});
 #endif
@@ -255,7 +255,7 @@ void execute_split_push(thread_coordination::Context const& ctx, Handle& handle,
 #ifdef QUALITY
             handle.push({keys[i], quality::packed_value::pack(ctx.get_id(), push_log.size())});
             auto tick = quality::clock_type::now();
-            push_log.push_back({tick, key});
+            push_log.push_back({tick, keys[i]});
 #else
                 handle.push({keys[i], keys[i]});
 #endif
@@ -344,12 +344,14 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
         auto& push_log = result.push_log[static_cast<std::size_t>(ctx.get_id())];
 #endif
         auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
-        ctx.execute_synchronized([&handle, &key_dist, &rng, n = settings.prefill_per_thread]() {
+        ctx.execute_synchronized([&, n = settings.prefill_per_thread]() {
             for (std::size_t i = 0; i < n; ++i) {
                 auto key = key_dist(rng);
-                handle.push({key, key});
 #ifdef QUALITY
-                push_log.push_back({0, k});
+                handle.push({key, quality::packed_value::pack(ctx.get_id(), i)});
+                push_log.push_back({{}, key});
+        #else
+                handle.push({key, key});
 #endif
             }
         });
@@ -360,7 +362,7 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
 #endif
 
     if (ctx.get_id() == 0) {
-        std::clog << "done\nWorking..." << std::flush;
+        std::clog << "done\nRunning benchmark..." << std::flush;
     }
 
 #ifdef WITH_PAPI
@@ -409,7 +411,7 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
     }
 }
 
-void print_settings(Settings const& settings) {
+void print_settings(Settings const& settings, PriorityQueueConfig const& pq_config) {
     std::clog << "Threads: " << settings.num_threads << '\n'
               << "Prefill per thread: " << settings.prefill_per_thread << '\n'
               << "Elements per thread: " << settings.elements_per_thread << '\n'
@@ -421,8 +423,10 @@ void print_settings(Settings const& settings) {
     std::clog << "Element distribution: " << settings.element_distribution_str() << '\n'
               << "Min key: " << settings.min_key << '\n'
               << "Max key: " << settings.max_key << '\n'
-              << "Seed: " << settings.seed << '\n'
-              << '\n';
+              << "Seed: " << settings.seed << '\n';
+    std::clog << "Priority configuration: ";
+    print_pq_config(pq_config);
+    std::clog << '\n' << '\n';
 }
 
 void print_result(Settings const& settings, Result const& result) {
@@ -444,8 +448,8 @@ void print_result(Settings const& settings, Result const& result) {
               << static_cast<double>(result.use_counts) / static_cast<double>(result.num_resets) << '\n';
 #endif
 
-    std::cout << "# thread,prefill,elements,work-mode,push-threads,element-distribution,min-key,max-key,seed,work-time,"
-                 "failed-pops,l1d-cache-misses,l2-cache-misses,num-resets-use-counts\n";
+    std::cout << "threads,prefill,elements,work-mode,push-threads,element-distribution,min-key,max-key,seed,work-time,"
+                 "failed-pops,l1d-cache-misses,l2-cache-misses,num-resets,use-counts\n";
     std::cout << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.elements_per_thread
               << ',' << settings.work_mode_str() << ',' << settings.num_push_threads << ','
               << settings.element_distribution_str() << ',' << settings.min_key << ',' << settings.max_key << ','
@@ -469,33 +473,41 @@ void print_result(Settings const& settings, Result const& result) {
     std::cout << std::endl;
 }
 
-Result run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config) {
+void run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config, Result& result) {
     auto pq = create_pq<DefaultMinPriorityQueue>(
         settings.num_threads, settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads), pq_config);
 
     std::vector<key_type> keys(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
-    Result result;
     thread_coordination::TaskHandle task_handle(settings.num_threads, benchmark_thread, settings, std::ref(pq),
                                                 std::ref(keys), std::ref(result));
     task_handle.wait();
-    return result;
 }
 
 int main(int argc, char* argv[]) {
-#ifndef NDEBUG
-    std::clog << "Build type: Debug\n";
+    std::clog << "Built on " << __DATE__ << ' ' << __TIME__ << " with:\n";
+#ifdef NDEBUG
+    std::clog << "  Release build\n";
 #else
-    std::clog << "Build type: Release\n";
+    std::clog << "  Debug build\n";
+#endif
+#ifdef __clang__
+    std::clog << "  Clang " << __clang_version__ << '\n';
+#elif defined(__GNUC__)
+    std::clog << "  GCC " << __VERSION__ << '\n';
+#else
+    std::clog << "  Unknown compiler\n";
 #endif
 #ifdef WITH_PAPI
-    std::clog << "Performance counter: enabled\n";
+    std::clog << "  PAPI " << PAPI_VER_CURRENT << '\n';
 #else
-    std::clog << "Performance counter: disabled\n";
+    std::clog << "  PAPI disabled\n";
 #endif
-    std::clog << "L1 cache linesize (bytes): " << L1_CACHE_LINESIZE << '\n';
-    std::clog << "Pagesize (bytes): " << PAGESIZE << '\n';
-    std::clog << "Priority queue: " << pq_name << '\n';
-
+#ifdef MQ_COUNT_STATS
+    std::clog << "  MQ_COUNT_STATS enabled\n";
+#else
+    std::clog << "  MQ_COUNT_STATS disabled\n";
+#endif
+    std::clog << "  Priority queue: " << pq_name << '\n';
     std::clog << '\n';
 
     std::clog << "Command line:";
@@ -563,7 +575,7 @@ int main(int argc, char* argv[]) {
         pq_config = get_pq_options(args);
     }
 
-    print_settings(settings);
+    print_settings(settings, pq_config);
 
     if (!settings.validate()) {
         std::cerr << "Invalid settings\n";
@@ -579,25 +591,38 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    auto result = run_benchmark(settings, pq_config);
+    Result result;
+#ifdef QUALITY
+    result.pop_log.resize(static_cast<std::size_t>(settings.num_threads));
+    result.push_log.resize(static_cast<std::size_t>(settings.num_threads));
+#endif
 
-    print_result(settings, result);
+    run_benchmark(settings, pq_config, result);
 
 #ifdef QUALITY
     if (!settings.log_file.empty()) {
-        if (!quality::write_logs(result.push_log, result.pop_log, settings.log_file)) {
-            std::clog << "Writing log failed!" << std::endl;
+        try {
+            quality::write_logs(result.push_log, result.pop_log, settings.log_file);
+        } catch (std::exception const& e) {
+            std::clog << "\nWriting log failed: " << e.what() << std::endl;
             return 1;
         }
     }
-    bool logs_valid = qualit::fix_and_verify_logs(result.push_log, result.pop_log);
+    bool logs_valid = quality::fix_and_verify_logs(result.push_log, result.pop_log);
     if (!logs_valid) {
-        std::clog << "Operations invalid!" << std::endl;
+        std::clog << "\nOperations invalid!" << std::endl;
         return 1;
     }
     if (!settings.histogram_file.empty()) {
-        quality::write_histogram(result.push_log, result.pop_log, settings.histogram_file);
+        try {
+            quality::write_histogram(result.push_log, result.pop_log, settings.histogram_file);
+        } catch (std::exception const& e) {
+            std::clog << "\nWriting histogram failed: " << e.what() << std::endl;
+            return 1;
+        }
     }
 #endif
+
+    print_result(settings, result);
     return 0;
 }

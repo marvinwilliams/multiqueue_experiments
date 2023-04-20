@@ -74,8 +74,6 @@ string(
          "-Wnull-dereference;"
          "-Woverloaded-virtual;"
          "-Wpedantic;"
-         "-Wsuggest-attribute=const;"
-         "-Wsuggest-attribute=noreturn;"
          "-Wshadow;"
          "-Wsign-conversion;"
          "-Wsuggest-override;"

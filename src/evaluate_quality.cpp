@@ -1,7 +1,9 @@
 #include "evaluate_quality.hpp"
+
 #include "replay_tree.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
@@ -12,68 +14,97 @@
 #include <vector>
 
 struct HeapElement {
-    key_type key;
-    int from_thread_id;
-    std::size_t op_id;
+    quality::key_type key;
+    int thread_id;
+    std::size_t elem_id;
 };
 
 struct ExtractKey {
-    static key_type const& get(HeapElement const& e) {
+    static quality::key_type const& get(HeapElement const& e) {
         return e.key;
     }
 };
 
-bool verify(PushLogType& push_log, PopLogType const& pop_log) {
+struct HistogramEntry {
+    std::size_t rank_count;
+    std::size_t delay_count;
+};
+
+using Histogram = std::vector<HistogramEntry>;
+
+bool quality::fix_and_verify_logs(PushLogType& push_log, PopLogType const& pop_log) {
     std::vector<std::vector<bool>> popped;
     for (auto const& i : push_log) {
         popped.emplace_back(i.size(), false);
     }
     for (auto const& thread_pops : pop_log) {
         for (auto const& entry : thread_pops) {
-            if (entry.tick < push_log[static_cast<std::size_t>(entry.payload.from_thread_id)][entry.payload.op_id].tick) {
-                if (entry.payload.op_id > 0 &&
-                    entry.tick < push_log[static_cast<std::size_t>(entry.payload.from_thread_id)][entry.payload.op_id - 1].tick) {
-                    std::cerr << "Popped element before push of previous element finished" << std::endl;
+            if (entry.thread_id < 0 || entry.thread_id >= static_cast<int>(push_log.size())) {
+                std::cerr << "Popped element from invalid thread: " << entry.thread_id << std::endl;
+                return false;
+            }
+            auto& thread_push_log = push_log[static_cast<std::size_t>(entry.thread_id)];
+            if (entry.elem_id >= thread_push_log.size()) {
+                std::cerr << "Invalid element id: " << entry.elem_id << std::endl;
+                return false;
+            }
+            if (entry.tick < thread_push_log[entry.elem_id].tick) {
+                if (entry.elem_id > 0 && entry.tick < thread_push_log[entry.elem_id - 1].tick) {
+                    std::cerr << "Popped element before pushing thread pushed previous element" << std::endl;
                     return false;
                 }
-                push_log[static_cast<std::size_t>(entry.payload.from_thread_id)][entry.payload.op_id].tick = entry.tick;
+                thread_push_log[entry.elem_id].tick = entry.tick;
             }
 
-            if (popped[static_cast<std::size_t>(entry.payload.from_thread_id)][entry.payload.op_id]) {
+            if (popped[static_cast<std::size_t>(entry.thread_id)][entry.elem_id]) {
                 std::cerr << "Popped element twice" << std::endl;
                 return false;
             }
-            popped[static_cast<std::size_t>(entry.payload.from_thread_id)][entry.payload.op_id] = true;
+            popped[static_cast<std::size_t>(entry.thread_id)][entry.elem_id] = true;
         }
     }
     return true;
 }
 
-bool evaluate(PushLogType& push_log, PopLogType const& pop_log, std::filesystem::path const& rank_file,
-              std::filesystem::path const& delay_file) {
-    std::clog << "Verifying operations\n";
-    if (!verify(push_log, pop_log)) {
-        return false;
-    }
-    std::clog << "Sorting pops\n";
+void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop_log,
+                              std::filesystem::path const& file) {
+    std::clog << "Preparing logs..." << std::flush;
     std::vector<PopLogEntry> all_pops;
     all_pops.reserve(std::accumulate(pop_log.begin(), pop_log.end(), 0UL,
                                      [](std::size_t sum, auto const& p) { return sum + p.size(); }));
-    for (auto const& p : pop_log) {
-        all_pops.insert(all_pops.end(), p.begin(), p.end());
+    // multiway merge
+    std::vector<std::vector<PopLogEntry>::const_iterator> iters;
+    iters.resize(pop_log.size());
+    for (std::size_t t = 0; t < pop_log.size(); ++t) {
+        iters[t] = pop_log[t].begin();
     }
-    std::sort(all_pops.begin(), all_pops.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-
+    while (true) {
+        auto min_it = iters.end();
+        for (std::size_t i = 0; i < iters.size(); ++i) {
+            if (iters[i] != pop_log[i].end()) {
+                if (min_it == iters.end() || iters[i]->tick < (*min_it)->tick) {
+                    min_it = iters.begin() + static_cast<std::ptrdiff_t>(i);
+                }
+            }
+        }
+        if (min_it == iters.end()) {
+            break;
+        }
+        all_pops.push_back(**min_it);
+        ++(*min_it);
+    }
+    assert(std::is_sorted(all_pops.begin(), all_pops.end(),
+                          [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; }));
+    std::clog << "done" << std::endl;
     std::vector<std::size_t> ranks;
     ranks.reserve(all_pops.size());
     std::vector<std::size_t> delays;
     delays.reserve(all_pops.size());
 
-    std::clog << "Replaying operations";
+    std::clog << "Replaying...";
     ReplayTree<unsigned long, HeapElement, ExtractKey> replay_tree{};
     std::vector<std::size_t> push_id(push_log.size());
-    std::size_t progress_counter = 0;
-    std::size_t progress_update = (all_pops.size() / 10UL);
+    std::size_t max_entry = 0;
     for (auto& pop : all_pops) {
         // Inserting everything before next deletion
         for (std::size_t t = 0; t < push_log.size(); ++t) {
@@ -84,62 +115,94 @@ bool evaluate(PushLogType& push_log, PopLogType const& pop_log, std::filesystem:
         }
 
         // Check if the insertion corresponding to the current deletion is already inserted
-        if (push_id[static_cast<std::size_t>(pop.payload.from_thread_id)] < pop.payload.op_id) {
-            std::cerr << "Push after pop after verifying, this must not happen" << std::endl;
-            return false;
+        if (push_id[static_cast<std::size_t>(pop.thread_id)] < pop.elem_id) {
+            std::cerr << "Error: Element pushed after it was popped" << std::endl;
+            std::abort();
         }
 
-        auto key = push_log[static_cast<std::size_t>(pop.payload.from_thread_id)][pop.payload.op_id].key;
+        auto key = push_log[static_cast<std::size_t>(pop.thread_id)][pop.elem_id].key;
         auto [start, end] = replay_tree.equal_range(key);
         start = std::find_if(start, end, [&pop](auto const& e) {
-            return std::tie(pop.payload.from_thread_id, pop.payload.op_id) == std::tie(e.from_thread_id, e.op_id);
+            return std::tie(pop.thread_id, pop.elem_id) == std::tie(e.thread_id, e.elem_id);
         });
-        if (start == end) {
-            std::cerr << "Element not in the heap at deletion time" << std::endl;
-            return false;
-        }
+        assert(start != end);
         ranks.push_back(replay_tree.get_rank(key));
+        if (ranks.back() > max_entry) {
+            max_entry = ranks.back();
+        }
         auto [success, delay] = replay_tree.erase(start);
-        if (!success || delay < 0) {
-            std::cerr << "Inconsistent replay tree state, this must not happen" << std::endl;
-            return false;
-        }
+        assert(success && delay >= 0);
         delays.push_back(static_cast<std::size_t>(delay));
+        if (delays.back() > max_entry) {
+            max_entry = delays.back();
+        }
         replay_tree.increase_delay(key);
-        if (progress_counter == progress_update) {
-            progress_counter = 0;
-            std::clog << '.';
-        }
-        ++progress_counter;
     }
+    Histogram histogram(max_entry + 1);
+    for (auto r : ranks) {
+        ++histogram[r].rank_count;
+    }
+    for (auto r : delays) {
+        ++histogram[r].delay_count;
+    }
+    std::clog << "done\nWriting histogram..." << std::flush;
+    std::ofstream out(file);
+    if (!out) {
+        throw std::runtime_error("Failed to open file: " + file.string());
+    }
+    out << all_pops.size() << '\n';
+    out << "# index rank_count delay_count\n";
+    for (std::size_t i = 0; i < histogram.size(); ++i) {
+        out << i << ' ' << histogram[i].rank_count << ' ' << histogram[i].delay_count << '\n';
+    }
+    std::clog << "done\n" << std::endl;
+}
 
-    std::clog << "\nWriting histograms" << std::endl;
-    if (auto out = std::ofstream{rank_file}; out) {
-        std::vector<std::size_t> rank_histogram(*std::max_element(ranks.begin(), ranks.end()) + 1);
-        for (auto r : ranks) {
-            ++rank_histogram[r];
-        }
-        for (size_t i = 0; i < rank_histogram.size(); ++i) {
-            if (rank_histogram[i] > 0) {
-                out << i << " " << rank_histogram[i] << '\n';
+void quality::write_logs(PushLogType const& push_log, PopLogType const& pop_log, std::filesystem::path const& file) {
+    std::clog << "Writing logs..." << std::flush;
+    std::ofstream out(file);
+    if (!out) {
+        throw std::runtime_error("Failed to open file: " + file.string());
+    }
+    std::vector<std::size_t> push_index(push_log.size());
+    std::vector<std::size_t> pop_index(pop_log.size());
+    enum class EntryType { Push, Pop, None };
+    std::pair<EntryType, std::size_t> next_entry = {EntryType::None, 0};
+    auto new_smallest = [&push_log, &pop_log, &push_index, &pop_index, &next_entry](auto key) {
+        return next_entry.first == EntryType::None ||
+            (key < (next_entry.first == EntryType::Push
+                        ? push_log[next_entry.second][push_index[next_entry.second]].tick
+                        : pop_log[next_entry.second][pop_index[next_entry.second]].tick));
+    };
+    while (true) {
+        // find next entry with smallest tick
+        next_entry = {EntryType::None, 0};
+        for (std::size_t i = 0; i < push_index.size(); ++i) {
+            if (push_index[i] < push_log[i].size() && new_smallest(push_log[i][push_index[i]].tick)) {
+                next_entry = {EntryType::Push, i};
             }
         }
-    } else {
-        std::cerr << "Failed to open file to write rank histogram\n";
-    }
-    if (auto out = std::ofstream{delay_file}; out) {
-        std::vector<std::size_t> delay_histogram(*std::max_element(delays.begin(), delays.end()) + 1);
-        for (auto r : delays) {
-            ++delay_histogram[r];
-        }
-        for (size_t i = 0; i < delay_histogram.size(); ++i) {
-            if (delay_histogram[i] > 0) {
-                out << i << " " << delay_histogram[i] << '\n';
+        for (std::size_t i = 0; i < pop_index.size(); ++i) {
+            if (pop_index[i] < pop_log[i].size() && new_smallest(pop_log[i][pop_index[i]].tick)) {
+                next_entry = {EntryType::Pop, i};
             }
         }
-    } else {
-        std::cerr << "Failed to open file to write delay histogram\n";
+        // no more entries
+        if (next_entry.first == EntryType::None) {
+            break;
+        }
+        if (next_entry.first == EntryType::Push) {
+            out << 'i' << ' ' << next_entry.second << ' '
+                << push_log[next_entry.second][push_index[next_entry.second]].tick.time_since_epoch().count() << ' '
+                << push_log[next_entry.second][push_index[next_entry.second]].key << '\n';
+            ++push_index[next_entry.second];
+        } else {
+            out << 'd' << ' ' << next_entry.second << ' '
+                << pop_log[next_entry.second][pop_index[next_entry.second]].tick.time_since_epoch().count() << ' '
+                << pop_log[next_entry.second][pop_index[next_entry.second]].thread_id << ' '
+                << pop_log[next_entry.second][pop_index[next_entry.second]].elem_id << '\n';
+            ++pop_index[next_entry.second];
+        }
     }
-    std::clog << "Done" << std::endl;
-    return true;
+    std::clog << "done\n" << std::endl;
 }

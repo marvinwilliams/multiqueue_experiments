@@ -114,8 +114,7 @@ class Context {
                 break;
             }
             auto count = std::min(static_cast<Integer>(block_size), n - start_index);
-            work(static_cast<Integer>(start_index), count,
-                 args...);  // no perfect forwarding here
+            work(static_cast<Integer>(start_index), count, args...);  // no perfect forwarding here
         }
         auto t2 = std::chrono::steady_clock::now();
         shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });

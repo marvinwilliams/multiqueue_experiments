@@ -19,6 +19,8 @@
 
 #include "cxxopts.hpp"
 
+#include <iostream>
+
 #define PQ_HAS_GENERIC
 #define PQ_HAS_MAX
 #define PQ_HAS_MAX_GENERIC
@@ -31,16 +33,16 @@ static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Random;
 #define STICK_POLICY_NAME random
 #elif defined STICK_POLICY_RANDOM_STRICT
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::RandomStrict;
-#define STICK_POLICY_NAME random (strict)
+#define STICK_POLICY_NAME random(strict)
 #elif defined STICK_POLICY_SWAPPING
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Swapping;
 #define STICK_POLICY_NAME swapping
 #elif defined STICK_POLICY_SWAPPING_LAZY
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::SwappingLazy;
-#define STICK_POLICY_NAME swapping (lazy)
+#define STICK_POLICY_NAME swapping(lazy)
 #elif defined STICK_POLICY_SWAPPING_BLOCKING
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::SwappingBlocking;
-#define STICK_POLICY_NAME swapping (blocking)
+#define STICK_POLICY_NAME swapping(blocking)
 #elif defined STICK_POLICY_PERMUTATION
 static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Permutation;
 #define STICK_POLICY_NAME permutation
@@ -104,17 +106,27 @@ inline void add_pq_options(cxxopts::Options& options) {
 #endif
 }
 
-template <typename PriorityQueue>
-inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, const cxxopts::ParseResult& result) {
+using PriorityQueueConfig = multiqueue::Config;
+
+inline PriorityQueueConfig get_pq_options(cxxopts::ParseResult const& result) {
     multiqueue::Config config;
-    if (result.count("factor")) {
+    if (result.count("factor") > 0) {
         config.c = result["factor"].as<int>();
     }
 #ifndef PQ_MQ_NONE
-    if (result.count("stickiness")) {
+    if (result.count("stickiness") > 0) {
         config.stickiness = result["stickiness"].as<int>();
     }
 #endif
+    return config;
+}
+
+inline void print_pq_config(PriorityQueueConfig const& config) {
+    std::clog << "factor: " << config.c << ", stickiness: " << config.stickiness;
+}
+
+template <typename PriorityQueue>
+inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, PriorityQueueConfig const& config) {
     return PriorityQueue(num_threads, initial_capacity, config);
 }
 #else
@@ -159,9 +171,19 @@ static constexpr auto pq_name = "TBB";
 
 inline void add_pq_options(cxxopts::Options&) {
 }
+
+struct PriorityQueueConfig {};
+
+inline PriorityQueueConfig get_pq_options(cxxopts::ParseResult const&) {
+    return PriorityQueueConfig{};
+}
+
 template <typename PriorityQueue>
-inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, const cxxopts::ParseResult&) {
+inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, PriorityQueueConfig const&) {
     return PriorityQueue(num_threads, initial_capacity);
+}
+
+inline void print_pq_config(PriorityQueueConfig const&) {
 }
 #endif
 
