@@ -68,7 +68,7 @@ bool quality::fix_and_verify_logs(PushLogType& push_log, PopLogType const& pop_l
 
 void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop_log,
                               std::filesystem::path const& file) {
-    std::clog << "Preparing logs..." << std::flush;
+    std::clog << "Processing logs..." << std::flush;
     std::vector<PopLogEntry> all_pops;
     all_pops.reserve(std::accumulate(pop_log.begin(), pop_log.end(), 0UL,
                                      [](std::size_t sum, auto const& p) { return sum + p.size(); }));
@@ -151,11 +151,10 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
         throw std::runtime_error("Failed to open file: " + file.string());
     }
     out << all_pops.size() << '\n';
-    out << "# index rank_count delay_count\n";
     for (std::size_t i = 0; i < histogram.size(); ++i) {
         out << i << ' ' << histogram[i].rank_count << ' ' << histogram[i].delay_count << '\n';
     }
-    std::clog << "done\n" << std::endl;
+    std::clog << "done" << std::endl;
 }
 
 void quality::write_logs(PushLogType const& push_log, PopLogType const& pop_log, std::filesystem::path const& file) {
@@ -204,5 +203,5 @@ void quality::write_logs(PushLogType const& push_log, PopLogType const& pop_log,
             ++pop_index[next_entry.second];
         }
     }
-    std::clog << "done\n" << std::endl;
+    std::clog << "done" << std::endl;
 }

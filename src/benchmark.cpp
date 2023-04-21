@@ -35,8 +35,20 @@ extern "C" {
 #include <filesystem>
 #endif
 
-using key_type = DefaultMinPriorityQueue::key_type;
-using Handle = DefaultMinPriorityQueue::Handle;
+#ifdef USE_UINT8
+#ifdef QUALITY
+#error "QUALITY does not work with UINT8"
+#endif
+#ifndef PQ_HAS_GENERIC
+#error "UINT8 is defined, but PQ is not generic"
+#endif
+using PriorityQueue = GenericMinPriorityQueue<std::uint8_t, std::uint8_t>;
+#else
+using PriorityQueue = DefaultMinPriorityQueue;
+#endif
+using key_type = PriorityQueue::key_type;
+using handle_type = PriorityQueue::Handle;
+
 using thread_coordination::timepoint_type;
 
 #ifdef WITH_PAPI
@@ -103,7 +115,11 @@ struct Settings {
     int num_push_threads = 1;
     ElementDistribution element_distribution = ElementDistribution::Uniform;
     key_type min_key = 1;
-    key_type max_key = key_type{1} << 30;
+#ifdef USE_UINT8
+    key_type max_key = std::numeric_limits<key_type>::max();
+#else
+    key_type max_key = std::numeric_limits<key_type>::max() >> 2;
+#endif
     int seed = 1;
 #ifdef QUALITY
     std::filesystem::path histogram_file;
@@ -211,18 +227,46 @@ struct Result {
     }
 };
 
-void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, std::vector<key_type> const& keys,
+template <typename RNG>
+void generate_workload(Settings const& settings, std::vector<key_type>& keys, int id, RNG& rng) {
+    auto start_index = static_cast<std::size_t>(id) * settings.elements_per_thread;
+    switch (settings.element_distribution) {
+        case Settings::ElementDistribution::Uniform: {
+            auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
+            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
+                keys[i] = key_dist(rng);
+            }
+        } break;
+        case Settings::ElementDistribution::Ascending: {
+            auto range = static_cast<std::size_t>(settings.max_key - settings.min_key + 1);
+            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
+                keys[i] = settings.min_key + static_cast<key_type>((i * range) / keys.size());
+            }
+        } break;
+        case Settings::ElementDistribution::Descending: {
+            auto range = static_cast<std::size_t>(settings.max_key - settings.min_key + 1);
+            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
+                keys[i] = settings.min_key + static_cast<key_type>(((keys.size() - i - 1) * range) / keys.size());
+            }
+        } break;
+    }
+}
+
+void execute_mixed(thread_coordination::Context const& ctx, handle_type& handle, std::vector<key_type> const& keys,
                    Result& result) {
     long long num_failed_pops = 0;
 #ifdef QUALITY
     auto& push_log = result.push_log[static_cast<std::size_t>(ctx.get_id())];
+    push_log.reserve(push_log.size() + keys.size());
     auto& pop_log = result.pop_log[static_cast<std::size_t>(ctx.get_id())];
+    pop_log.reserve(keys.size());
 #endif
     auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
         for (auto i = start_index; i < start_index + count; ++i) {
             {
 #ifdef QUALITY
-                handle.push({keys[i], quality::packed_value::pack(ctx.get_id(), push_log.size())});
+                auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
+                handle.push({keys[i], v});
                 auto tick = quality::clock_type::now();
                 push_log.push_back({tick, keys[i]});
 #else
@@ -230,7 +274,7 @@ void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, std:
 #endif
             }
             {
-                DefaultMinPriorityQueue::value_type retval;
+                PriorityQueue::value_type retval;
                 while (!handle.try_pop(retval)) {
                     ++num_failed_pops;
                 }
@@ -245,15 +289,17 @@ void execute_mixed(thread_coordination::Context const& ctx, Handle& handle, std:
     result.update_work_time(work_time);
 }
 
-void execute_split_push(thread_coordination::Context const& ctx, Handle& handle, std::vector<key_type> const& keys,
+void execute_split_push(thread_coordination::Context const& ctx, handle_type& handle, std::vector<key_type> const& keys,
                         Result& result) {
 #ifdef QUALITY
     auto& push_log = result.push_log[static_cast<std::size_t>(ctx.get_id())];
+    push_log.reserve(push_log.size() + keys.size());
 #endif
     auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
         for (auto i = start_index; i < start_index + count; ++i) {
 #ifdef QUALITY
-            handle.push({keys[i], quality::packed_value::pack(ctx.get_id(), push_log.size())});
+            auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
+            handle.push({keys[i], v});
             auto tick = quality::clock_type::now();
             push_log.push_back({tick, keys[i]});
 #else
@@ -264,20 +310,21 @@ void execute_split_push(thread_coordination::Context const& ctx, Handle& handle,
     result.update_work_time(work_time);
 }
 
-void execute_split_pop(thread_coordination::Context const& ctx, Handle& handle, Result& result,
+void execute_split_pop(thread_coordination::Context const& ctx, handle_type& handle, Result& result,
                        std::size_t num_elements) {
     long long num_failed_pops = 0;
 #ifdef QUALITY
     auto& pop_log = result.pop_log[static_cast<std::size_t>(ctx.get_id())];
+    pop_log.reserve(num_elements);
 #endif
     auto work_time = ctx.execute_synchronized([&, num_elements]() {
         do {
             long long num_pops = 0;
-            DefaultMinPriorityQueue::value_type retval;
+            PriorityQueue::value_type retval;
             while (handle.try_pop(retval)) {
 #ifdef QUALITY
                 auto tick = quality::clock_type::now();
-                pop_log.emplace_back(tick, retval.second);
+                pop_log.emplace_back(tick, static_cast<std::uint32_t>(retval.second));
 #endif
                 ++num_pops;
             }
@@ -299,32 +346,7 @@ void execute_split_pop(thread_coordination::Context const& ctx, Handle& handle, 
     result.num_failed_pops += num_failed_pops;
 }
 
-template <typename RNG>
-void generate_workload(Settings const& settings, std::vector<key_type>& keys, int id, RNG& rng) {
-    auto start_index = static_cast<std::size_t>(id) * settings.elements_per_thread;
-    switch (settings.element_distribution) {
-        case Settings::ElementDistribution::Uniform: {
-            auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
-            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = key_dist(rng);
-            }
-        } break;
-        case Settings::ElementDistribution::Ascending: {
-            auto range = settings.max_key - settings.min_key + 1;
-            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = settings.min_key + (i * range) / keys.size();
-            }
-        } break;
-        case Settings::ElementDistribution::Descending: {
-            auto range = settings.max_key - settings.min_key + 1;
-            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = settings.min_key + ((keys.size() - i - 1) * range) / keys.size();
-            }
-        } break;
-    }
-}
-
-void benchmark_thread(thread_coordination::Context ctx, Settings const& settings, DefaultMinPriorityQueue& pq,
+void benchmark_thread(thread_coordination::Context ctx, Settings const& settings, PriorityQueue& pq,
                       std::vector<key_type>& keys, Result& result) {
     std::seed_seq seed{settings.seed, ctx.get_id()};
     std::default_random_engine rng(seed);
@@ -337,7 +359,11 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
         std::clog << "done\nPrefilling..." << std::flush;
     }
 
-    Handle handle = pq.get_handle(ctx.get_id());
+#ifdef QUALITY
+    result.push_log[static_cast<std::size_t>(ctx.get_id())].reserve(settings.prefill_per_thread);
+#endif
+
+    handle_type handle = pq.get_handle(ctx.get_id());
 
     if (settings.prefill_per_thread > 0) {
 #ifdef QUALITY
@@ -348,9 +374,10 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
             for (std::size_t i = 0; i < n; ++i) {
                 auto key = key_dist(rng);
 #ifdef QUALITY
-                handle.push({key, quality::packed_value::pack(ctx.get_id(), i)});
+                auto v = quality::packed_value::pack(ctx.get_id(), i);
+                handle.push({key, v});
                 push_log.push_back({{}, key});
-        #else
+#else
                 handle.push({key, key});
 #endif
             }
@@ -407,7 +434,7 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
 #endif
 
     if (ctx.get_id() == 0) {
-        std::clog << "done\n" << std::endl;
+        std::clog << "done" << std::endl;
     }
 }
 
@@ -421,8 +448,8 @@ void print_settings(Settings const& settings, PriorityQueueConfig const& pq_conf
     }
     std::clog << '\n';
     std::clog << "Element distribution: " << settings.element_distribution_str() << '\n'
-              << "Min key: " << settings.min_key << '\n'
-              << "Max key: " << settings.max_key << '\n'
+              << "Min key: " << static_cast<unsigned long>(settings.min_key) << '\n'
+              << "Max key: " << static_cast<unsigned long>(settings.max_key) << '\n'
               << "Seed: " << settings.seed << '\n';
     std::clog << "Priority configuration: ";
     print_pq_config(pq_config);
@@ -474,7 +501,7 @@ void print_result(Settings const& settings, Result const& result) {
 }
 
 void run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config, Result& result) {
-    auto pq = create_pq<DefaultMinPriorityQueue>(
+    auto pq = create_pq<PriorityQueue>(
         settings.num_threads, settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads), pq_config);
 
     std::vector<key_type> keys(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
@@ -508,6 +535,11 @@ int main(int argc, char* argv[]) {
     std::clog << "  MQ_COUNT_STATS disabled\n";
 #endif
     std::clog << "  Priority queue: " << pq_name << '\n';
+#ifdef USE_UINT8
+    std::clog << "  Data type: uint8_t\n";
+#else
+    std::clog << "  Data type: unsigned long\n";
+#endif
     std::clog << '\n';
 
     std::clog << "Command line:";
@@ -592,6 +624,7 @@ int main(int argc, char* argv[]) {
 #endif
 
     Result result;
+
 #ifdef QUALITY
     result.pop_log.resize(static_cast<std::size_t>(settings.num_threads));
     result.push_log.resize(static_cast<std::size_t>(settings.num_threads));
@@ -623,6 +656,8 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
+    std::clog << '\n';
     print_result(settings, result);
+
     return 0;
 }

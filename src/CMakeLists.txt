@@ -153,6 +153,12 @@ foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   target_link_libraries(throughput_${target} PRIVATE ${target} throughput)
 endforeach()
 
+foreach(target ${mq_targets} klsm4 klsm256 klsm1024 klsm4096 tbb_pq)
+  add_executable(throughput_${target}_uint8)
+  target_link_libraries(throughput_${target}_uint8 PRIVATE ${target} throughput)
+  target_compile_definitions(throughput_${target}_uint8 PRIVATE -DUSE_UINT8)
+endforeach()
+
 add_custom_target(throughput_mq_tuning)
 foreach(t ${mq_tuning_targets})
   add_dependencies(throughput_mq_tuning throughput_${t})
