@@ -11,16 +11,17 @@
 #include <istream>
 #include <numeric>
 #include <optional>
+#include <stdexcept>
 #include <vector>
 
 struct HeapElement {
-    quality::key_type key;
+    unsigned long key;
     int thread_id;
     std::size_t elem_id;
 };
 
 struct ExtractKey {
-    static quality::key_type const& get(HeapElement const& e) {
+    static unsigned long const& get(HeapElement const& e) {
         return e.key;
     }
 };
@@ -32,7 +33,7 @@ struct HistogramEntry {
 
 using Histogram = std::vector<HistogramEntry>;
 
-bool quality::fix_and_verify_logs(PushLogType& push_log, PopLogType const& pop_log) {
+void quality::fix_logs(PushLogType& push_log, PopLogType const& pop_log) {
     std::vector<std::vector<bool>> popped;
     for (auto const& i : push_log) {
         popped.emplace_back(i.size(), false);
@@ -40,35 +41,29 @@ bool quality::fix_and_verify_logs(PushLogType& push_log, PopLogType const& pop_l
     for (auto const& thread_pops : pop_log) {
         for (auto const& entry : thread_pops) {
             if (entry.thread_id < 0 || entry.thread_id >= static_cast<int>(push_log.size())) {
-                std::cerr << "Popped element from invalid thread: " << entry.thread_id << std::endl;
-                return false;
+                throw std::runtime_error{"Popped element from invalid thread: " + std::to_string(entry.thread_id)};
             }
             auto& thread_push_log = push_log[static_cast<std::size_t>(entry.thread_id)];
             if (entry.elem_id >= thread_push_log.size()) {
-                std::cerr << "Invalid element id: " << entry.elem_id << std::endl;
-                return false;
+                throw std::runtime_error{"Popped element has invalid element id: " + std::to_string(entry.elem_id)};
             }
             if (entry.tick < thread_push_log[entry.elem_id].tick) {
                 if (entry.elem_id > 0 && entry.tick < thread_push_log[entry.elem_id - 1].tick) {
-                    std::cerr << "Popped element before pushing thread pushed previous element" << std::endl;
-                    return false;
+                    throw std::runtime_error{"Popped element before pushing thread pushed previous element"};
                 }
                 thread_push_log[entry.elem_id].tick = entry.tick;
             }
 
             if (popped[static_cast<std::size_t>(entry.thread_id)][entry.elem_id]) {
-                std::cerr << "Popped element twice" << std::endl;
-                return false;
+                throw std::runtime_error{"Popped element twice"};
             }
             popped[static_cast<std::size_t>(entry.thread_id)][entry.elem_id] = true;
         }
     }
-    return true;
 }
 
 void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop_log,
                               std::filesystem::path const& file) {
-    std::clog << "Processing logs..." << std::flush;
     std::vector<PopLogEntry> all_pops;
     all_pops.reserve(std::accumulate(pop_log.begin(), pop_log.end(), 0UL,
                                      [](std::size_t sum, auto const& p) { return sum + p.size(); }));
@@ -154,11 +149,9 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
     for (std::size_t i = 0; i < histogram.size(); ++i) {
         out << i << ' ' << histogram[i].rank_count << ' ' << histogram[i].delay_count << '\n';
     }
-    std::clog << "done" << std::endl;
 }
 
 void quality::write_logs(PushLogType const& push_log, PopLogType const& pop_log, std::filesystem::path const& file) {
-    std::clog << "Writing logs..." << std::flush;
     std::ofstream out(file);
     if (!out) {
         throw std::runtime_error("Failed to open file: " + file.string());
@@ -203,5 +196,4 @@ void quality::write_logs(PushLogType const& push_log, PopLogType const& pop_log,
             ++pop_index[next_entry.second];
         }
     }
-    std::clog << "done" << std::endl;
 }

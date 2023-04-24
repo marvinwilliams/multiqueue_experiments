@@ -57,7 +57,7 @@ using PushLogType = std::vector<std::vector<PushLogEntry>>;
 using PopLogType = std::vector<std::vector<PopLogEntry>>;
 
 void write_logs(PushLogType const& push_log, PopLogType const& pop_log, std::filesystem::path const& file);
-bool fix_and_verify_logs(PushLogType& push_log, PopLogType const& pop_log);
+void fix_logs(PushLogType& push_log, PopLogType const& pop_log);
 void write_histogram(PushLogType const& push_log, PopLogType const& pop_log, std::filesystem::path const& file);
 
 }  // namespace quality

@@ -169,7 +169,7 @@ class Benchmark {
         l.unlock();
 
         std::atomic_int num_working{0};
-        ctx.execute_synchronized_timed(data.time, work_loop, thread_data, data, num_working);
+        ctx.execute_synchronized(work_loop, thread_data, data, num_working);
         if (ctx.get_id() == 0) {
             std::clog << "done\n";
         }

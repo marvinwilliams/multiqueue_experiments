@@ -451,7 +451,7 @@ void print_settings(Settings const& settings, PriorityQueueConfig const& pq_conf
               << "Min key: " << static_cast<unsigned long>(settings.min_key) << '\n'
               << "Max key: " << static_cast<unsigned long>(settings.max_key) << '\n'
               << "Seed: " << settings.seed << '\n';
-    std::clog << "Priority configuration: ";
+    std::clog << "Priority queue configuration: ";
     print_pq_config(pq_config);
     std::clog << '\n' << '\n';
 }
@@ -634,24 +634,29 @@ int main(int argc, char* argv[]) {
 
 #ifdef QUALITY
     if (!settings.log_file.empty()) {
+        std::clog << "Writing logs..." << std::flush;
         try {
             quality::write_logs(result.push_log, result.pop_log, settings.log_file);
+            std::clog << "done" << std::endl;
         } catch (std::exception const& e) {
-            std::clog << "\nWriting log failed: " << e.what() << std::endl;
-            return 1;
+            std::clog << "failed: " << e.what() << std::endl;
         }
     }
-    bool logs_valid = quality::fix_and_verify_logs(result.push_log, result.pop_log);
-    if (!logs_valid) {
-        std::clog << "\nOperations invalid!" << std::endl;
+    std::clog << "Checking logs..." << std::flush;
+    try {
+        quality::fix_logs(result.push_log, result.pop_log);
+        std::clog << "done" << std::endl;
+    } catch (std::runtime_error const& e) {
+        std::clog << "failed: " << e.what() << std::endl;
         return 1;
     }
     if (!settings.histogram_file.empty()) {
+        std::clog << "Processing logs..." << std::flush;
         try {
             quality::write_histogram(result.push_log, result.pop_log, settings.histogram_file);
-        } catch (std::exception const& e) {
-            std::clog << "\nWriting histogram failed: " << e.what() << std::endl;
-            return 1;
+            std::clog << "done" << std::endl;
+        } catch (std::runtime_error const& e) {
+            std::clog << "failed: " << e.what() << std::endl;
         }
     }
 #endif

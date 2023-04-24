@@ -10,6 +10,7 @@ include(utils)
 include(CMakeDependentOption)
 
 disable_intree_builds()
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Read the system's L1 cache-line size and page size
 execute_process(

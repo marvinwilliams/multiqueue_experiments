@@ -218,25 +218,26 @@ foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
   target_link_libraries(insert_delete_${target} PRIVATE ${target} throughput)
 endforeach()
 
-add_library(sssp INTERFACE)
-target_sources(sssp INTERFACE shortest_path.cpp)
-target_link_libraries(sssp INTERFACE thread_coordination benchmark_base)
+add_library(shortest_path INTERFACE)
+target_sources(shortest_path INTERFACE shortest_path.cpp)
+target_link_libraries(shortest_path INTERFACE thread_coordination
+                                              benchmark_base)
 
 foreach(target ${mq_targets} ${wrapper_targets} tbb_q mf)
-  add_executable(sssp_${target})
-  target_link_libraries(sssp_${target} PRIVATE ${target} sssp)
+  add_executable(shortest_path_${target})
+  target_link_libraries(shortest_path_${target} PRIVATE ${target} shortest_path)
   if(BUILD_TESTING)
     add_test(
-      NAME sssp_${target}_small
+      NAME shortest_path_${target}_small
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:sssp_${target}> -j 1 -f data/NY_graph.gr -c data/NY_solution.txt"
+        "$<TARGET_FILE:shortest_path_${target}> data/NY_graph.gr data/NY_solution.txt -j 1"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     add_test(
-      NAME sssp_${target}_large
+      NAME shortest_path_${target}_large
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:sssp_${target}> -j 8 -f data/CAL_graph.gr -c data/CAL_solution.txt"
+        "$<TARGET_FILE:shortest_path_${target}> data/CAL_graph.gr data/CAL_solution.txt -j 8"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
