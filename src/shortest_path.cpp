@@ -329,8 +329,6 @@ int main(int argc, char* argv[]) {
     }
     std::clog << "done\n";
 
-    std::clog << '\n';
-
     SharedData shared_data{graph.num_nodes()};
     run_benchmark(settings, pq_config, shared_data, graph);
 
