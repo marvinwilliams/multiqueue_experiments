@@ -235,7 +235,7 @@ void print_settings(Settings const& settings) {
     std::clog << "\n\n";
 }
 
-void print_shared_data(Settings const& settings, SharedData const& shared_data, graph::Graph const& graph) {
+void print_shared_data(Settings const& settings, SharedData const& shared_data, graph::Graph const& graph, bool valid) {
     std::clog << "Time (s): " << std::setprecision(3)
               << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
               << '\n';
@@ -246,12 +246,12 @@ void print_shared_data(Settings const& settings, SharedData const& shared_data, 
     std::cout << "Threads idle: " << shared_data.num_thread_idle << '\n';
 
     std::cout << "graph,nodes,edges,threads,seed,work_time,pushed_nodes,ignored_nodes,popped_nodes,"
-                 "processed_nodes,num_thread_idle\n";
+                 "processed_nodes,num_thread_idle,valid\n";
     std::cout << settings.graph_file.string() << ',' << graph.num_nodes() << ',' << graph.num_edges() << ','
               << settings.num_threads << ',' << settings.seed << ','
               << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
               << ',' << shared_data.pushed_nodes << ',' << shared_data.ignored_nodes << ',' << shared_data.popped_nodes
-              << ',' << shared_data.processed_nodes << ',' << shared_data.num_thread_idle << '\n';
+              << ',' << shared_data.processed_nodes << ',' << shared_data.num_thread_idle << ',' << valid << '\n';
 }
 
 int main(int argc, char* argv[]) {
@@ -344,20 +344,21 @@ int main(int argc, char* argv[]) {
         }
     }
     std::clog << "Verifying..." << std::flush;
+    bool valid = true;
     try {
         if (!verify_shared_data(settings, shared_data)) {
             std::clog << "failed: Distance mismatch" << std::endl;
-            return 1;
+            valid = false;
         }
         std::clog << "done" << std::endl;
     } catch (std::runtime_error const& e) {
         std::clog << "failed: " << e.what() << std::endl;
-        return 1;
+        valid = false;
     }
 
     std::clog << '\n';
 
-    print_shared_data(settings, shared_data, graph);
+    print_shared_data(settings, shared_data, graph, valid);
 
     return 0;
 }
