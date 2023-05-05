@@ -1,22 +1,9 @@
-#if !(defined PACKED_VALUE || defined HEAP_VALUE || defined EXPLICIT_VALUE)
-#define PACKED_VALUE
-#endif
-
-#if !(defined LINEAR_MODE || defined BINARY_MODE || defined HINT_MODE)
-#define HINT_MODE
-#endif
-
-#include "utils/priority_queue_factory.hpp"
-#include "utils/thread_coordination.hpp"
-#include "utils/threading.hpp"
-#include "utils/xoroshiro256starstar.hpp"
+#include "priority_queue_factory.hpp"
+#include "termination_detection.hpp"
+#include "thread_coordination.hpp"
 
 #include "cxxopts.hpp"
 
-#ifdef HEAP_VALUE
-#include <tbb/scalable_allocator.h>
-#endif
-#include <x86intrin.h>
 #include <algorithm>
 #include <array>
 #include <atomic>
@@ -36,8 +23,25 @@
 #include <utility>
 #include <vector>
 
-using weight_type = unsigned long;
-using value_type = unsigned long;
+#if !(defined PACKED_VALUE || defined HEAP_VALUE || defined EXPLICIT_VALUE)
+#error "Exactly one of PACKED_VALUE, HEAP_VALUE, or EXPLICIT_VALUE must be defined"
+#endif
+
+#ifdef HEAP_VALUE
+#include <tbb/scalable_allocator.h>
+#endif
+
+#if !(defined LINEAR_MODE || defined BINARY_MODE || defined HINT_MODE)
+#error "Exactly one of LINEAR_MODE, BINARY_MODE, or HINT_MODE must be defined"
+#endif
+
+using PriorityQueue = DefaultMinPriorityQueue;
+
+using distance_type = PriorityQueue::key_type;
+using node_type = PriorityQueue::mapped_type;
+using handle_type = PriorityQueue::Handle;
+
+using thread_coordination::timepoint_type;
 
 // Some pqs need higher values as sentinels
 static constexpr value_type value_max = std::numeric_limits<value_type>::max() >> 2;

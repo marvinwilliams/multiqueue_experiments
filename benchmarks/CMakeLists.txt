@@ -1,4 +1,3 @@
-add_subdirectory(util)
 add_library(benchmark_base INTERFACE)
 target_include_directories(
   benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/third_party"
@@ -47,21 +46,21 @@ add_library(mq_interface INTERFACE)
 target_link_libraries(mq_interface INTERFACE multiqueue::multiqueue)
 target_compile_definitions(mq_interface INTERFACE PQ_MQ)
 
-function(add_tuning_variant bs d)
-  set(name mq_bs_${bs}_d_${d})
+function(add_tuning_variant buffer_size degree)
+  set(name mq_bs_${buffer_size}_d_${degree})
   add_library(${name} INTERFACE)
   target_compile_definitions(
-    ${name} INTERFACE STICK_POLICY_NONE INSERTION_BUFFERSIZE=${bs}
-                      DELETION_BUFFERSIZE=${bs} HEAP_ARITY=${d})
+    ${name} INTERFACE STICK_POLICY_NONE INSERTION_BUFFERSIZE=${buffer_size}
+                      DELETION_BUFFERSIZE=${buffer_size} HEAP_ARITY=${degree})
   target_link_libraries(${name} INTERFACE mq_interface)
-  list(APPEND mq_tuning_targets ${name})
-  set(mq_tuning_targets
-      ${mq_tuning_targets}
+  list(APPEND MQ_TUNING_TARGETS ${name})
+  set(MQ_TUNING_TARGETS
+      ${MQ_TUNING_TARGETS}
       PARENT_SCOPE)
 endfunction()
 
 foreach(
-  bs
+  buffer_size
   0
   4
   8
@@ -69,8 +68,8 @@ foreach(
   64
   128
   512)
-  foreach(d 2 4 8 16 64)
-    add_tuning_variant(${bs} ${d})
+  foreach(degree 2 4 8 16 64)
+    add_tuning_variant(${buffer_size} ${degree})
   endforeach()
 endforeach()
 
@@ -79,62 +78,62 @@ target_compile_definitions(
   mq_bs_0_std INTERFACE STICK_POLICY_NONE USE_STD_PQ INSERTION_BUFFERSIZE=0
                         DELETION_BUFFERSIZE=0)
 target_link_libraries(mq_bs_0_std INTERFACE mq_interface)
-list(APPEND mq_tuning_targets mq_bs_0_std)
+list(APPEND MQ_TUNING_TARGETS mq_bs_0_std)
 
 add_library(mq_none INTERFACE)
 target_compile_definitions(mq_none INTERFACE STICK_POLICY_NONE)
 target_link_libraries(mq_none INTERFACE mq_interface)
-list(APPEND mq_targets mq_none)
+list(APPEND MQ_TARGETS mq_none)
 
 add_library(mq_none1 INTERFACE)
 target_compile_definitions(mq_none1 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=1)
 target_link_libraries(mq_none1 INTERFACE mq_interface)
-list(APPEND mq_tuning_targets mq_none1)
+list(APPEND MQ_TUNING_TARGETS mq_none1)
 
 add_library(mq_none2 INTERFACE)
 target_compile_definitions(mq_none2 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=2)
 target_link_libraries(mq_none2 INTERFACE mq_interface)
-list(APPEND mq_tuning_targets mq_none2)
+list(APPEND MQ_TUNING_TARGETS mq_none2)
 
 add_library(mq_none4 INTERFACE)
 target_compile_definitions(mq_none4 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=4)
 target_link_libraries(mq_none4 INTERFACE mq_interface)
-list(APPEND mq_tuning_targets mq_none4)
+list(APPEND MQ_TUNING_TARGETS mq_none4)
 
 add_library(mq_none8 INTERFACE)
 target_compile_definitions(mq_none8 INTERFACE STICK_POLICY_NONE
                                               MQ_NUM_COMPARE=8)
 target_link_libraries(mq_none8 INTERFACE mq_interface)
-list(APPEND mq_tuning_targets mq_none8)
+list(APPEND MQ_TUNING_TARGETS mq_none8)
 
 add_library(mq_random INTERFACE)
 target_compile_definitions(mq_random INTERFACE STICK_POLICY_RANDOM)
 target_link_libraries(mq_random INTERFACE mq_interface)
-list(APPEND mq_targets mq_random)
+list(APPEND MQ_TARGETS mq_random)
 
 add_library(mq_swapping INTERFACE)
 target_compile_definitions(mq_swapping INTERFACE STICK_POLICY_SWAPPING)
 target_link_libraries(mq_swapping INTERFACE mq_interface)
-list(APPEND mq_targets mq_swapping)
+list(APPEND MQ_TARGETS mq_swapping)
 
 # add_library(mq_swapping_lazy INTERFACE)
 # target_compile_definitions(mq_swapping_lazy INTERFACE
 # STICK_POLICY_SWAPPING_LAZY) target_link_libraries(mq_swapping_lazy INTERFACE
-# mq_interface) list(APPEND mq_targets mq_swapping_lazy)
+# mq_interface) list(APPEND MQ_TARGETS mq_swapping_lazy)
 
 # add_library(mq_swapping_blocking INTERFACE)
 # target_compile_definitions(mq_swapping_blocking INTERFACE
 # STICK_POLICY_SWAPPING_BLOCKING) target_link_libraries(mq_swapping_blocking
-# INTERFACE mq_interface) list(APPEND mq_targets mq_swapping_blocking)
+# INTERFACE mq_interface) list(APPEND MQ_TARGETS mq_swapping_blocking)
 
 # add_library(mq_perm INTERFACE) target_compile_definitions(mq_perm INTERFACE
 # STICK_POLICY_PERMUTATION) target_link_libraries(mq_perm INTERFACE
-# mq_interface) list(APPEND mq_targets mq_perm)
+# mq_interface) list(APPEND MQ_TARGETS mq_perm)
 
-set(wrapper_targets
+set(WRAPPER_TARGETS
     klsm4
     klsm256
     klsm1024
@@ -145,46 +144,47 @@ set(wrapper_targets
     tbb_pq)
 
 add_library(throughput INTERFACE)
-target_sources(throughput INTERFACE benchmark.cpp)
-target_link_libraries(throughput INTERFACE thread_coordination benchmark_base)
+target_sources(throughput INTERFACE throughput.cpp util/threading.cpp)
+target_link_libraries(throughput INTERFACE benchmark_base)
 
-foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
+foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} ${WRAPPER_TARGETS})
   add_executable(throughput_${target})
   target_link_libraries(throughput_${target} PRIVATE ${target} throughput)
 endforeach()
 
-foreach(target ${mq_targets} klsm4 klsm256 klsm1024 klsm4096 tbb_pq)
+foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} klsm4 klsm256 klsm1024 klsm4096 tbb_pq)
   add_executable(throughput_${target}_uint8)
   target_link_libraries(throughput_${target}_uint8 PRIVATE ${target} throughput)
   target_compile_definitions(throughput_${target}_uint8 PRIVATE -DUSE_UINT8)
 endforeach()
 
 add_custom_target(throughput_mq_tuning)
-foreach(t ${mq_tuning_targets})
-  add_dependencies(throughput_mq_tuning throughput_${t})
+foreach(target ${MQ_TUNING_TARGETS})
+  add_dependencies(throughput_mq_tuning throughput_${target})
 endforeach()
 
 add_custom_target(throughput_mq)
-foreach(t ${mq_targets})
-  add_dependencies(throughput_mq throughput_${t})
+foreach(target ${MQ_TARGETS})
+  add_dependencies(throughput_mq throughput_${target})
 endforeach()
 
 add_custom_target(throughput_wrapper)
-foreach(t ${wrapper_targets})
-  add_dependencies(throughput_wrapper throughput_${t})
+foreach(target ${WRAPPER_TARGETS})
+  add_dependencies(throughput_wrapper throughput_${target})
 endforeach()
 
 add_custom_target(throughput_all)
-foreach(t ${mq_targets} ${wrapper_targets})
-  add_dependencies(throughput_all throughput_${t})
+foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+  add_dependencies(throughput_all throughput_${target})
 endforeach()
 
 add_library(quality INTERFACE)
-target_sources(quality INTERFACE benchmark.cpp evaluate_quality.cpp)
+target_sources(quality INTERFACE throughput.cpp util/threading.cpp
+                                 util/evaluate_quality.cpp)
 target_compile_definitions(quality INTERFACE -DQUALITY)
-target_link_libraries(quality INTERFACE thread_coordination benchmark_base)
+target_link_libraries(quality INTERFACE benchmark_base Threads::Threads)
 
-foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
+foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} ${WRAPPER_TARGETS})
   add_executable(quality_${target})
   target_link_libraries(quality_${target} PRIVATE ${target} quality)
   if(BUILD_TESTING)
@@ -204,26 +204,20 @@ foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
 endforeach()
 
 add_custom_target(quality_mq)
-foreach(t ${mq_targets})
-  add_dependencies(quality_mq quality_${t})
+foreach(target ${MQ_TARGETS})
+  add_dependencies(quality_mq quality_${target})
 endforeach()
 
 add_custom_target(quality_all)
-foreach(t ${mq_targets} ${wrapper_targets})
-  add_dependencies(quality_all quality_${t})
-endforeach()
-
-foreach(target ${mq_tuning_targets} ${mq_targets} ${wrapper_targets})
-  add_executable(insert_delete_${target})
-  target_link_libraries(insert_delete_${target} PRIVATE ${target} throughput)
+foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+  add_dependencies(quality_all quality_${target})
 endforeach()
 
 add_library(shortest_path INTERFACE)
-target_sources(shortest_path INTERFACE shortest_path.cpp)
-target_link_libraries(shortest_path INTERFACE thread_coordination
-                                              benchmark_base)
+target_sources(shortest_path INTERFACE shortest_path.cpp util/threading.cpp)
+target_link_libraries(shortest_path INTERFACE benchmark_base Threads::Threads)
 
-foreach(target ${mq_targets} ${wrapper_targets} tbb_q mf)
+foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
   add_executable(shortest_path_${target})
   target_link_libraries(shortest_path_${target} PRIVATE ${target} shortest_path)
   if(BUILD_TESTING)
@@ -242,22 +236,29 @@ foreach(target ${mq_targets} ${wrapper_targets} tbb_q mf)
   endif()
 endforeach()
 
+add_custom_target(shortest_path_all)
+foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+  add_dependencies(shortest_path_all shortest_path_${target})
+endforeach()
+add_dependencies(shortest_path_all shortest_path_seq)
+
+add_executable(shortest_path_seq shortest_path_seq.cpp)
+target_link_libraries(shortest_path_seq PRIVATE benchmark_base)
+
 add_library(knapsack_packed INTERFACE)
-target_sources(knapsack_packed INTERFACE knapsack.cpp)
-target_link_libraries(knapsack_packed INTERFACE thread_coordination
-                                                benchmark_base)
+target_sources(knapsack_packed INTERFACE knapsack.cpp util/threading.cpp)
+target_link_libraries(knapsack_packed INTERFACE benchmark_base Threads::Threads)
 target_compile_definitions(knapsack_packed INTERFACE HINT_MODE PACKED_VALUE)
 
 add_library(knapsack_heap INTERFACE)
-target_sources(knapsack_heap INTERFACE knapsack.cpp)
-target_link_libraries(knapsack_heap INTERFACE thread_coordination
-                                              benchmark_base)
+target_sources(knapsack_heap INTERFACE knapsack.cpp utils/threading.cpp)
+target_link_libraries(knapsack_heap INTERFACE benchmark_base Threads::Threads)
 target_compile_definitions(knapsack_heap INTERFACE HINT_MODE HEAP_VALUE)
 
 add_library(knapsack_explicit INTERFACE)
-target_sources(knapsack_explicit INTERFACE knapsack.cpp)
-target_link_libraries(knapsack_explicit INTERFACE thread_coordination
-                                                  benchmark_base)
+target_sources(knapsack_explicit INTERFACE knapsack.cpp utils/threading.cpp)
+target_link_libraries(knapsack_explicit INTERFACE benchmark_base
+                                                  Threads::Threads)
 target_compile_definitions(knapsack_explicit INTERFACE HINT_MODE EXPLICIT_VALUE)
 
 foreach(target ${targets})
@@ -322,3 +323,6 @@ foreach(target ${targets})
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
+
+add_executable(knapsack_seq knapsack_seq.cpp)
+target_link_libraries(knapsack_seq PRIVATE benchmark_base)

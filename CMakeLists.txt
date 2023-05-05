@@ -10,7 +10,6 @@ include(utils)
 include(CMakeDependentOption)
 
 disable_intree_builds()
-set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 # Read the system's L1 cache-line size and page size
 execute_process(
@@ -29,15 +28,15 @@ find_package(TBB)
 
 option("MULTIQUEUE_EXP_BUILD_TESTS" "Build unit tests for experiment tools" OFF)
 if(PAPI_FOUND)
-  option("MULTIQUEUE_EXP_PERFORMANCE_COUNTERS" "Enable performance counters in benchmarks" ON)
+  option("MULTIQUEUE_EXP_PERFORMANCE_COUNTERS"
+         "Enable performance counters in benchmarks" ON)
 else()
   message(STATUS "PAPI library not found, performance counters disabled")
 endif()
-option("MULTIQUEUE_EXP_PGO"
-       "Use profile-guided optimizations" OFF)
-     cmake_dependent_option("MULTIQUEUE_EXP_PGO_USE"
-                       "Use the generated profile for optimizations" OFF
-                       "MULTIQUEUE_EXP_PGO" OFF)
+option("MULTIQUEUE_EXP_PGO" "Use profile-guided optimizations" OFF)
+cmake_dependent_option(
+  "MULTIQUEUE_EXP_PGO_USE" "Use the generated profile for optimizations" OFF
+  "MULTIQUEUE_EXP_PGO" OFF)
 option("MULTIQUEUE_EXP_COVERAGE" "Enable flags for coverage tests" OFF)
 option("MULTIQUEUE_EXP_ASAN"
        "Instrucment benchmarks with the address sanitizer" OFF)
@@ -82,12 +81,10 @@ string(
          "-Wunreachable-code;"
          "-Wunused;")
 
-set(EXTERNAL_DIR "${CMAKE_CURRENT_LIST_DIR}/third_party")
-
 add_subdirectory(multiqueue)
-add_subdirectory(src)
-add_subdirectory(tools)
 add_subdirectory(wrapper)
+add_subdirectory(benchmarks)
+add_subdirectory(tools)
 
 if(MULTIQUEUE_EXP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
   include(CTest)

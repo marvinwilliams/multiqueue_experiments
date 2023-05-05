@@ -1,5 +1,6 @@
 #include "graph.hpp"
 #include "priority_queue_factory.hpp"
+#include "termination_detection.hpp"
 #include "thread_coordination.hpp"
 
 #include "cxxopts.hpp"
@@ -49,9 +50,7 @@ struct ThreadData {
     handle_type pq_handle;
     long long pushed_nodes{0};
     long long ignored_nodes{0};
-    long long popped_nodes{0};
     long long processed_nodes{0};
-    long long idle_counter{0};
 };
 
 struct SharedData {
@@ -59,18 +58,13 @@ struct SharedData {
     struct alignas(L1_CACHE_LINESIZE) PaddedAtomic {
         std::atomic<T> value;
     };
-    alignas(L1_CACHE_LINESIZE) std::atomic_int no_work_count{0};
-    int idle_count{0};
-    std::mutex idle_mutex;
-    std::condition_variable idle_cv;
     std::vector<PaddedAtomic<distance_type>> shortest_distances;
     std::atomic<timepoint_type> start_time{timepoint_type::max()};
     std::atomic<timepoint_type> end_time{timepoint_type::min()};
     std::atomic_llong pushed_nodes{0};
     std::atomic_llong ignored_nodes{0};
-    std::atomic_llong popped_nodes{0};
     std::atomic_llong processed_nodes{0};
-    std::atomic_llong num_thread_idle{0};
+    termination_detection::Data termination_detection_data;
 
     SharedData(std::size_t num_nodes) : shortest_distances(num_nodes) {
         for (auto& i : shortest_distances) {
@@ -92,22 +86,19 @@ struct SharedData {
     void update_counters(ThreadData const& thread_data) {
         pushed_nodes.fetch_add(thread_data.pushed_nodes, std::memory_order_relaxed);
         ignored_nodes.fetch_add(thread_data.ignored_nodes, std::memory_order_relaxed);
-        popped_nodes.fetch_add(thread_data.popped_nodes, std::memory_order_relaxed);
         processed_nodes.fetch_add(thread_data.processed_nodes, std::memory_order_relaxed);
-        num_thread_idle.fetch_add(thread_data.idle_counter, std::memory_order_relaxed);
     }
 };
 
 // Returns true if this node inserted new nodes
-bool process_node(PriorityQueue::value_type const& value, SharedData& shared_data, ThreadData& data,
+void process_node(PriorityQueue::value_type const& value, SharedData& shared_data, ThreadData& data,
                   graph::Graph const& graph) {
     auto current_distance = shared_data.shortest_distances[value.second].value.load(std::memory_order_relaxed);
     if (value.first > current_distance) {
         ++data.ignored_nodes;
-        return false;
+        return;
     }
     ++data.processed_nodes;
-    bool inserted = false;
     for (node_type i = graph.nodes[value.second]; i < graph.nodes[value.second + 1]; ++i) {
         node_type target = graph.edges[i].target;
         distance_type d = value.first + graph.edges[i].weight;
@@ -117,58 +108,17 @@ bool process_node(PriorityQueue::value_type const& value, SharedData& shared_dat
                                                                                    std::memory_order_relaxed)) {
                 data.pq_handle.push({d, target});
                 ++data.pushed_nodes;
-                inserted = true;
                 break;
             }
         }
     }
-    return inserted;
-}
-
-bool wait_for_work(thread_coordination::Context& ctx, SharedData& shared_data) {
-    auto l = std::unique_lock(shared_data.idle_mutex);
-    if (++shared_data.idle_count == ctx.get_num_threads()) {
-        shared_data.idle_cv.notify_all();
-        return false;
-    }
-    shared_data.idle_cv.wait(l, [&]() {
-        return shared_data.idle_count == ctx.get_num_threads() ||
-            shared_data.no_work_count.load(std::memory_order_relaxed) < ctx.get_num_threads();
-    });
-    if (shared_data.idle_count == ctx.get_num_threads()) {
-        return false;
-    }
-    --shared_data.idle_count;
-    l.unlock();
-    shared_data.no_work_count.fetch_sub(1, std::memory_order_relaxed);
-    return true;
 }
 
 void main_loop(thread_coordination::Context& ctx, SharedData& shared_data, ThreadData& data,
                graph::Graph const& graph) {
-    while (true) {
-        PriorityQueue::value_type retval;
-        if (!data.pq_handle.try_pop(retval)) {
-            auto num_no_work = shared_data.no_work_count.fetch_add(1, std::memory_order_relaxed) + 1;
-            while (num_no_work < ctx.get_num_threads()) {
-                if (data.pq_handle.try_pop(retval)) {
-                    shared_data.no_work_count.fetch_sub(1, std::memory_order_relaxed);
-                    break;
-                }
-                num_no_work = shared_data.no_work_count.load(std::memory_order_relaxed);
-            }
-            if (num_no_work >= ctx.get_num_threads()) {
-                if (data.pq_handle.try_pop(retval)) {
-                    shared_data.no_work_count.fetch_sub(1, std::memory_order_relaxed);
-                } else {
-                    ++data.idle_counter;
-                    if (!wait_for_work(ctx, shared_data)) {
-                        break;
-                    }
-                }
-            }
-        }
-        ++data.popped_nodes;
+    PriorityQueue::value_type retval;
+    while (termination_detection::try_do(ctx.get_num_threads(), shared_data.termination_detection_data,
+                                         [&]() { return data.pq_handle.try_pop(retval); })) {
         process_node(retval, shared_data, data, graph);
     }
 }
@@ -180,35 +130,43 @@ void benchmark_thread(thread_coordination::Context ctx, PriorityQueue& pq, Share
         shared_data.shortest_distances[0].value = 0;
         data.pq_handle.push({0, 0});
         ++data.pushed_nodes;
+        std::clog << "Computing shortest paths..." << std::flush;
     }
     auto work_time = ctx.execute_synchronized([&]() { main_loop(ctx, shared_data, data, graph); });
     shared_data.update_work_time(work_time);
     shared_data.update_counters(data);
 }
 
-void run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config, SharedData& shared_data,
-                   graph::Graph const& graph) {
-    auto pq = create_pq<PriorityQueue>(settings.num_threads, graph.num_nodes(), pq_config);
-
-    std::clog << "Computing shortest paths..." << std::flush;
-
-    thread_coordination::TaskHandle task_handle{settings.num_threads, benchmark_thread, std::ref(pq),
-                                                std::ref(shared_data), graph};
-    task_handle.wait();
-
-    std::clog << "done" << std::endl;
+void print_settings(Settings const& settings) {
+    std::clog << "Threads: " << settings.num_threads << '\n'
+              << "Graph: " << settings.graph_file.string() << '\n'
+              << "Seed: " << settings.seed;
+    std::clog << "\n\n";
 }
 
-bool verify_shared_data(Settings const& settings, SharedData const& shared_data) {
-    std::ifstream in{settings.solution_file};
+void print_shared_data(Settings const& settings, SharedData const& shared_data, graph::Graph const& graph, bool valid) {
+    auto time = std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count();
+    std::clog << "Time (s): " << std::setprecision(3) << time << '\n';
+    std::cout << "Processed nodes: " << shared_data.processed_nodes.load() << '\n';
+    std::cout << "Ignored nodes: " << shared_data.ignored_nodes.load() << '\n';
+    std::cout << "Total nodes: " << shared_data.processed_nodes.load() + shared_data.ignored_nodes.load() << '\n';
+
+    std::cout << "graph,nodes,edges,threads,seed,work_time,processed_nodes,ignored_nodes,valid\n";
+    std::cout << settings.graph_file.string() << ',' << graph.num_nodes() << ',' << graph.num_edges() << ','
+              << settings.num_threads << ',' << settings.seed << ',' << time << ','
+              << shared_data.processed_nodes.load() << ',' << shared_data.ignored_nodes << ',' << valid << '\n';
+}
+
+bool verify_distances(std::filesystem::path const& file, SharedData const& shared_data) {
+    std::ifstream in{file};
     if (!in) {
-        throw std::runtime_error("Failed to open file: " + settings.solution_file.string());
+        throw std::runtime_error("Failed to open file: " + file.string());
     }
     std::string line;
     while (std::getline(in, line)) {
         std::istringstream iss{line};
-        node_type node;
-        distance_type distance;
+        node_type node = 0;
+        distance_type distance = 0;
         iss >> node >> distance;
 
         if (shared_data.shortest_distances[node].value != distance) {
@@ -228,33 +186,62 @@ void write_distances(SharedData const& shared_data, std::filesystem::path const&
     }
 }
 
-void print_settings(Settings const& settings) {
-    std::clog << "Threads: " << settings.num_threads << '\n'
-              << "Graph: " << settings.graph_file.string() << '\n'
-              << "Seed: " << settings.seed;
-    std::clog << "\n\n";
+bool run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config) {
+    std::clog << "Reading graph..." << std::flush;
+    graph::Graph graph(0, 0);
+    try {
+        graph = graph::from_file(settings.graph_file);
+    } catch (std::runtime_error const& e) {
+        std::cerr << "\nError reading graph: " << e.what() << std::endl;
+        return false;
+    }
+    std::clog << "done\n";
+
+    auto pq = create_pq<PriorityQueue>(settings.num_threads, graph.num_nodes(), pq_config);
+    SharedData shared_data{graph.num_nodes()};
+    thread_coordination::TaskHandle task_handle{settings.num_threads, benchmark_thread, std::ref(pq),
+                                                std::ref(shared_data), graph};
+    task_handle.wait();
+
+    std::clog << "done" << std::endl;
+
+    bool success = true;
+    if (!settings.distance_file.empty()) {
+        std::clog << "Writing distances..." << std::flush;
+        try {
+            write_distances(shared_data, settings.distance_file);
+            std::clog << "done" << std::endl;
+        } catch (std::runtime_error const& e) {
+            std::clog << "failed: " << e.what() << std::endl;
+            success = false;
+        }
+    }
+    std::clog << "Verifying..." << std::flush;
+    bool valid = true;
+    if (shared_data.processed_nodes.load() + shared_data.ignored_nodes.load() != shared_data.pushed_nodes.load()) {
+        std::clog << "failed: Not all nodes were popped" << std::endl;
+        success = false;
+        valid = false;
+    } else {
+        try {
+            if (!verify_distances(settings.solution_file, shared_data)) {
+                std::clog << "failed: Distance mismatch" << std::endl;
+                success = false;
+                valid = false;
+            }
+            std::clog << "done" << std::endl;
+        } catch (std::runtime_error const& e) {
+            std::clog << "failed: " << e.what() << std::endl;
+            valid = false;
+            success = false;
+        }
+    }
+    std::clog << '\n';
+    print_shared_data(settings, shared_data, graph, valid);
+    return success;
 }
 
-void print_shared_data(Settings const& settings, SharedData const& shared_data, graph::Graph const& graph, bool valid) {
-    std::clog << "Time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
-              << '\n';
-    std::cout << "Pushed nodes: " << shared_data.pushed_nodes << '\n';
-    std::cout << "Ignored nodes: " << shared_data.ignored_nodes << '\n';
-    std::cout << "Popped nodes: " << shared_data.popped_nodes << '\n';
-    std::cout << "Processed nodes: " << shared_data.processed_nodes << '\n';
-    std::cout << "Threads idle: " << shared_data.num_thread_idle << '\n';
-
-    std::cout << "graph,nodes,edges,threads,seed,work_time,pushed_nodes,ignored_nodes,popped_nodes,"
-                 "processed_nodes,num_thread_idle,valid\n";
-    std::cout << settings.graph_file.string() << ',' << graph.num_nodes() << ',' << graph.num_edges() << ','
-              << settings.num_threads << ',' << settings.seed << ','
-              << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
-              << ',' << shared_data.pushed_nodes << ',' << shared_data.ignored_nodes << ',' << shared_data.popped_nodes
-              << ',' << shared_data.processed_nodes << ',' << shared_data.num_thread_idle << ',' << valid << '\n';
-}
-
-int main(int argc, char* argv[]) {
+void print_header() {
     std::clog << "Built on " << __DATE__ << ' ' << __TIME__ << " with:\n";
 #ifdef NDEBUG
     std::clog << "  Release build\n";
@@ -269,9 +256,11 @@ int main(int argc, char* argv[]) {
     std::clog << "  Unknown compiler\n";
 #endif
     std::clog << "  Priority queue: " << pq_name << '\n';
-    std::clog << '\n';
+}
 
-    std::clog << "Command line:";
+int main(int argc, char* argv[]) {
+    print_header();
+    std::clog << "\nCommand line:";
     for (int i = 0; i < argc; ++i) {
         std::clog << ' ' << argv[i];
     }
@@ -292,19 +281,19 @@ int main(int argc, char* argv[]) {
 
     PriorityQueueConfig pq_config;
     {
-        cxxopts::ParseResult args;
+        cxxopts::ParseResult result;
         try {
-            args = options.parse(argc, argv);
+            result = options.parse(argc, argv);
         } catch (cxxopts::OptionParseException const& e) {
             std::cerr << "Error parsing arguments: " << e.what() << '\n';
             std::cerr << options.help() << std::endl;
             return 1;
         }
-        if (args.count("help") > 0) {
+        if (result.count("help") > 0) {
             std::cerr << options.help() << std::endl;
             return 0;
         }
-        pq_config = get_pq_options(args);
+        pq_config = get_pq_options(result);
     }
     if (settings.graph_file.empty()) {
         std::cerr << "Error: No graph file specified" << std::endl;
@@ -319,44 +308,7 @@ int main(int argc, char* argv[]) {
 
     print_settings(settings);
 
-    std::clog << "Reading graph..." << std::flush;
-    graph::Graph graph(0, 0);
-    try {
-        graph = graph::from_file(settings.graph_file);
-    } catch (std::runtime_error const& e) {
-        std::cerr << "\nError reading graph: " << e.what() << std::endl;
-        return 1;
-    }
-    std::clog << "done\n";
+    bool success = run_benchmark(settings, pq_config);
 
-    SharedData shared_data{graph.num_nodes()};
-    run_benchmark(settings, pq_config, shared_data, graph);
-
-    if (!settings.distance_file.empty()) {
-        std::clog << "Writing distances..." << std::flush;
-        try {
-            write_distances(shared_data, settings.distance_file);
-            std::clog << "done" << std::endl;
-        } catch (std::runtime_error const& e) {
-            std::clog << "failed: " << e.what() << std::endl;
-        }
-    }
-    std::clog << "Verifying..." << std::flush;
-    bool valid = true;
-    try {
-        if (!verify_shared_data(settings, shared_data)) {
-            std::clog << "failed: Distance mismatch" << std::endl;
-            valid = false;
-        }
-        std::clog << "done" << std::endl;
-    } catch (std::runtime_error const& e) {
-        std::clog << "failed: " << e.what() << std::endl;
-        valid = false;
-    }
-
-    std::clog << '\n';
-
-    print_shared_data(settings, shared_data, graph, valid);
-
-    return 0;
+    return success ? 0 : 1;
 }

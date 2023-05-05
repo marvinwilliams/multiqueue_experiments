@@ -41,12 +41,12 @@ void pthread::init_attr_scheduling(pthread_attr_t &attr, scheduling::Policy poli
         throw std::system_error{rc, std::system_category(), "Failed to set explicit scheduling for thread: "};
     }
     std::visit(
-        [&attr](auto const &policy) {
-            if (int rc = pthread_attr_setschedpolicy(&attr, policy.PolicyId)) {
+        [&attr](auto const &p) {
+            if (int rc = pthread_attr_setschedpolicy(&attr, p.PolicyId)) {
                 throw std::system_error{rc, std::system_category(), "Failed to set scheduling policy: "};
             }
             sched_param param{};
-            param.sched_priority = policy.priority;
+            param.sched_priority = p.priority;
             if (int rc = pthread_attr_setschedparam(&attr, &param)) {
                 throw std::system_error{rc, std::system_category(), "Failed to set scheduling parameter: "};
             }
@@ -69,7 +69,7 @@ void pthread::init_attr(pthread_attr_t &attr, thread_config const &config) {
     if (!config.cpu_set.none()) {
         cpu_set_t set{};
         CPU_ZERO(&set);
-        for (int i = 0; i < config.cpu_set.size(); ++i) {
+        for (std::size_t i = 0; i < config.cpu_set.size(); ++i) {
             if (config.cpu_set[i]) {
                 CPU_SET(i, &set);
             }
