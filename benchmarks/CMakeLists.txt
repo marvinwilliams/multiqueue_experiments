@@ -136,7 +136,7 @@ set(WRAPPER_TARGETS
 
 add_library(throughput INTERFACE)
 target_sources(throughput INTERFACE throughput.cpp util/threading.cpp)
-target_link_libraries(throughput INTERFACE benchmark_base)
+target_link_libraries(throughput INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} ${WRAPPER_TARGETS})
   add_executable(throughput_${target})
