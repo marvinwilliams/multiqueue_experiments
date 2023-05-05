@@ -618,7 +618,7 @@ int main(int argc, char* argv[]) {
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
         ("s,seed", "Specify the initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
 #ifdef QUALITY
-        ("r,histogram-file", "Path to write the histogram to", cxxopts::value<std::filesystem::path>(settings.histogram_file), "PATH")
+        ("q,histogram-file", "Path to write the histogram to", cxxopts::value<std::filesystem::path>(settings.histogram_file), "PATH")
         ("x,log-file", "Path to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
 #endif
 #ifdef WITH_PAPI

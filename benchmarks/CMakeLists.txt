@@ -119,19 +119,10 @@ target_compile_definitions(mq_swapping INTERFACE STICK_POLICY_SWAPPING)
 target_link_libraries(mq_swapping INTERFACE mq_interface)
 list(APPEND MQ_TARGETS mq_swapping)
 
-# add_library(mq_swapping_lazy INTERFACE)
-# target_compile_definitions(mq_swapping_lazy INTERFACE
-# STICK_POLICY_SWAPPING_LAZY) target_link_libraries(mq_swapping_lazy INTERFACE
-# mq_interface) list(APPEND MQ_TARGETS mq_swapping_lazy)
-
-# add_library(mq_swapping_blocking INTERFACE)
-# target_compile_definitions(mq_swapping_blocking INTERFACE
-# STICK_POLICY_SWAPPING_BLOCKING) target_link_libraries(mq_swapping_blocking
-# INTERFACE mq_interface) list(APPEND MQ_TARGETS mq_swapping_blocking)
-
-# add_library(mq_perm INTERFACE) target_compile_definitions(mq_perm INTERFACE
-# STICK_POLICY_PERMUTATION) target_link_libraries(mq_perm INTERFACE
-# mq_interface) list(APPEND MQ_TARGETS mq_perm)
+add_library(mq_perm INTERFACE)
+target_compile_definitions(mq_perm INTERFACE STICK_POLICY_PERMUTATION)
+target_link_libraries(mq_perm INTERFACE mq_interface)
+list(APPEND MQ_TARGETS mq_perm)
 
 set(WRAPPER_TARGETS
     klsm4
