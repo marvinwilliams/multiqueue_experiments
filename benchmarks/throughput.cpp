@@ -352,9 +352,12 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
     std::seed_seq seed{settings.seed, ctx.get_id()};
     std::default_random_engine rng(seed);
 
-    ctx.synchronize([]() { std::clog << "Generating keys..." << std::flush; });
-
-    generate_workload(settings, keys, ctx.get_id(), rng);
+    if (ctx.get_id() == 0) {
+        std::clog << "Generating keys..." << std::flush;
+    }
+    ctx.execute_synchronized(
+        [&settings, id = ctx.get_id()](auto& keys, auto& rng) { generate_workload(settings, keys, id, rng); }, keys,
+        rng);
 
     if (ctx.get_id() == 0) {
         std::clog << "done\nPrefilling..." << std::flush;
@@ -483,8 +486,9 @@ void print_shared_data(Settings const& settings, SharedData const& shared_data) 
                  "failed-pops,l1d-cache-misses,l2-cache-misses,num-resets,use-counts,success\n";
     std::cout << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.elements_per_thread
               << ',' << settings.work_mode_str() << ',' << settings.num_push_threads << ','
-              << settings.element_distribution_str() << ',' << static_cast<unsigned long>(settings.min_key) << ',' << static_cast<unsigned long>(settings.max_key) << ','
-              << settings.seed << ',' << std::fixed << std::setprecision(3)
+              << settings.element_distribution_str() << ',' << static_cast<unsigned long>(settings.min_key) << ','
+              << static_cast<unsigned long>(settings.max_key) << ',' << settings.seed << ',' << std::fixed
+              << std::setprecision(3)
               << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
               << ',' << shared_data.num_failed_pops;
 #ifdef WITH_PAPI
