@@ -102,7 +102,7 @@ using PriorityQueueConfig = multiqueue::Config;
 inline PriorityQueueConfig get_pq_options(cxxopts::ParseResult const& result) {
     multiqueue::Config config;
     if (result.count("factor") > 0) {
-        config.c = result["factor"].as<int>();
+        config.pqs_per_thread = result["factor"].as<int>();
     }
 #ifndef PQ_MQ_NONE
     if (result.count("stickiness") > 0) {
@@ -113,7 +113,7 @@ inline PriorityQueueConfig get_pq_options(cxxopts::ParseResult const& result) {
 }
 
 inline void print_pq_config(PriorityQueueConfig const& config) {
-    std::clog << "factor: " << config.c << ", stickiness: " << config.stickiness;
+    std::clog << "factor: " << config.pqs_per_thread << ", stickiness: " << config.stickiness;
 }
 
 template <typename PriorityQueue>
