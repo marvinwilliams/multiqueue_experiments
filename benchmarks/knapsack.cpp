@@ -227,14 +227,15 @@ void print_shared_data(Settings const& settings, SharedData const& shared_data, 
                        bool valid) {
     auto time = std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count();
     std::clog << "Time (s): " << std::setprecision(3) << time << '\n';
+    std::clog << "Value: " << shared_data.best_value.load() << '\n';
     std::clog << "Processed nodes: " << shared_data.processed_nodes.load() << '\n';
     std::clog << "Ignored nodes: " << shared_data.ignored_nodes.load() << '\n';
     std::clog << "Total nodes: " << shared_data.processed_nodes.load() + shared_data.ignored_nodes.load() << '\n';
 
-    std::cout << "instance,items,threads,seed,work_time,processed_nodes,ignored_nodes,valid\n";
+    std::cout << "instance,items,threads,seed,work_time,processed_nodes,ignored_nodes,value,valid\n";
     std::cout << settings.knapsack_file.string() << ',' << instance.items.size() << ',' << settings.num_threads << ','
               << settings.seed << ',' << time << ',' << shared_data.processed_nodes.load() << ','
-              << shared_data.ignored_nodes << ',' << valid << '\n';
+              << shared_data.ignored_nodes << ',' << shared_data.best_value.load() << ',' << valid << '\n';
 }
 
 bool run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config) {
