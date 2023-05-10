@@ -40,8 +40,7 @@ bool try_pop(PriorityQueue& pq, PriorityQueue::value_type& v) {
 
 using PriorityQueue = DefaultMinPriorityQueue;
 
-// Some pqs need higher values as sentinels
-static constexpr unsigned long max_key = std::numeric_limits<unsigned long>::max() >> 1;
+static constexpr unsigned long max_key = 1 << 28;
 
 void push(PriorityQueue::Handle& h, PriorityQueue::value_type v) {
     h.push({max_key - v.first, v.second});
@@ -65,25 +64,19 @@ using thread_coordination::timepoint_type;
 static_assert(sizeof(unsigned long) >= sizeof(std::uint64_t), "64bit unsigned long required");
 using payload_type = unsigned long;
 
-static constexpr std::uint8_t bits_for_index = 12;
-static constexpr std::uint8_t bits_for_hint = 12;
-static constexpr std::uint8_t bits_for_free_capacity = 20;
-static constexpr std::uint8_t bits_for_value = 20;
-static_assert(bits_for_index + bits_for_hint + bits_for_free_capacity + bits_for_value <=
-                  std::numeric_limits<payload_type>::digits,
+static constexpr std::uint8_t bits_for_index = 16;
+static constexpr std::uint8_t bits_for_free_capacity = 24;
+static constexpr std::uint8_t bits_for_value = 24;
+static_assert(bits_for_index + bits_for_free_capacity + bits_for_value <= std::numeric_limits<payload_type>::digits,
               "Too many bits required for payload");
 
-constexpr payload_type to_payload(std::size_t index, std::size_t hint, unsigned long free_capacity,
-                                  unsigned long value) noexcept {
+constexpr payload_type to_payload(std::size_t index, unsigned long free_capacity, unsigned long value) noexcept {
     assert(index < (1UL << bits_for_index));
-    assert(hint < (1UL << bits_for_hint));
     assert(free_capacity < (1UL << bits_for_free_capacity));
     assert(value < (1UL << bits_for_value));
     payload_type payload = value;
     payload <<= bits_for_free_capacity;
     payload |= free_capacity;
-    payload <<= bits_for_hint;
-    payload |= hint;
     payload <<= bits_for_index;
     payload |= index;
     return payload;
@@ -140,25 +133,21 @@ unsigned long lower_bound(KnapsackInstance const& instance, unsigned long capaci
     return value;
 }
 
-unsigned long upper_bound(KnapsackInstance const& instance, unsigned long capacity, std::size_t index,
-                          std::size_t& hint) noexcept {
+unsigned long upper_bound(KnapsackInstance const& instance, unsigned long capacity, std::size_t index) noexcept {
     assert(index <= instance.items.size());
-    assert(hint <= instance.prefix_sum.size());
     unsigned long value_offset = instance.prefix_sum[index].value;
     unsigned long target_capacity = instance.prefix_sum[index].weight + capacity;
-    while (hint != instance.prefix_sum.size()) {
-        if (instance.prefix_sum[hint].weight > target_capacity) {
-            double fraction = static_cast<double>(target_capacity - instance.prefix_sum[hint - 1].weight) /
-                static_cast<double>(instance.prefix_sum[hint].weight - instance.prefix_sum[hint - 1].weight);
-            return (instance.prefix_sum[hint - 1].value - value_offset) +
-                static_cast<unsigned long>(
-                       static_cast<double>(instance.prefix_sum[hint].value - instance.prefix_sum[hint - 1].value) *
-                       fraction);
+    while (index != instance.prefix_sum.size()) {
+        if (instance.prefix_sum[index].weight > target_capacity) {
+            double fraction = static_cast<double>(target_capacity - instance.prefix_sum[index - 1].weight) /
+                static_cast<double>(instance.items[index - 1].weight);
+            return (instance.prefix_sum[index - 1].value - value_offset) +
+                static_cast<unsigned long>(static_cast<double>(instance.items[index - 1].value) * fraction);
         }
-        ++hint;
+        ++index;
     }
     // All items fit
-    return instance.prefix_sum[hint - 1].value - value_offset;
+    return instance.prefix_sum[index - 1].value - value_offset;
 }
 
 void process_node(PriorityQueue::value_type const& node, SharedData& shared_data, ThreadData& data,
@@ -173,36 +162,32 @@ void process_node(PriorityQueue::value_type const& node, SharedData& shared_data
     auto e = node.second;
     std::size_t index = e & ((1UL << bits_for_index) - 1);
     e >>= bits_for_index;
-    std::size_t hint = e & ((1UL << bits_for_hint) - 1);
-    assert(index < hint);
-    e >>= bits_for_hint;
     unsigned long free_capacity = e & ((1UL << bits_for_free_capacity) - 1);
     assert(free_capacity <= instance.capacity);
-    assert((instance.items[index].weight <= free_capacity) == (index + 1 != hint));
     e >>= bits_for_free_capacity;
     unsigned long value = e & ((1UL << bits_for_value) - 1);
-    /* std::cout << "popped " << index << ' ' << hint << ' ' << free_capacity << ' ' << value << std::endl; */
     if (index == instance.items.size()) {
         while (value > best_value &&
                !shared_data.best_value.compare_exchange_weak(best_value, value, std::memory_order_relaxed)) {
         }
         return;
     }
+    /* std::cout << "popped " << index << ' ' << hint << ' ' << free_capacity << ' ' << value << std::endl; */
     if (instance.items[index].weight <= free_capacity) {
         auto new_value = value + instance.items[index].value;
         auto new_capacity = free_capacity - instance.items[index].weight;
-        /* std::cout << "pushed " << index + 1 << ' ' << hint << ' ' << new_capacity << ' ' << new_value << std::endl;
+        /* std::cout << "pushed " << index + 1 << ' ' << hint << ' ' << new_capacity << ' ' << new_value <<
+         * std::endl;
          */
-        auto payload = to_payload(index + 1, hint, new_capacity, new_value);
+        auto payload = to_payload(index + 1, new_capacity, new_value);
         push(data.pq_handle, {node.first, payload});
         ++data.pushed_nodes;
     }
-    auto hint_without_next = hint;
-    auto upper_bound_without_next = value + upper_bound(instance, free_capacity, index + 1, hint_without_next);
+    auto upper_bound_without_next = value + upper_bound(instance, free_capacity, index + 1);
     if (upper_bound_without_next <= best_value) {
         return;
     }
-    push(data.pq_handle, {upper_bound_without_next, to_payload(index + 1, hint_without_next, free_capacity, value)});
+    push(data.pq_handle, {upper_bound_without_next, to_payload(index + 1, free_capacity, value)});
     ++data.pushed_nodes;
 }
 
@@ -218,12 +203,11 @@ void benchmark_thread(thread_coordination::Context ctx, PriorityQueue& pq, Share
                       KnapsackInstance const& instance) {
     ThreadData data{pq.get_handle(ctx.get_id())};
     if (ctx.get_id() == 0) {
-        unsigned long hint = 1;
-        auto ub = upper_bound(instance, instance.capacity, 0, hint);
+        auto ub = upper_bound(instance, instance.capacity, 0);
         auto lb = lower_bound(instance, instance.capacity, 0);
         shared_data.best_value.store(lb, std::memory_order_relaxed);
         /* std::cout << "pushed " << 0 << ' ' << hint << ' ' << instance.capacity << ' ' << 0 << std::endl; */
-        push(data.pq_handle, {ub, to_payload(0, hint, instance.capacity, 0)});
+        push(data.pq_handle, {ub, to_payload(0, instance.capacity, 0)});
         ++data.pushed_nodes;
         std::clog << "Solving knapsack instance..." << std::flush;
     }
