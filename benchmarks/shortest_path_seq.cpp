@@ -37,7 +37,7 @@ struct Data {
     }
 };
 
-void dijkstra(PriorityQueue& pq, Data& data, graph::Graph const& graph) noexcept {
+void dijkstra(PriorityQueue& pq, Data& data, Graph const& graph) noexcept {
     while (!pq.empty()) {
         auto node = pq.top();
         pq.pop();
@@ -103,18 +103,18 @@ int main(int argc, char* argv[]) {
             std::cerr << options.help() << std::endl;
             return 1;
         }
-        if (result.count("help")) {
+        if (result.count("help") > 0U) {
             std::cerr << options.help() << std::endl;
             return 0;
         }
     }
     std::clog << "Reading graph..." << std::flush;
-    graph::Graph graph(0, 0);
+    Graph graph(0, 0);
     try {
-        graph = graph::from_file(graph_file);
+        graph.from_file(graph_file);
     } catch (std::runtime_error const& e) {
         std::cerr << "\nError reading graph: " << e.what() << std::endl;
-        return false;
+        return 1;
     }
     std::clog << "done\n";
 

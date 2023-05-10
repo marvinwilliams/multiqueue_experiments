@@ -143,7 +143,15 @@ foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} ${WRAPPER_TARGETS})
   target_link_libraries(throughput_${target} PRIVATE ${target} throughput)
 endforeach()
 
-foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} klsm4 klsm256 klsm1024 klsm4096 tbb_pq)
+foreach(
+  target
+  ${MQ_TUNING_TARGETS}
+  ${MQ_TARGETS}
+  klsm4
+  klsm256
+  klsm1024
+  klsm4096
+  tbb_pq)
   add_executable(throughput_${target}_uint8)
   target_link_libraries(throughput_${target}_uint8 PRIVATE ${target} throughput)
   target_compile_definitions(throughput_${target}_uint8 PRIVATE -DUSE_UINT8)
@@ -236,84 +244,34 @@ add_dependencies(shortest_path_all shortest_path_seq)
 add_executable(shortest_path_seq shortest_path_seq.cpp)
 target_link_libraries(shortest_path_seq PRIVATE benchmark_base)
 
-add_library(knapsack_packed INTERFACE)
-target_sources(knapsack_packed INTERFACE knapsack.cpp util/threading.cpp)
-target_link_libraries(knapsack_packed INTERFACE benchmark_base Threads::Threads)
-target_compile_definitions(knapsack_packed INTERFACE HINT_MODE PACKED_VALUE)
+add_library(knapsack INTERFACE)
+target_sources(knapsack INTERFACE knapsack.cpp util/threading.cpp)
+target_link_libraries(knapsack INTERFACE benchmark_base Threads::Threads)
 
-add_library(knapsack_heap INTERFACE)
-target_sources(knapsack_heap INTERFACE knapsack.cpp utils/threading.cpp)
-target_link_libraries(knapsack_heap INTERFACE benchmark_base Threads::Threads)
-target_compile_definitions(knapsack_heap INTERFACE HINT_MODE HEAP_VALUE)
-
-add_library(knapsack_explicit INTERFACE)
-target_sources(knapsack_explicit INTERFACE knapsack.cpp utils/threading.cpp)
-target_link_libraries(knapsack_explicit INTERFACE benchmark_base
-                                                  Threads::Threads)
-target_compile_definitions(knapsack_explicit INTERFACE HINT_MODE EXPLICIT_VALUE)
-
-foreach(target ${targets})
-  add_executable(knapsack_packed_${target})
-  target_link_libraries(knapsack_packed_${target} PRIVATE ${target}
-                                                          knapsack_packed)
-  add_dependencies(knapsack_all knapsack_packed_${target})
+foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+  add_executable(knapsack_${target})
+  target_link_libraries(knapsack_${target} PRIVATE ${target} knapsack)
   if(BUILD_TESTING)
     add_test(
-      NAME knapsack_packed_${target}_small
+      NAME knapsack_${target}_small
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:knapsack_packed_${target}> -j 1 -f  data/knapsack_small.txt"
+        "$<TARGET_FILE:knapsack_${target}> -j 1 -f  data/knapsack_small.txt"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     add_test(
-      NAME knapsack_packed_${target}_large
+      NAME knapsack_${target}_large
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:knapsack_packed_${target}> -j 8 -f data/knapsack_large.txt"
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  endif()
-endforeach()
-
-foreach(target ${targets})
-  add_executable(knapsack_heap_${target})
-  target_link_libraries(knapsack_heap_${target} PRIVATE ${target} knapsack_heap
-                                                        tbbmalloc)
-  add_dependencies(knapsack_all knapsack_heap_${target})
-  if(BUILD_TESTING)
-    add_test(
-      NAME knapsack_heap_${target}_small
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:knapsack_heap_${target}> -j 1 -f  data/knapsack_small.txt"
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(
-      NAME knapsack_heap_${target}_large
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:knapsack_heap_${target}> -j 8 -f data/knapsack_large.txt"
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  endif()
-endforeach()
-
-foreach(target ${targets})
-  add_executable(knapsack_explicit_${target})
-  target_link_libraries(knapsack_explicit_${target} PRIVATE ${target}
-                                                            knapsack_explicit)
-  add_dependencies(knapsack_all knapsack_explicit_${target})
-  if(BUILD_TESTING)
-    add_test(
-      NAME knapsack_explicit_${target}_small
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:knapsack_explicit_${target}> -j 1 -f  data/knapsack_small.txt"
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(
-      NAME knapsack_explicit_${target}_large
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:knapsack_explicit_${target}> -j 8 -f data/knapsack_large.txt"
+        "$<TARGET_FILE:knapsack_${target}> -j 8 -f data/knapsack_large.txt"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
 
 add_executable(knapsack_seq knapsack_seq.cpp)
 target_link_libraries(knapsack_seq PRIVATE benchmark_base)
+
+add_custom_target(knapsack_all)
+foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+  add_dependencies(knapsack_all knapsack_${target})
+endforeach()
+add_dependencies(knapsack_all knapsack_seq)

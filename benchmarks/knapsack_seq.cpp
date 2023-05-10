@@ -1,3 +1,5 @@
+#include "knapsack_instance.hpp"
+
 #include "cxxopts.hpp"
 
 #include <algorithm>
@@ -13,42 +15,28 @@
 using weight_type = unsigned long;
 using value_type = unsigned long;
 
-struct KnapsackInstance {
-    struct Item {
-        weight_type weight;
-        value_type value;
-    };
-    std::vector<Item> items;
-    weight_type capacity;
-};
-
 struct Node {
     value_type upper_bound;
     unsigned int index;
     weight_type free_capacity;
     value_type value;
+
+    friend bool operator<(Node const& lhs, Node const& rhs) noexcept {
+        return lhs.upper_bound < rhs.upper_bound;
+    }
 };
 
-bool operator<(Node const& lhs, Node const& rhs) noexcept {
-    return lhs.upper_bound < rhs.upper_bound;
-}
+using PriorityQueue = std::priority_queue<Node>;
 
-struct StatCounters {
-    std::size_t pushed_nodes = 0;
+struct Data {
+    value_type best_value;
     std::size_t ignored_nodes = 0;
-    std::size_t extracted_nodes = 0;
     std::size_t processed_nodes = 0;
 };
 
-KnapsackInstance instance;
-std::priority_queue<Node> pq;
-value_type best_value;
-StatCounters stats;
-
-value_type get_lower_bound(weight_type capacity, unsigned int index) noexcept {
+value_type lower_bound(KnapsackInstance const& instance, weight_type capacity, unsigned int index) noexcept {
     value_type value = 0;
-    while (index < instance.items.size() &&
-           instance.items[index].weight <= capacity) {
+    while (index < instance.items.size() && instance.items[index].weight <= capacity) {
         capacity -= instance.items[index].weight;
         value += instance.items[index].value;
         ++index;
@@ -56,64 +44,21 @@ value_type get_lower_bound(weight_type capacity, unsigned int index) noexcept {
     return value;
 }
 
-value_type get_upper_bound(weight_type capacity, std::size_t index) noexcept {
+value_type upper_bound(KnapsackInstance const& instance, weight_type capacity, std::size_t index) noexcept {
     value_type result = 0;
-    while (index < instance.items.size() &&
-           capacity >= instance.items[index].weight) {
+    while (index < instance.items.size() && capacity >= instance.items[index].weight) {
         result += instance.items[index].value;
         capacity -= instance.items[index].weight;
         ++index;
     }
     if (index < instance.items.size()) {
-        result += static_cast<value_type>(
-            static_cast<double>(capacity * instance.items[index].value) /
-            static_cast<double>(instance.items[index].weight));
+        result += static_cast<value_type>(static_cast<double>(capacity * instance.items[index].value) /
+                                          static_cast<double>(instance.items[index].weight));
     }
     return result;
 }
 
-void read_problem(std::filesystem::path instance_file) {
-    std::ifstream file_stream{instance_file};
-    if (!file_stream) {
-        throw std::runtime_error{"Could not open knapsack file"};
-    }
-    size_t n;
-    file_stream >> n;
-    if (!file_stream || file_stream.eof()) {
-        throw std::runtime_error{"Error reading knapsack file"};
-    }
-    instance.items.clear();
-    instance.items.reserve(n);
-    file_stream >> instance.capacity;
-    if (!file_stream || (n > 0 && file_stream.eof())) {
-        throw std::runtime_error{"Error reading knapsack file"};
-    }
-
-    for (size_t i = 0; i < n; ++i) {
-        if (!file_stream || file_stream.eof()) {
-            throw std::runtime_error{"Error reading knapsack file"};
-        }
-        auto item = KnapsackInstance::Item{};
-        file_stream >> item.value;
-        if (!file_stream || file_stream.eof()) {
-            throw std::runtime_error{"Error reading knapsack file"};
-        }
-        file_stream >> item.weight;
-        if (!file_stream) {
-            throw std::runtime_error{"Error reading knapsack file"};
-        }
-        instance.items.push_back(item);
-    }
-    std::sort(instance.items.begin(), instance.items.end(),
-              [](auto const& lhs, auto const& rhs) {
-                  return (static_cast<double>(lhs.value) /
-                          static_cast<double>(lhs.weight)) >
-                         (static_cast<double>(rhs.value) /
-                          static_cast<double>(rhs.weight));
-              });
-}
-
-void process_node(Node const& node) noexcept {
+void process_node(PriorityQueue& pq, Node const& node, KnapsackInstance const& instance) noexcept {
     if (node.index == instance.items.size()) {
         return;
     }
@@ -127,21 +72,18 @@ void process_node(Node const& node) noexcept {
     // Check if there is enough capacity for the next item
     if (instance.items[node.index].weight <= node.free_capacity) {
         value_type new_value = node.value + instance.items[node.index].value;
-        value_type new_capacity =
-            node.free_capacity - instance.items[node.index].weight;
+        value_type new_capacity = node.free_capacity - instance.items[node.index].weight;
         if (new_value > best_value) {
             best_value = new_value;
         }
         pq.push({node.upper_bound, node.index + 1, new_capacity, new_value});
         ++stats.pushed_nodes;
     }
-    value_type upper_bound_without_next =
-        node.value + get_upper_bound(node.free_capacity, node.index + 1);
+    value_type upper_bound_without_next = node.value + get_upper_bound(node.free_capacity, node.index + 1);
     if (upper_bound_without_next <= best_value) {
         return;
     }
-    pq.push({upper_bound_without_next, node.index + 1, node.free_capacity,
-             node.value});
+    pq.push({upper_bound_without_next, node.index + 1, node.free_capacity, node.value});
     ++stats.pushed_nodes;
 }
 
@@ -156,8 +98,7 @@ void main_loop() noexcept {
 
 int main(int argc, char* argv[]) {
     std::clog << "Command line: ";
-    std::copy(argv, argv + argc,
-              std::ostream_iterator<char const*>(std::clog, " "));
+    std::copy(argv, argv + argc, std::ostream_iterator<char const*>(std::clog, " "));
     std::clog << "\n\n";
 
     std::filesystem::path instance_file;
@@ -206,8 +147,7 @@ int main(int argc, char* argv[]) {
     auto end = std::chrono::steady_clock::now();
     std::clog << "done\n";
     std::cout << "value: " << best_value << '\n';
-    std::cout << "time: " << std::setprecision(3)
-              << std::chrono::duration<double>(end - start).count() << '\n';
+    std::cout << "time: " << std::setprecision(3) << std::chrono::duration<double>(end - start).count() << '\n';
     std::cout << "pushed nodes: " << stats.pushed_nodes << '\n';
     std::cout << "ignored nodes: " << stats.ignored_nodes << '\n';
     std::cout << "extracted nodes: " << stats.extracted_nodes << '\n';
