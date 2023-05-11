@@ -355,9 +355,7 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
     if (ctx.get_id() == 0) {
         std::clog << "Generating keys..." << std::flush;
     }
-    ctx.execute_synchronized(
-        [&settings, id = ctx.get_id()](auto& keys, auto& rng) { generate_workload(settings, keys, id, rng); }, keys,
-        rng);
+    ctx.execute_synchronized([&, id = ctx.get_id()]() { generate_workload(settings, keys, id, rng); });
 
     if (ctx.get_id() == 0) {
         std::clog << "done\nPrefilling..." << std::flush;
