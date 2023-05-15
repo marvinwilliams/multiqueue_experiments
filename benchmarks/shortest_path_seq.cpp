@@ -24,9 +24,20 @@ struct Node {
     friend bool operator>(Node const& lhs, Node const& rhs) noexcept {
         return lhs.distance > rhs.distance;
     }
+    friend bool operator<(Node const& lhs, Node const& rhs) noexcept {
+        return lhs.distance < rhs.distance;
+    }
 };
 
+#ifdef USE_FIFO
+using PriorityQueue = std::queue<Node>;
+#else
+#ifdef REVERSE_PRIORITY
+using PriorityQueue = std::priority_queue<Node, std::vector<Node>, std::less<>>;
+#else
 using PriorityQueue = std::priority_queue<Node, std::vector<Node>, std::greater<>>;
+#endif
+#endif
 
 struct Data {
     std::vector<unsigned long long> shortest_distances;
@@ -39,13 +50,17 @@ struct Data {
 
 void dijkstra(PriorityQueue& pq, Data& data, Graph const& graph) noexcept {
     while (!pq.empty()) {
+#ifdef USE_FIFO
+        auto node = pq.front();
+#else
         auto node = pq.top();
+#endif
         pq.pop();
         // Ignore stale nodes
-        if (node.distance > data.shortest_distances[node.id]) {
-            ++data.ignored_nodes;
-            continue;
-        }
+        /* if (node.distance > data.shortest_distances[node.id]) { */
+        /*     ++data.ignored_nodes; */
+        /*     continue; */
+        /* } */
         ++data.processed_nodes;
         for (std::size_t i = graph.nodes[node.id]; i < graph.nodes[node.id + 1]; ++i) {
             auto d = node.distance + graph.edges[i].weight;
@@ -118,7 +133,7 @@ int main(int argc, char* argv[]) {
     }
     std::clog << "done\n";
 
-    std::priority_queue<Node, std::vector<Node>, std::greater<>> pq;
+    PriorityQueue pq;
     Data data(graph.num_nodes());
     data.shortest_distances[0] = 0;
     pq.push({0, 0});
@@ -129,7 +144,6 @@ int main(int argc, char* argv[]) {
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "done\n";
     auto time = std::chrono::duration<double>(t_end - t_start).count();
-
 
     if (!distance_file.empty()) {
         std::clog << "\nWriting output..." << std::flush;

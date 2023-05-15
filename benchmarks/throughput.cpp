@@ -547,7 +547,7 @@ bool run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_confi
         std::clog << "failed: " << e.what() << std::endl;
         shared_data.success = false;
     }
-    if (!settings.histogram_file.empty()) {
+    if (shared_data.success && !settings.histogram_file.empty()) {
         std::clog << "Processing logs..." << std::flush;
         try {
             quality::write_histogram(shared_data.push_log, shared_data.pop_log, settings.histogram_file);

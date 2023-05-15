@@ -155,6 +155,7 @@ void process_node(PriorityQueue::value_type const& node, SharedData& shared_data
     auto best_value = shared_data.best_value.load(std::memory_order_relaxed);
     if (node.first <= best_value) {
         // The upper bound of this node is worse than the currently best value
+        /* std::cout << "Ignored " << node.first << std::endl; */
         ++data.ignored_nodes;
         return;
     }
@@ -166,19 +167,18 @@ void process_node(PriorityQueue::value_type const& node, SharedData& shared_data
     assert(free_capacity <= instance.capacity);
     e >>= bits_for_free_capacity;
     unsigned long value = e & ((1UL << bits_for_value) - 1);
+    /* std::cout << "Popped " << node.first << ' ' << index << ' ' << free_capacity << ' ' << value << std::endl; */
     if (index == instance.items.size()) {
         while (value > best_value &&
                !shared_data.best_value.compare_exchange_weak(best_value, value, std::memory_order_relaxed)) {
         }
         return;
     }
-    /* std::cout << "popped " << index << ' ' << hint << ' ' << free_capacity << ' ' << value << std::endl; */
     if (instance.items[index].weight <= free_capacity) {
         auto new_value = value + instance.items[index].value;
         auto new_capacity = free_capacity - instance.items[index].weight;
-        /* std::cout << "pushed " << index + 1 << ' ' << hint << ' ' << new_capacity << ' ' << new_value <<
-         * std::endl;
-         */
+        /* std::cout << "pushed " << node.first << ' ' << index + 1 << ' ' << new_capacity << ' ' << new_value */
+        /*           << std::endl; */
         auto payload = to_payload(index + 1, new_capacity, new_value);
         push(data.pq_handle, {node.first, payload});
         ++data.pushed_nodes;
@@ -188,6 +188,8 @@ void process_node(PriorityQueue::value_type const& node, SharedData& shared_data
         return;
     }
     push(data.pq_handle, {upper_bound_without_next, to_payload(index + 1, free_capacity, value)});
+    /* std::cout << "pushed " << upper_bound_without_next << ' ' << index + 1 << ' ' << free_capacity << ' ' << value */
+    /*           << std::endl; */
     ++data.pushed_nodes;
 }
 
@@ -205,8 +207,10 @@ void benchmark_thread(thread_coordination::Context ctx, PriorityQueue& pq, Share
     if (ctx.get_id() == 0) {
         auto ub = upper_bound(instance, instance.capacity, 0);
         auto lb = lower_bound(instance, instance.capacity, 0);
+        /* std::cout << "upper bound: " << ub << std::endl; */
+        /* std::cout << "lower bound: " << lb << std::endl; */
         shared_data.best_value.store(lb, std::memory_order_relaxed);
-        /* std::cout << "pushed " << 0 << ' ' << hint << ' ' << instance.capacity << ' ' << 0 << std::endl; */
+        /* std::cout << "pushed " << ub << ' ' << 0 << ' ' << instance.capacity << ' ' << 0 << std::endl; */
         push(data.pq_handle, {ub, to_payload(0, instance.capacity, 0)});
         ++data.pushed_nodes;
         std::clog << "Solving knapsack instance..." << std::flush;

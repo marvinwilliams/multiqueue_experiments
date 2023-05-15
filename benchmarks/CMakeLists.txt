@@ -235,14 +235,22 @@ foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
   endif()
 endforeach()
 
+add_executable(shortest_path_seq shortest_path_seq.cpp)
+target_link_libraries(shortest_path_seq PRIVATE benchmark_base)
+
+add_executable(shortest_path_seq_fifo shortest_path_seq.cpp)
+target_link_libraries(shortest_path_seq_fifo PRIVATE benchmark_base)
+target_compile_definitions(shortest_path_seq_fifo PRIVATE -DUSE_FIFO)
+
+add_executable(shortest_path_seq_rev shortest_path_seq.cpp)
+target_link_libraries(shortest_path_seq_rev PRIVATE benchmark_base)
+target_compile_definitions(shortest_path_seq_rev PRIVATE -DREVERSE_PRIORITY)
+
 add_custom_target(shortest_path_all)
 foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
   add_dependencies(shortest_path_all shortest_path_${target})
 endforeach()
-add_dependencies(shortest_path_all shortest_path_seq)
-
-add_executable(shortest_path_seq shortest_path_seq.cpp)
-target_link_libraries(shortest_path_seq PRIVATE benchmark_base)
+add_dependencies(shortest_path_all shortest_path_seq shortest_path_seq_fifo)
 
 add_library(knapsack INTERFACE)
 target_sources(knapsack INTERFACE knapsack.cpp util/threading.cpp)
@@ -269,9 +277,12 @@ endforeach()
 
 add_executable(knapsack_seq knapsack_seq.cpp)
 target_link_libraries(knapsack_seq PRIVATE benchmark_base)
+add_executable(knapsack_seq_fifo knapsack_seq.cpp)
+target_link_libraries(knapsack_seq_fifo PRIVATE benchmark_base)
+target_compile_definitions(knapsack_seq_fifo PRIVATE -DUSE_FIFO)
 
 add_custom_target(knapsack_all)
 foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
   add_dependencies(knapsack_all knapsack_${target})
 endforeach()
-# add_dependencies(knapsack_all knapsack_seq)
+add_dependencies(knapsack_all knapsack_seq knapsack_seq_fifo)
