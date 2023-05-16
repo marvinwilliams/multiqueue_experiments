@@ -105,7 +105,7 @@ bool start_performance_counter(int& event_set) {
 #endif
 
 struct Settings {
-    enum class WorkMode { Mixed, Split };
+    enum class WorkMode { Mixed, Split, Increment };
     enum class ElementDistribution { Uniform, Ascending, Descending };
 
     int num_threads = 4;
@@ -114,7 +114,6 @@ struct Settings {
     WorkMode work_mode = WorkMode::Mixed;
     int num_push_threads = 1;
     ElementDistribution element_distribution = ElementDistribution::Uniform;
-    key_type min_key = 1;
 #ifdef USE_UINT8
     key_type max_key = std::numeric_limits<key_type>::max();
 #else
@@ -136,6 +135,9 @@ struct Settings {
                 return true;
             case 's':
                 work_mode = WorkMode::Split;
+                return true;
+            case 'i':
+                work_mode = WorkMode::Increment;
                 return true;
         }
         return false;
@@ -162,6 +164,8 @@ struct Settings {
                 return "mixed";
             case WorkMode::Split:
                 return "split";
+            case WorkMode::Increment:
+                return "increment";
         }
         return "unknown";
     }
@@ -181,16 +185,17 @@ struct Settings {
         if (num_threads <= 0) {
             return false;
         }
-        if (min_key > max_key) {
+        if (max_key == 0) {
             return false;
         }
-        if (work_mode == WorkMode::Split &&
-            ((num_push_threads < 0 || num_push_threads > num_threads) ||
-             (num_push_threads == 0 && elements_per_thread > 0))) {
-            return false;
-        }
-        if (work_mode == WorkMode::Split && num_push_threads == 0 && elements_per_thread > 0) {
-            return false;
+        if (work_mode == WorkMode::Split) {
+            if ((num_push_threads < 0 || num_push_threads > num_threads) ||
+                (num_push_threads == 0 && elements_per_thread > 0)) {
+                return false;
+            }
+            if (num_push_threads == 0 && elements_per_thread > 0) {
+                return false;
+            }
         }
         return true;
     }
@@ -233,21 +238,19 @@ void generate_workload(Settings const& settings, std::vector<key_type>& keys, in
     auto start_index = static_cast<std::size_t>(id) * settings.elements_per_thread;
     switch (settings.element_distribution) {
         case Settings::ElementDistribution::Uniform: {
-            auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
+            auto key_dist = std::uniform_int_distribution<key_type>(1, settings.max_key);
             for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
                 keys[i] = key_dist(rng);
             }
         } break;
         case Settings::ElementDistribution::Ascending: {
-            auto range = static_cast<std::size_t>(settings.max_key - settings.min_key + 1);
             for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = settings.min_key + static_cast<key_type>((i * range) / keys.size());
+                keys[i] = static_cast<key_type>((i * settings.max_key) / keys.size() + 1);
             }
         } break;
         case Settings::ElementDistribution::Descending: {
-            auto range = static_cast<std::size_t>(settings.max_key - settings.min_key + 1);
             for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = settings.min_key + static_cast<key_type>(((keys.size() - i - 1) * range) / keys.size());
+                keys[i] = static_cast<key_type>(((keys.size() - i - 1) * settings.max_key) / keys.size() + 1);
             }
         } break;
     }
@@ -264,26 +267,22 @@ void execute_mixed(thread_coordination::Context const& ctx, handle_type& handle,
 #endif
     auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
         for (auto i = start_index; i < start_index + count; ++i) {
-            {
 #ifdef QUALITY
-                auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
-                handle.push({keys[i], v});
-                auto tick = quality::clock_type::now();
-                push_log.push_back({tick, keys[i]});
+            auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
+            handle.push({keys[i], v});
+            auto tick = quality::clock_type::now();
+            push_log.push_back({tick, keys[i]});
 #else
                 handle.push({keys[i], keys[i]});
 #endif
+            PriorityQueue::value_type retval;
+            while (!handle.try_pop(retval)) {
+                ++num_failed_pops;
             }
-            {
-                PriorityQueue::value_type retval;
-                while (!handle.try_pop(retval)) {
-                    ++num_failed_pops;
-                }
 #ifdef QUALITY
-                auto tick = quality::clock_type::now();
-                pop_log.emplace_back(tick, retval.second);
+            tick = quality::clock_type::now();
+            pop_log.emplace_back(tick, retval.second);
 #endif
-            }
         }
     });
     shared_data.num_failed_pops += num_failed_pops;
@@ -347,6 +346,37 @@ void execute_split_pop(thread_coordination::Context const& ctx, handle_type& han
     shared_data.num_failed_pops += num_failed_pops;
 }
 
+void execute_increment(thread_coordination::Context const& ctx, handle_type& handle, std::vector<key_type> const& keys,
+                       SharedData& shared_data) {
+    long long num_failed_pops = 0;
+#ifdef QUALITY
+    auto& push_log = shared_data.push_log[static_cast<std::size_t>(ctx.get_id())];
+    push_log.reserve(push_log.size() + keys.size());
+    auto& pop_log = shared_data.pop_log[static_cast<std::size_t>(ctx.get_id())];
+    pop_log.reserve(keys.size());
+#endif
+    auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
+        for (auto i = start_index; i < start_index + count; ++i) {
+            PriorityQueue::value_type retval;
+            while (!handle.try_pop(retval)) {
+                ++num_failed_pops;
+            }
+#ifdef QUALITY
+            auto tick = quality::clock_type::now();
+            pop_log.emplace_back(tick, retval.second);
+            auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
+            handle.push({retval.first + keys[i], v});
+            tick = quality::clock_type::now();
+            push_log.push_back({tick, retval.first + keys[i]});
+#else
+            handle.push({retval.first + keys[i], keys[i]});
+#endif
+        }
+    });
+    shared_data.num_failed_pops += num_failed_pops;
+    shared_data.update_work_time(work_time);
+}
+
 void benchmark_thread(thread_coordination::Context ctx, Settings const& settings, PriorityQueue& pq,
                       std::vector<key_type>& keys, SharedData& shared_data) {
     std::seed_seq seed{settings.seed, ctx.get_id()};
@@ -371,7 +401,7 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
 #ifdef QUALITY
         auto& push_log = shared_data.push_log[static_cast<std::size_t>(ctx.get_id())];
 #endif
-        auto key_dist = std::uniform_int_distribution<key_type>(settings.min_key, settings.max_key);
+        auto key_dist = std::uniform_int_distribution<key_type>(1, settings.max_key);
         ctx.execute_synchronized([&, n = settings.prefill_per_thread]() {
             for (std::size_t i = 0; i < n; ++i) {
                 auto key = key_dist(rng);
@@ -406,16 +436,22 @@ void benchmark_thread(thread_coordination::Context ctx, Settings const& settings
     }
 #endif
 
-    if (settings.work_mode == Settings::WorkMode::Mixed) {
-        execute_mixed(ctx, handle, keys, shared_data);
-    } else {
-        if (ctx.get_id() < settings.num_push_threads) {
-            execute_split_push(ctx, handle, keys, shared_data);
-        } else {
-            execute_split_pop(ctx, handle, shared_data,
-                              (settings.prefill_per_thread + settings.elements_per_thread) *
-                                  static_cast<std::size_t>(settings.num_threads));
-        }
+    switch (settings.work_mode) {
+        case Settings::WorkMode::Mixed:
+            execute_mixed(ctx, handle, keys, shared_data);
+            break;
+        case Settings::WorkMode::Split:
+            if (ctx.get_id() < settings.num_push_threads) {
+                execute_split_push(ctx, handle, keys, shared_data);
+            } else {
+                execute_split_pop(ctx, handle, shared_data,
+                                  (settings.prefill_per_thread + settings.elements_per_thread) *
+                                      static_cast<std::size_t>(settings.num_threads));
+            }
+            break;
+        case Settings::WorkMode::Increment:
+            execute_increment(ctx, handle, keys, shared_data);
+            break;
     }
 
 #ifdef WITH_PAPI
@@ -452,7 +488,6 @@ void print_settings(Settings const& settings, PriorityQueueConfig const& pq_conf
     }
     std::clog << '\n';
     std::clog << "Element distribution: " << settings.element_distribution_str() << '\n'
-              << "Min key: " << static_cast<unsigned long>(settings.min_key) << '\n'
               << "Max key: " << static_cast<unsigned long>(settings.max_key) << '\n'
               << "Seed: " << settings.seed << '\n';
     std::clog << "Priority queue configuration: ";
@@ -480,13 +515,12 @@ void print_shared_data(Settings const& settings, SharedData const& shared_data) 
               << static_cast<double>(shared_data.use_counts) / static_cast<double>(shared_data.num_resets) << '\n';
 #endif
 
-    std::cout << "threads,prefill,elements,work-mode,push-threads,element-distribution,min-key,max-key,seed,work-time,"
+    std::cout << "threads,prefill,elements,work-mode,push-threads,element-distribution,max-key,seed,work-time,"
                  "failed-pops,l1d-cache-misses,l2-cache-misses,num-resets,use-counts,success\n";
     std::cout << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.elements_per_thread
               << ',' << settings.work_mode_str() << ',' << settings.num_push_threads << ','
-              << settings.element_distribution_str() << ',' << static_cast<unsigned long>(settings.min_key) << ','
-              << static_cast<unsigned long>(settings.max_key) << ',' << settings.seed << ',' << std::fixed
-              << std::setprecision(3)
+              << settings.element_distribution_str() << ',' << static_cast<unsigned long>(settings.max_key) << ','
+              << settings.seed << ',' << std::fixed << std::setprecision(3)
               << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
               << ',' << shared_data.num_failed_pops;
 #ifdef WITH_PAPI
@@ -548,7 +582,6 @@ bool run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_confi
         shared_data.success = false;
     }
     if (shared_data.success && !settings.histogram_file.empty()) {
-        std::clog << "Processing logs..." << std::flush;
         try {
             quality::write_histogram(shared_data.push_log, shared_data.pop_log, settings.histogram_file);
             std::clog << "done" << std::endl;
@@ -613,10 +646,9 @@ int main(int argc, char* argv[]) {
         ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("p,prefill", "The prefill per thread", cxxopts::value<std::size_t>(settings.prefill_per_thread), "NUMBER")
         ("n,keys", "The number of keys per thread", cxxopts::value<std::size_t>(settings.elements_per_thread), "NUMBER")
-        ("w,work-mode", "Specify the work mode ([m]ixed, [s]plit)", cxxopts::value<char>(), "STRING")
+        ("w,work-mode", "Specify the work mode ([m]ixed, [s]plit, [i]ncrement)", cxxopts::value<char>(), "STRING")
         ("i,push-threads", "The number of pushing threads in split mode", cxxopts::value<int>(settings.num_push_threads), "NUMBER")
         ("e,element-distribution", "Specify the element distribution ([u]niform, [a]scending, [d]escending)", cxxopts::value<char>(), "STRING")
-        ("l,min", "Specify the min key", cxxopts::value<key_type>(settings.min_key), "NUMBER")
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
         ("s,seed", "Specify the initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
 #ifdef QUALITY

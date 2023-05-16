@@ -64,6 +64,7 @@ void quality::fix_logs(PushLogType& push_log, PopLogType const& pop_log) {
 
 void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop_log,
                               std::filesystem::path const& file) {
+    std::clog << "Preprocessing logs..." << std::flush;
     std::vector<PopLogEntry> all_pops;
     all_pops.reserve(std::accumulate(pop_log.begin(), pop_log.end(), 0UL,
                                      [](std::size_t sum, auto const& p) { return sum + p.size(); }));
