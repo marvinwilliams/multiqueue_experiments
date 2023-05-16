@@ -65,15 +65,24 @@ void quality::fix_logs(PushLogType& push_log, PopLogType const& pop_log) {
 void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop_log,
                               std::filesystem::path const& file) {
     std::clog << "Preprocessing logs..." << std::flush;
-    std::vector<PopLogEntry> all_pops;
-    all_pops.reserve(std::accumulate(pop_log.begin(), pop_log.end(), 0UL,
-                                     [](std::size_t sum, auto const& p) { return sum + p.size(); }));
-    // multiway merge
+    auto num_pops = std::accumulate(pop_log.begin(), pop_log.end(), 0UL,
+                                    [](std::size_t sum, auto const& p) { return sum + p.size(); });
     std::vector<std::vector<PopLogEntry>::const_iterator> iters;
     iters.resize(pop_log.size());
     for (std::size_t t = 0; t < pop_log.size(); ++t) {
         iters[t] = pop_log[t].begin();
     }
+    std::clog << "done" << std::endl;
+
+    std::vector<std::size_t> ranks;
+    ranks.reserve(num_pops);
+    std::vector<std::size_t> delays;
+    delays.reserve(num_pops);
+
+    std::clog << "Replaying...";
+    ReplayTree<unsigned long, HeapElement, ExtractKey> replay_tree{};
+    std::vector<std::size_t> push_id(push_log.size());
+    std::size_t max_entry = 0;
     while (true) {
         auto min_it = iters.end();
         for (std::size_t i = 0; i < iters.size(); ++i) {
@@ -86,40 +95,24 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
         if (min_it == iters.end()) {
             break;
         }
-        all_pops.push_back(**min_it);
-        ++(*min_it);
-    }
-    assert(std::is_sorted(all_pops.begin(), all_pops.end(),
-                          [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; }));
-    std::clog << "done" << std::endl;
-    std::vector<std::size_t> ranks;
-    ranks.reserve(all_pops.size());
-    std::vector<std::size_t> delays;
-    delays.reserve(all_pops.size());
-
-    std::clog << "Replaying...";
-    ReplayTree<unsigned long, HeapElement, ExtractKey> replay_tree{};
-    std::vector<std::size_t> push_id(push_log.size());
-    std::size_t max_entry = 0;
-    for (auto& pop : all_pops) {
         // Inserting everything before next deletion
         for (std::size_t t = 0; t < push_log.size(); ++t) {
-            while (push_id[t] < push_log[t].size() && push_log[t][push_id[t]].tick <= pop.tick) {
+            while (push_id[t] < push_log[t].size() && push_log[t][push_id[t]].tick <= (*min_it)->tick) {
                 replay_tree.insert({push_log[t][push_id[t]].key, static_cast<int>(t), push_id[t]});
                 ++push_id[t];
             }
         }
 
         // Check if the insertion corresponding to the current deletion is already inserted
-        if (push_id[static_cast<std::size_t>(pop.thread_id)] < pop.elem_id) {
+        if (push_id[static_cast<std::size_t>((*min_it)->thread_id)] < (*min_it)->elem_id) {
             std::cerr << "Error: Element pushed after it was popped" << std::endl;
             std::abort();
         }
 
-        auto key = push_log[static_cast<std::size_t>(pop.thread_id)][pop.elem_id].key;
+        auto key = push_log[static_cast<std::size_t>((*min_it)->thread_id)][(*min_it)->elem_id].key;
         auto [start, end] = replay_tree.equal_range(key);
-        start = std::find_if(start, end, [&pop](auto const& e) {
-            return std::tie(pop.thread_id, pop.elem_id) == std::tie(e.thread_id, e.elem_id);
+        start = std::find_if(start, end, [&](auto const& e) {
+            return std::tie((*min_it)->thread_id, (*min_it)->elem_id) == std::tie(e.thread_id, e.elem_id);
         });
         assert(start != end);
         ranks.push_back(replay_tree.get_rank(key));
@@ -133,6 +126,7 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
             max_entry = delays.back();
         }
         replay_tree.increase_delay(key);
+        ++(*min_it);
     }
     Histogram histogram(max_entry + 1);
     for (auto r : ranks) {
@@ -146,7 +140,7 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
     if (!out) {
         throw std::runtime_error("Failed to open file: " + file.string());
     }
-    out << all_pops.size() << '\n';
+    out << num_pops << '\n';
     for (std::size_t i = 0; i < histogram.size(); ++i) {
         out << i << ' ' << histogram[i].rank_count << ' ' << histogram[i].delay_count << '\n';
     }
