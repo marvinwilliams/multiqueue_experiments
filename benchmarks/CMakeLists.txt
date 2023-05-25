@@ -129,6 +129,7 @@ set(WRAPPER_TARGETS
     klsm256
     klsm1024
     klsm4096
+    smq
     linden
     capq
     spraylist

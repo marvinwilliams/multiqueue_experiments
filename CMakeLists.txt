@@ -82,6 +82,7 @@ string(
          "-Wunused;")
 
 add_subdirectory(multiqueue)
+# add_subdirectory(third_party/smq/Galois-2.2.1)
 add_subdirectory(wrapper)
 add_subdirectory(benchmarks)
 add_subdirectory(tools)

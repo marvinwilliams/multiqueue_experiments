@@ -1,6 +1,7 @@
 set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
+set(SMQ_DIR "${CMAKE_SOURCE_DIR}/third_party/smq/Galois-2.2.1")
 
 add_library(wrapper INTERFACE)
 target_include_directories(wrapper INTERFACE "..")
@@ -37,6 +38,12 @@ target_compile_definitions(
   klsm4096
   INTERFACE PQ_KLSM
   INTERFACE KLSM_K=4096)
+
+add_library(smq INTERFACE)
+target_link_libraries(smq INTERFACE wrapper)
+target_include_directories(smq SYSTEM INTERFACE ${SMQ_DIR}/include)
+set_property(TARGET smq PROPERTY pq_name smq)
+target_compile_definitions(smq INTERFACE PQ_STEALING_MQ)
 
 add_library(
   linden STATIC

@@ -13,3 +13,6 @@
 [submodule "multififo"]
 	path = multififo
 	url = git@github.com:marvinwilliams/multiqueue.git
+[submodule "smq"]
+	path = third_party/smq
+	url = git@github.com:marvinwilliams/mq-based-schedulers.git

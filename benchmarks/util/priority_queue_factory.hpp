@@ -135,6 +135,18 @@ template <typename Key, typename T>
 using GenericMinPriorityQueue = wrapper::Klsm<Key, T, KLSM_K>;
 using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
 static constexpr auto pq_name = "KLSM (k=" TOSTRING(KLSM_K) ")";
+#elif defined PQ_STEALING_MQ
+#include "wrapper/smq.hpp"
+#define PQ_HAS_GENERIC
+#define PQ_HAS_MAX
+#define PQ_HAS_MAX_GENERIC
+template <typename Key, typename T>
+using GenericMinPriorityQueue = wrapper::StealingMQ<Key, T, std::greater<Key>>;
+using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
+template <typename Key, typename T>
+using GenericMaxPriorityQueue = wrapper::StealingMQ<Key, T, std::less<Key>>;
+using DefaultMaxPriorityQueue = GenericMaxPriorityQueue<unsigned long, unsigned long>;
+static constexpr auto pq_name = "Stealing MQ";
 #elif defined PQ_LINDEN
 #include "wrapper/linden.hpp"
 using DefaultMinPriorityQueue = wrapper::Linden;
