@@ -83,7 +83,7 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
     ReplayTree<unsigned long, HeapElement, ExtractKey> replay_tree{};
     std::vector<std::size_t> push_id(push_log.size());
     std::size_t max_entry = 0;
-    while (true) {
+    for (std::size_t i = 0; i < num_pops; ++i) {
         auto min_it = iters.end();
         for (std::size_t i = 0; i < iters.size(); ++i) {
             if (iters[i] != pop_log[i].end()) {
@@ -92,9 +92,7 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
                 }
             }
         }
-        if (min_it == iters.end()) {
-            break;
-        }
+        assert(min_it == iters.end());
         // Inserting everything before next deletion
         for (std::size_t t = 0; t < push_log.size(); ++t) {
             while (push_id[t] < push_log[t].size() && push_log[t][push_id[t]].tick <= (*min_it)->tick) {
