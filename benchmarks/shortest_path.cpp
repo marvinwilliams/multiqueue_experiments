@@ -128,7 +128,6 @@ void benchmark_thread(thread_coordination::Context ctx, PriorityQueue& pq, Share
         shared_data.shortest_distances[0].value = 0;
         data.pq_handle.push({0, 0});
         ++data.pushed_nodes;
-        std::clog << "Computing shortest paths..." << std::flush;
     }
     auto work_time = ctx.execute_synchronized([&]() { main_loop(ctx.get_num_threads(), shared_data, data, graph); });
     shared_data.update_work_time(work_time);
@@ -197,6 +196,7 @@ bool run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_confi
 
     auto pq = create_pq<PriorityQueue>(settings.num_threads, graph.num_nodes(), pq_config);
     SharedData shared_data{graph.num_nodes()};
+    std::clog << "Computing shortest paths..." << std::flush;
     thread_coordination::TaskHandle task_handle{settings.num_threads, benchmark_thread, std::ref(pq),
                                                 std::ref(shared_data), graph};
     task_handle.wait();

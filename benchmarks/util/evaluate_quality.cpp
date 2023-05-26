@@ -14,15 +14,12 @@
 #include <stdexcept>
 #include <vector>
 
-struct HeapElement {
+struct Operation {
+    std::uint64_t tick;
     unsigned long key;
-    int thread_id;
-    std::size_t elem_id;
-};
-
-struct ExtractKey {
-    static unsigned long const& get(HeapElement const& e) {
-        return e.key;
+    unsigned long value;
+    friend bool operator<(Operation const& lhs, Operation const& rhs) noexcept {
+        return lhs.tick < rhs.tick;
     }
 };
 
@@ -33,45 +30,73 @@ struct HistogramEntry {
 
 using Histogram = std::vector<HistogramEntry>;
 
-void quality::fix_logs(PushLogType& push_log, PopLogType const& pop_log) {
+void quality::check_logs(std::vector<OperationLog> const& logs) {
     std::vector<std::vector<bool>> popped;
+    popped.reserve(push_log.size());
     for (auto const& i : push_log) {
         popped.emplace_back(i.size(), false);
     }
     for (auto const& thread_pops : pop_log) {
         for (auto const& entry : thread_pops) {
-            if (entry.thread_id < 0 || entry.thread_id >= static_cast<int>(push_log.size())) {
-                throw std::runtime_error{"Popped element from invalid thread: " + std::to_string(entry.thread_id)};
+            auto thread_id = packed_value::get_thread_id(entry.data);
+            auto elem_id = packed_value::get_elem_id(entry.data);
+            if (thread_id < 0 || thread_id >= static_cast<int>(push_log.size())) {
+                throw std::runtime_error{"Popped element from invalid thread: " + std::to_string(thread_id)};
             }
-            auto& thread_push_log = push_log[static_cast<std::size_t>(entry.thread_id)];
-            if (entry.elem_id >= thread_push_log.size()) {
-                throw std::runtime_error{"Popped element has invalid element id: " + std::to_string(entry.elem_id)};
+            auto& thread_push_log = push_log[static_cast<std::size_t>(thread_id)];
+            if (elem_id >= thread_push_log.size()) {
+                throw std::runtime_error{"Popped element has invalid element id: " + std::to_string(elem_id)};
             }
-            if (entry.tick < thread_push_log[entry.elem_id].tick) {
-                if (entry.elem_id > 0 && entry.tick < thread_push_log[entry.elem_id - 1].tick) {
+            if (entry.tick < thread_push_log[elem_id].tick) {
+                if (elem_id > 0 && entry.tick < thread_push_log[elem_id - 1].tick) {
                     throw std::runtime_error{"Popped element before pushing thread pushed previous element"};
                 }
-                thread_push_log[entry.elem_id].tick = entry.tick;
+                thread_push_log[elem_id].tick = entry.tick;
             }
 
-            if (popped[static_cast<std::size_t>(entry.thread_id)][entry.elem_id]) {
+            if (popped[static_cast<std::size_t>(thread_id)][elem_id]) {
                 throw std::runtime_error{"Popped element twice"};
             }
-            popped[static_cast<std::size_t>(entry.thread_id)][entry.elem_id] = true;
+            popped[static_cast<std::size_t>(thread_id)][elem_id] = true;
         }
     }
 }
 
-void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop_log,
-                              std::filesystem::path const& file) {
-    std::clog << "Preprocessing logs..." << std::flush;
+void quality::write_histogram(OperationLog& push_log, OperationLog& pop_log, std::filesystem::path const& file) {
+    struct HeapElement {
+        unsigned long key;
+        unsigned long data;
+    };
+
+    struct ExtractKey {
+        static unsigned long const& get(HeapElement const& e) {
+            return e.key;
+        }
+    };
+
+    std::clog << "Preparing logs..." << std::flush;
+    fix_logs(push_log, pop_log);
     auto num_pops = std::accumulate(pop_log.begin(), pop_log.end(), 0UL,
                                     [](std::size_t sum, auto const& p) { return sum + p.size(); });
-    std::vector<std::vector<PopLogEntry>::const_iterator> iters;
-    iters.resize(pop_log.size());
-    for (std::size_t t = 0; t < pop_log.size(); ++t) {
-        iters[t] = pop_log[t].begin();
+    auto num_pushes = std::accumulate(push_log.begin(), push_log.end(), 0UL,
+                                      [](std::size_t sum, auto const& p) { return sum + p.size(); });
+    std::vector<Operation> all_pops;
+    all_pops.reserve(num_pops);
+    for (auto const& log : pop_log) {
+        all_pops.insert(all_pops.end(), log.begin(), log.end());
     }
+    std::sort(all_pops.begin(), all_pops.end());
+    std::vector<Operation> all_pushes;
+    all_pushes.reserve(num_pushes);
+    for (auto const& log : push_log) {
+        all_pops.insert(all_pops.end(), log.begin(), log.end());
+    }
+    std::sort(all_pushes.begin(), all_pushes.end());
+    /* std::vector<std::vector<PopLogEntry>::const_iterator> iters; */
+    /* iters.resize(pop_log.size()); */
+    /* for (std::size_t t = 0; t < pop_log.size(); ++t) { */
+    /*     iters[t] = pop_log[t].begin(); */
+    /* } */
     std::clog << "done" << std::endl;
 
     std::vector<std::size_t> ranks;
@@ -79,28 +104,14 @@ void quality::write_histogram(PushLogType const& push_log, PopLogType const& pop
     std::vector<std::size_t> delays;
     delays.reserve(num_pops);
 
-    std::clog << "Replaying...";
+    std::clog << "Replaying operations...";
     ReplayTree<unsigned long, HeapElement, ExtractKey> replay_tree{};
-    std::vector<std::size_t> push_id(push_log.size());
-    std::size_t max_entry = 0;
-    for (std::size_t i = 0; i < num_pops; ++i) {
-        auto min_it = iters.end();
-        for (std::size_t i = 0; i < iters.size(); ++i) {
-            if (iters[i] != pop_log[i].end()) {
-                if (min_it == iters.end() || iters[i]->tick < (*min_it)->tick) {
-                    min_it = iters.begin() + static_cast<std::ptrdiff_t>(i);
-                }
-            }
-        }
-        assert(min_it == iters.end());
+    auto push_it = all_pushes.begin();
+    for (auto& pop : all_pops) {
         // Inserting everything before next deletion
-        for (std::size_t t = 0; t < push_log.size(); ++t) {
-            while (push_id[t] < push_log[t].size() && push_log[t][push_id[t]].tick <= (*min_it)->tick) {
-                replay_tree.insert({push_log[t][push_id[t]].key, static_cast<int>(t), push_id[t]});
-                ++push_id[t];
-            }
+        while (push_it != all_pushes.end() && push_it->tick < pop.tick) {
+            replay_tree.insert({push_it->key, push_it->data});
         }
-
         // Check if the insertion corresponding to the current deletion is already inserted
         if (push_id[static_cast<std::size_t>((*min_it)->thread_id)] < (*min_it)->elem_id) {
             std::cerr << "Error: Element pushed after it was popped" << std::endl;

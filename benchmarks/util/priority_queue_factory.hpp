@@ -54,11 +54,9 @@ using SeqPriorityQueue = ::multiqueue::BufferedPQ<
 #else
     ::multiqueue::Heap<T, Compare>
 #endif
-#if defined INSERTION_BUFFERSIZE && defined DELETION_BUFFERSIZE
+#if defined MQ_BUFFERSIZE
     ,
-    INSERTION_BUFFERSIZE, DELETION_BUFFERSIZE
-#elif defined INSERTION_BUFFERSIZE || defined DELETION_BUFFERSIZE
-#error Must specify either both buffersizes or none
+    MQ_BUFFERSIZE, MQ_BUFFERSIZE
 #endif
     >;
 }  // namespace detail
@@ -70,26 +68,23 @@ using GenericMaxPriorityQueue =
     multiqueue::MultiQueue<Key, T, std::less<>, detail::STICK_POLICY, detail::SeqPriorityQueue>;
 using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
 using DefaultMaxPriorityQueue = GenericMaxPriorityQueue<unsigned long, unsigned long>;
-static constexpr auto pq_name =
-    "MultiQueue (buffer sizes: "
-#if defined INSERTION_BUFFERSIZE && defined DELETION_BUFFERSIZE
-    "i=" TOSTRING(INSERTION_BUFFERSIZE) " d=" TOSTRING(DELETION_BUFFERSIZE)
+static constexpr auto pq_name = "MultiQueue (buffersize: "
+#if defined MQ_BUFFERSIZE
+        TOSTRING(MQ_BUFFERSIZE)
 #else
-                          "default"
+      "default"
 #endif
         ", stick policy: " TOSTRING(STICK_POLICY_NAME)
         ", heap: "
 #ifdef USE_STD_PQ
         "std"
 #else
-    "default"
+        "default"
 #ifdef HEAP_ARITY
-                                   " (d=" TOSTRING(HEAP_ARITY) ")"
+        ", d: " TOSTRING(HEAP_ARITY)
 #endif
 #endif
         ")";
-#undef STICK_POLICY_NAME
-
 inline void add_pq_options(cxxopts::Options& options) {
     options.add_options()("c,factor", "The factor for queues", cxxopts::value<int>(), "NUMBER")
 #ifndef PQ_MQ_NONE
@@ -112,15 +107,19 @@ inline PriorityQueueConfig get_pq_options(cxxopts::ParseResult const& result) {
     return config;
 }
 
-inline void print_pq_config(PriorityQueueConfig const& config) {
-    std::clog << "factor: " << config.pqs_per_thread << ", stickiness: " << config.stickiness;
+inline void describe_pq(std::ostream& out, PriorityQueueConfig const& config) {
+    out << pq_name << ", c=" << config.pqs_per_thread << ", s=" << config.stickiness;
 }
+
+#undef STICK_POLICY_NAME
 
 template <typename PriorityQueue>
 inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, PriorityQueueConfig const& config) {
     return PriorityQueue(num_threads, initial_capacity, config);
 }
+
 #else
+
 #ifdef PQ_CAPQ
 #include "wrapper/capq.hpp"
 using DefaultMinPriorityQueue = wrapper::Capq<true, true, true>;
@@ -134,7 +133,7 @@ static constexpr auto pq_name = "CA-PQ";
 template <typename Key, typename T>
 using GenericMinPriorityQueue = wrapper::Klsm<Key, T, KLSM_K>;
 using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
-static constexpr auto pq_name = "KLSM (k=" TOSTRING(KLSM_K) ")";
+static constexpr auto pq_name = "KLSM (k: " TOSTRING(KLSM_K) ")";
 #elif defined PQ_LINDEN
 #include "wrapper/linden.hpp"
 using DefaultMinPriorityQueue = wrapper::Linden;
@@ -169,13 +168,15 @@ inline PriorityQueueConfig get_pq_options(cxxopts::ParseResult const&) {
     return PriorityQueueConfig{};
 }
 
+inline void describe_pq(std::ostream& out, PriorityQueueConfig const&) {
+    out << pq_name;
+}
+
 template <typename PriorityQueue>
 inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, PriorityQueueConfig const&) {
     return PriorityQueue(num_threads, initial_capacity);
 }
 
-inline void print_pq_config(PriorityQueueConfig const&) {
-}
 #endif
 
 #undef STRINGIFY
