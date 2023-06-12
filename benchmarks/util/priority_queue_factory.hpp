@@ -12,79 +12,43 @@
 #define TOSTRING(x) STRINGIFY(x)
 
 #if defined PQ_MQ
-#include "multiqueue/buffered_pq.hpp"
-#include "multiqueue/config.hpp"
 #include "multiqueue/multiqueue.hpp"
-#include "multiqueue/stick_policy.hpp"
+#include "multiqueue/queue_selection/global_permutation.hpp"
+#include "multiqueue/queue_selection/random.hpp"
+#include "multiqueue/queue_selection/stick_random.hpp"
+#include "multiqueue/queue_selection/swap_assignment.hpp"
 
 #include "cxxopts.hpp"
 
 #include <iostream>
+#ifdef USE_STD_PQ
+#include <queue>
+#endif
 
 #define PQ_HAS_GENERIC
 #define PQ_HAS_MAX
 #define PQ_HAS_MAX_GENERIC
 namespace detail {
-#ifdef STICK_POLICY_NONE
-static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::None;
-#define STICK_POLICY_NAME none
-#elif defined STICK_POLICY_RANDOM
-static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Random;
-#define STICK_POLICY_NAME random
-#elif defined STICK_POLICY_SWAPPING
-static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Swapping;
-#define STICK_POLICY_NAME swapping
-#elif defined STICK_POLICY_PERMUTATION
-static constexpr auto STICK_POLICY = ::multiqueue::StickPolicy::Permutation;
-#define STICK_POLICY_NAME permutation
-#else
-#error No valid stick policy specified
-#endif
+template <typename Key, typename T, typename Compare>
+using GenericPriorityQueue = multiqueue::MultiQueue<
+    Key, std::pair<Key, T>, Compare
 #ifdef USE_STD_PQ
-#include <queue>
-#else
-#include "multiqueue/heap.hpp"
-#endif
-template <typename T, typename Compare>
-using SeqPriorityQueue = ::multiqueue::BufferedPQ<
-#ifdef USE_STD_PQ
-    std::priority_queue<T, std::vector<T>, Compare>
-#elif defined HEAP_ARITY
-    ::multiqueue::Heap<T, Compare, HEAP_ARITY>
-#else
-    ::multiqueue::Heap<T, Compare>
-#endif
-#if defined MQ_BUFFERSIZE
     ,
-    MQ_BUFFERSIZE, MQ_BUFFERSIZE
+    multiqueue::defaults::MultiQueueTraits, multiqueue::defaults::KeyOfValue<Key, std::pair<Key, T>>,
+    multiqueue::BufferedPQ<
+        std::priority_queue<std::pair<Key, T>, std::vector<std::pair<Key, T>>,
+                            multiqueue::defaults::ValueCompare<
+                                std::pair<Key, T>, multiqueue::defaults::KeyOfValue<Key, std::pair<Key, T>>, Compare>>>
 #endif
     >;
 }  // namespace detail
+
 template <typename Key, typename T>
-using GenericMinPriorityQueue =
-    multiqueue::MultiQueue<Key, T, std::greater<>, detail::STICK_POLICY, detail::SeqPriorityQueue>;
+using GenericMinPriorityQueue = detail::GenericPriorityQueue<Key, T, std::greater<>>;
 template <typename Key, typename T>
-using GenericMaxPriorityQueue =
-    multiqueue::MultiQueue<Key, T, std::less<>, detail::STICK_POLICY, detail::SeqPriorityQueue>;
+using GenericMaxPriorityQueue = detail::GenericPriorityQueue<Key, T, std::less<>>;
 using DefaultMinPriorityQueue = GenericMinPriorityQueue<unsigned long, unsigned long>;
 using DefaultMaxPriorityQueue = GenericMaxPriorityQueue<unsigned long, unsigned long>;
-static constexpr auto pq_name = "MultiQueue (buffersize: "
-#if defined MQ_BUFFERSIZE
-        TOSTRING(MQ_BUFFERSIZE)
-#else
-      "default"
-#endif
-        ", stick policy: " TOSTRING(STICK_POLICY_NAME)
-        ", heap: "
-#ifdef USE_STD_PQ
-        "std"
-#else
-        "default"
-#ifdef HEAP_ARITY
-        ", d: " TOSTRING(HEAP_ARITY)
-#endif
-#endif
-        ")";
 inline void add_pq_options(cxxopts::Options& options) {
     options.add_options()("c,factor", "The factor for queues", cxxopts::value<int>(), "NUMBER")
 #ifndef PQ_MQ_NONE
@@ -92,30 +56,63 @@ inline void add_pq_options(cxxopts::Options& options) {
 #endif
 }
 
-using PriorityQueueConfig = multiqueue::Config;
+struct PriorityQueueConfig {
+    multiqueue::build_config::DefaultQueueSelectionPolicy::Config queue_selection_policy_config;
+    int pqs_per_thread = 2;
+};
 
 inline PriorityQueueConfig get_pq_options(cxxopts::ParseResult const& result) {
-    multiqueue::Config config;
+    PriorityQueueConfig config;
     if (result.count("factor") > 0) {
         config.pqs_per_thread = result["factor"].as<int>();
     }
 #ifndef PQ_MQ_NONE
     if (result.count("stickiness") > 0) {
-        config.stickiness = result["stickiness"].as<int>();
+        config.queue_selection_policy_config.stickiness = result["stickiness"].as<int>();
     }
 #endif
     return config;
 }
 
-inline void describe_pq(std::ostream& out, PriorityQueueConfig const& config) {
-    out << pq_name << ", c=" << config.pqs_per_thread << ", s=" << config.stickiness;
-}
+template <typename Policy>
+struct QueueSelectionPolicyName {
+    static constexpr auto name = "Unknown";
+};
 
-#undef STICK_POLICY_NAME
+template <>
+struct QueueSelectionPolicyName<multiqueue::queue_selection::Random> {
+    static constexpr auto name = "Random";
+};
+
+template <>
+struct QueueSelectionPolicyName<multiqueue::queue_selection::StickRandom> {
+    static constexpr auto name = "StickRandom";
+};
+
+template <>
+struct QueueSelectionPolicyName<multiqueue::queue_selection::SwapAssignment> {
+    static constexpr auto name = "Swapping";
+};
+
+template <>
+struct QueueSelectionPolicyName<multiqueue::queue_selection::GlobalPermutation> {
+    static constexpr auto name = "GlobalPermutation";
+};
+
+inline void describe_pq(std::ostream& out, PriorityQueueConfig const& config) {
+    out << "MultiQueue (" << QueueSelectionPolicyName<multiqueue::build_config::DefaultQueueSelectionPolicy>::name
+        << ", heap arity: " << multiqueue::build_config::DefaultHeapArity
+        << ", buffer sizes (ins/del): " << multiqueue::build_config::DefaultInsertionBuffersize << '/'
+        << multiqueue::build_config::DefaultDeletionBuffersize << ", pqs per thread: " << config.pqs_per_thread
+#ifndef PQ_MQ_NONE
+        << ", stickiness = " << config.queue_selection_policy_config.stickiness
+#endif
+        << ')';
+}
 
 template <typename PriorityQueue>
 inline PriorityQueue create_pq(int num_threads, std::size_t initial_capacity, PriorityQueueConfig const& config) {
-    return PriorityQueue(num_threads, initial_capacity, config);
+    return PriorityQueue(num_threads * config.pqs_per_thread, initial_capacity, config.queue_selection_policy_config);
 }
 
 #else
