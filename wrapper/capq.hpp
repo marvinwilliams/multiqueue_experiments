@@ -1,8 +1,8 @@
 #pragma once
-#ifndef WRAPPER_CAPQ_HPP_INCLUDED
-#define WRAPPER_CAPQ_HPP_INCLUDED
 
 // Adapted from klsm
+
+#include "cxxopts.hpp"
 
 #include <ios>
 #include <limits>
@@ -20,8 +20,14 @@ namespace wrapper {
 // GC has MAX_THREADS = 128
 // (unsigned long) -1 is signaling empty
 
-template <bool remove_min_relax = true, bool put_relax = true, bool catree_adapt = true>
-class Capq {
+template <typename Key = unsigned long, typename T = unsigned long, bool Min = true>
+class CAPQ {
+    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
+                  "Only unsigned long as Key and T are supported");
+};
+
+template <bool Min>
+class CAPQ<unsigned long, unsigned long, Min> {
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
@@ -45,20 +51,17 @@ class Capq {
     alignas(64) std::unique_ptr<CAPQ, CAPQ_deleter> pq_;
 
    public:
-    Capq(int num_threads, std::size_t initial_capacity);
+    static void add_options(cxxopts::Options& /*options*/) {
+    }
 
-    Handle get_handle(int id);
+    CAPQ(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& options);
 
-    static std::ostream& describe(std::ostream& out) {
-        out << "capq\n";
-        out << std::boolalpha;
-        out << "Remove min relax: " << remove_min_relax << '\n';
-        out << "Put relax: " << put_relax << '\n';
-        out << "Catree adapt: " << catree_adapt << '\n';
+    Handle get_handle();
+
+    std::ostream& describe(std::ostream& out) {
+        out << "CA-PQ";
         return out;
     }
 };
 
 }  // namespace wrapper
-
-#endif

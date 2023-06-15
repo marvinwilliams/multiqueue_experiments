@@ -5,6 +5,10 @@ set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
 add_library(wrapper INTERFACE)
 target_include_directories(wrapper INTERFACE "..")
 
+add_library(mq INTERFACE)
+target_link_libraries(mq INTERFACE multiqueue::multiqueue wrapper)
+target_compile_definitions(mq INTERFACE PQ_MQ)
+
 add_library(klsm STATIC ${KLSM_DIR}/src/util/thread_local_ptr.cpp)
 target_link_libraries(klsm INTERFACE wrapper)
 target_include_directories(klsm SYSTEM INTERFACE ${KLSM_DIR}/src
