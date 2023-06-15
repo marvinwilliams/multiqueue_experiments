@@ -1,6 +1,6 @@
 #pragma once
-#ifndef WRAPPER_TBB_QUEUE_HPP_INCLUDED
-#define WRAPPER_TBB_QUEUE_HPP_INCLUDED
+
+#include "cxxopts.hpp"
 
 #include <tbb/concurrent_queue.h>
 
@@ -9,7 +9,8 @@
 
 namespace wrapper {
 
-template <typename KeyType, typename T>
+// Min is ignored since this is a FIFO
+template <typename KeyType, typename T, bool /*Min*/>
 class TBBQueue {
    public:
     using key_type = KeyType;
@@ -25,8 +26,12 @@ class TBBQueue {
         pq_type* pq_;
 
        public:
-        void push(value_type const& value) { pq_->push(value); }
-        bool try_pop(value_type& retval) { return pq_->try_pop(retval); }
+        void push(value_type const& value) {
+            pq_->push(value);
+        }
+        bool try_pop(value_type& retval) {
+            return pq_->try_pop(retval);
+        }
     };
 
     using handle_type = Handle;
@@ -35,7 +40,11 @@ class TBBQueue {
     pq_type pq_;
 
    public:
-    TBBQueue(unsigned int /* num_threads */) {}
+    static void add_options(cxxopts::Options& /*options*/) {
+    }
+
+    TBBQueue(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*options*/) {
+    }
 
     Handle get_handle() {
         auto h = Handle{};
@@ -43,15 +52,18 @@ class TBBQueue {
         return h;
     }
 
-    void push(value_type const& value) { pq_.push(value); }
-    bool try_pop(value_type& retval) { return pq_.try_pop(retval); }
+    void push(value_type const& value) {
+        pq_.push(value);
+    }
 
-    static std::ostream& describe(std::ostream& out) {
-        out << "TBBQueue\n";
+    bool try_pop(value_type& retval) {
+        return pq_.try_pop(retval);
+    }
+
+    std::ostream& describe(std::ostream& out) {
+        out << "TBB Queue";
         return out;
     }
 };
 
 }  // namespace wrapper
-
-#endif

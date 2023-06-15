@@ -1,7 +1,7 @@
-#include "priority_queue_factory.hpp"
+#include "priority_queue_selection.hpp"
 #include "thread_coordination.hpp"
 #ifdef QUALITY
-#include "evaluate_quality.hpp"
+#include "operation_log.hpp"
 #endif
 
 #include "cxxopts.hpp"
@@ -35,93 +35,62 @@ extern "C" {
 #include <filesystem>
 #endif
 
+void print_header() {
+    std::clog << "Built on " << __DATE__ << ' ' << __TIME__ << " with:\n";
+#if defined(__clang__)
+    std::clog << "  Clang " << __clang_version__ << '\n';
+#elif defined(__GNUC__)
+    std::clog << "  GCC " << __VERSION__ << '\n';
+#else
+    std::clog << "  Unknown compiler\n";
+#endif
+#ifdef NDEBUG
+    std::clog << "  NDEBUG defined\n";
+#else
+    std::clog << "  NDEBUG not defined\n";
+#endif
+#ifdef WITH_PAPI
+    std::clog << "  PAPI " << PAPI_VER_CURRENT << '\n';
+#else
+    std::clog << "  PAPI unsupported\n";
+#endif
+}
+
 #ifdef USE_UINT8
 #ifdef QUALITY
 #error "QUALITY does not work with UINT8"
 #endif
-#ifndef PQ_HAS_GENERIC
-#error "UINT8 is defined, but PQ is not generic"
-#endif
-using PriorityQueue = GenericMinPriorityQueue<std::uint8_t, std::uint8_t>;
+using key_type = std::uint8_t;
+using value_type = std::uint8_t;
 #else
-using PriorityQueue = DefaultMinPriorityQueue;
+using key_type = unsigned long;
+using value_type = unsigned long;
 #endif
-using key_type = PriorityQueue::key_type;
-using handle_type = PriorityQueue::Handle;
+
+using pq_type = PriorityQueue<key_type, value_type, true>;
+using handle_type = pq_type::handle_type;
 
 using thread_coordination::timepoint_type;
 
-#ifdef WITH_PAPI
-// These are the event names used for the papi library to measure cache misses
-// As these are hardware specific, you need to modify them or use generic PAPI events
-static auto const L1d_cache_miss_event_name = "perf_raw::rc860";
-static auto const L2_cache_miss_event_name = "perf_raw::r0864";
-
-bool init_papi() {
-    if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
-        std::cerr << "Error initializing PAPI\n";
-        return false;
-    }
-    if (int ret = PAPI_thread_init((unsigned long (*)())(pthread_self)); ret != PAPI_OK) {
-        std::cerr << "Error initializing threads for PAPI\n";
-        return false;
-    }
-    if (int ret = PAPI_query_named_event(L1d_cache_miss_event_name); ret != PAPI_OK) {
-        std::cerr << "Cannot measure event '" << L1d_cache_miss_event_name << "'\n";
-        return false;
-    }
-    if (int ret = PAPI_query_named_event(L2_cache_miss_event_name); ret != PAPI_OK) {
-        std::cerr << "Cannot measure event '" << L2_cache_miss_event_name << "'\n";
-        return false;
-    }
-    return true;
-}
-
-bool start_performance_counter(int& event_set) {
-    if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
-        return false;
-    }
-    if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
-        return false;
-    }
-    int event_code{};
-    if (int ret = PAPI_event_name_to_code(L1d_cache_miss_event_name, &event_code); ret != PAPI_OK) {
-        return false;
-    }
-    if (int ret = PAPI_add_event(event_set, event_code); ret != PAPI_OK) {
-        return false;
-    }
-    if (int ret = PAPI_event_name_to_code(L2_cache_miss_event_name, &event_code); ret != PAPI_OK) {
-        return false;
-    }
-    if (int ret = PAPI_add_event(event_set, event_code); ret != PAPI_OK) {
-        return false;
-    }
-    if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
-        return false;
-    }
-    return true;
-}
-#endif
+enum class WorkMode { Mixed, Split, Increment };
+enum class KeyDistribution { Uniform, Ascending, Descending };
 
 struct Settings {
-    enum class WorkMode { Mixed, Split, Increment };
-    enum class ElementDistribution { Uniform, Ascending, Descending };
-
     int num_threads = 4;
     std::size_t prefill_per_thread = 1 << 20;
     std::size_t elements_per_thread = 1 << 24;
     WorkMode work_mode = WorkMode::Mixed;
     int num_push_threads = 1;
-    ElementDistribution element_distribution = ElementDistribution::Uniform;
+    KeyDistribution key_distribution = KeyDistribution::Uniform;
 #ifdef USE_UINT8
     key_type max_key = std::numeric_limits<key_type>::max();
 #else
     key_type max_key = 1 << 30;
 #endif
     int seed = 1;
+    std::filesystem::path result_file;
 #ifdef QUALITY
-    std::filesystem::path histogram_file;
+    std::filesystem::path histogram_file = "histogram.dat";
     std::filesystem::path log_file;
 #endif
 #ifdef WITH_PAPI
@@ -143,16 +112,16 @@ struct Settings {
         return false;
     }
 
-    bool set_element_distribution(char c) {
+    bool set_key_distribution(char c) {
         switch (c) {
             case 'u':
-                element_distribution = ElementDistribution::Uniform;
+                key_distribution = KeyDistribution::Uniform;
                 return true;
             case 'a':
-                element_distribution = ElementDistribution::Ascending;
+                key_distribution = KeyDistribution::Ascending;
                 return true;
             case 'd':
-                element_distribution = ElementDistribution::Descending;
+                key_distribution = KeyDistribution::Descending;
                 return true;
         }
         return false;
@@ -169,13 +138,13 @@ struct Settings {
         }
         return "unknown";
     }
-    [[nodiscard]] auto element_distribution_str() const {
-        switch (element_distribution) {
-            case ElementDistribution::Uniform:
+    [[nodiscard]] auto key_distribution_str() const {
+        switch (key_distribution) {
+            case KeyDistribution::Uniform:
                 return "uniform";
-            case ElementDistribution::Ascending:
+            case KeyDistribution::Ascending:
                 return "ascending";
-            case ElementDistribution::Descending:
+            case KeyDistribution::Descending:
                 return "descending";
         }
         return "unknown";
@@ -183,17 +152,21 @@ struct Settings {
 
     [[nodiscard]] bool validate() const {
         if (num_threads <= 0) {
+            std::cerr << "Error: Number of threads must be greater than 0\n";
             return false;
         }
         if (max_key == 0) {
+            std::cerr << "Error: Max key must be greater than 0\n";
             return false;
         }
         if (work_mode == WorkMode::Split) {
             if ((num_push_threads < 0 || num_push_threads > num_threads) ||
                 (num_push_threads == 0 && elements_per_thread > 0)) {
+                std::cerr << "Error: Invalid number of push threads\n";
                 return false;
             }
             if (num_push_threads == 0 && elements_per_thread > 0) {
+                std::cerr << "Error: Invalid number of push threads\n";
                 return false;
             }
         }
@@ -201,432 +174,427 @@ struct Settings {
     }
 };
 
-struct SharedData {
-    std::atomic<timepoint_type> start_time{timepoint_type::max()};
-    std::atomic<timepoint_type> end_time{timepoint_type::min()};
-    std::atomic<long long> num_failed_pops{0};
-    std::atomic<long long> num_pops{0};
 #ifdef QUALITY
-    quality::PushLogType push_log;
-    quality::PopLogType pop_log;
+std::uint64_t get_tick() noexcept {
+    timespec ts;
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+    return static_cast<std::uint64_t>(ts.tv_sec) * 1000000000 + static_cast<std::uint64_t>(ts.tv_nsec);
+}
 #endif
+
 #ifdef WITH_PAPI
-    std::atomic<long long> l1d_cache_misses{0};
-    std::atomic<long long> l2_cache_misses{0};
+// These are the event names used for the papi library to measure cache misses
+// As these are hardware specific, you need to modify them or use generic PAPI events
+static constexpr auto papi_events = std::array{"perf_raw::rc860", "perf_raw::r0864"};
+
+void init_papi() {
+    if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
+        throw std::runtime_error("Failed to initialize PAPI");
+    }
+    if (int ret = PAPI_thread_init((unsigned long (*)())(pthread_self)); ret != PAPI_OK) {
+        throw std::runtime_error("Failed to initialize PAPI thread support");
+    }
+    for (auto const& event_name : papi_events) {
+        if (int ret = PAPI_query_named_event(event_name); ret != PAPI_OK) {
+            throw std::runtime_error("Failed to get PAPI event code for event '" + std::string(event_name) + '\'');
+        }
+    }
+}
+
+void start_papi(int& event_set) {
+    if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
+        throw std::runtime_error("Failed to register thread for PAPI");
+    }
+    if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
+        throw std::runtime_error("Failed to create PAPI event set");
+    }
+    int event_code{};
+    for (auto const& event_name : papi_events) {
+        if (int ret = PAPI_event_name_to_code(event_name, &event_code); ret != PAPI_OK) {
+            throw std::runtime_error("Failed to get PAPI event code for '" + std::string(event_name) + '\'');
+        }
+        if (int ret = PAPI_add_event(event_set, event_code); ret != PAPI_OK) {
+            throw std::runtime_error("Failed to add PAPI event '" + std::string(event_name) + '\'');
+        }
+    }
+    if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
+        throw std::runtime_error("Failed to start PAPI");
+    }
+}
+#endif
+
+void print_settings(Settings const& settings) {
+    std::cout << "Threads: " << settings.num_threads << '\n'
+              << "Prefill per thread: " << settings.prefill_per_thread << '\n'
+              << "Elements per thread: " << settings.elements_per_thread << '\n'
+              << "Operation mode: " << settings.work_mode_str();
+    if (settings.work_mode == WorkMode::Split) {
+        std::cout << " (" << settings.num_push_threads << " push)";
+    }
+    std::cout << '\n';
+    std::cout << "Key distribution: " << settings.key_distribution_str() << '\n'
+              << "Max key: " << static_cast<unsigned long>(settings.max_key) << '\n'
+              << "Seed: " << settings.seed << '\n';
+#ifdef WITH_PAPI
+    std::cout << "Perf. counter: " << (settings.enable_performance_counter ? "enabled" : "disabled") << '\n';
+#else
+    std::cout << "Perf. counter: unavailable\n";
+#endif
+#ifdef USE_UINT8
+    std::cout << "Data type: uint8_t\n";
+#else
+    std::cout << "Data type: unsigned long\n";
+#endif
+    std::cout << '\n' << '\n';
+}
+
+struct Result {
+    timepoint_type start_time{timepoint_type::max()};
+    timepoint_type end_time{timepoint_type::min()};
+    long long num_failed_pops{0};
+    long long num_pops{0};
+    long long num_pushes{0};
+#ifdef WITH_PAPI
+    std::array<long long, papi_events.size()> papi_counter{};
 #endif
 #ifdef MQ_COUNT_STATS
-    std::atomic<long long> num_locking_failed{0};
-    std::atomic<long long> num_resets{0};
-    std::atomic<long long> use_counts{0};
+    multiqueue::Counters stat_counters;
 #endif
-    std::atomic_bool success{true};
-
-    void update_work_time(std::pair<timepoint_type, timepoint_type> const& work_time) {
-        auto old_start = start_time.load(std::memory_order_relaxed);
-        while (work_time.first < old_start &&
-               !start_time.compare_exchange_weak(old_start, work_time.first, std::memory_order_relaxed)) {
-        }
-        auto old_end = start_time.load(std::memory_order_relaxed);
-        while (work_time.second > old_end &&
-               !end_time.compare_exchange_weak(old_end, work_time.second, std::memory_order_relaxed)) {
-        }
-    }
+#ifdef QUALITY
+    operation_log::OperationLog log;
+#endif
 };
 
-template <typename RNG>
-void generate_workload(Settings const& settings, std::vector<key_type>& keys, int id, RNG& rng) {
-    auto start_index = static_cast<std::size_t>(id) * settings.elements_per_thread;
-    switch (settings.element_distribution) {
-        case Settings::ElementDistribution::Uniform: {
-            auto key_dist = std::uniform_int_distribution<key_type>(1, settings.max_key);
-            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = key_dist(rng);
-            }
-        } break;
-        case Settings::ElementDistribution::Ascending: {
-            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = static_cast<key_type>((i * settings.max_key) / keys.size() + 1);
-            }
-        } break;
-        case Settings::ElementDistribution::Descending: {
-            for (std::size_t i = start_index; i < start_index + settings.elements_per_thread; ++i) {
-                keys[i] = static_cast<key_type>(((keys.size() - i - 1) * settings.max_key) / keys.size() + 1);
-            }
-        } break;
+void print_result(std::vector<Result> const& results) {
+    auto start_time = std::min_element(results.begin(), results.end(), [](auto const& lhs, auto const& rhs) {
+                          return lhs.start_time < rhs.start_time;
+                      })->start_time;
+    auto end_time = std::max_element(results.begin(), results.end(), [](auto const& lhs, auto const& rhs) {
+                        return lhs.end_time < rhs.end_time;
+                    })->end_time;
+    std::cout << "Work time (s): " << std::setprecision(3)
+              << std::chrono::duration<double>(end_time - start_time).count() << '\n';
+    /* #ifdef WITH_PAPI */
+    /*     std::cout << "L1d cache misses: " << result.l1d_cache_misses << '\n'; */
+    /*     std::cout << "L2 cache misses: " << result.l2_cache_misses << '\n'; */
+    /* #endif */
+    /*     std::cout << result.success ? "Benchmark successful" : "Benchmark failed" << '\n'; */
+}
+
+/* void write_csv(Settings const& settings, Result const& result) { */
+/*     std::ofstream out(settings.result_file); */
+/*     if (!out) { */
+/*         throw std::runtime_error("Failed to open file: " + file.string()); */
+/*     } */
+/*     out << "threads,prefill,elements,work-mode,push-threads,key-distribution,max-key,seed,work-time," */
+/*            "failed-pops,l1d-cache-misses,l2-cache-misses,locked-push-pq,empty_pop_pqs,locked_pop_pq,stale_pop_" */
+/*            "pq"; */
+/*     out << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.elements_per_thread << ','
+ */
+/*         << settings.work_mode_str() << ',' << settings.num_push_threads << ',' << settings.key_distribution_str() <<
+ * ',' */
+/*         << static_cast<unsigned long>(settings.max_key) << ',' << settings.seed << ',' << std::fixed */
+/*         << std::setprecision(3) */
+/*         << std::chrono::duration<double>(result.work_time.second - result.work_time.first).count() << ',' */
+/*         << result.num_failed_pops; */
+/* #ifdef WITH_PAPI */
+/*     if (settings.enable_performance_counter) { */
+/*         out << ',' << result.l1d_cache_misses << ',' << result.l2_cache_misses; */
+/*     } else { */
+/*         out << ",-1,-1"; */
+/*     } */
+/* #else */
+/*     out << ",-1,-1"; */
+/* #endif */
+/* #ifdef MQ_COUNT_STATS */
+/*     out << ',' << result.counters.locked_push_pq << ',' << result.counters.empty_pop_pqs << ',' */
+/*         << result.counters.locked_pop_pq << ',' << result.counters.stale_pop_pq; */
+/* #else */
+/*     out << ",-1,-1,-1,-1"; */
+/* #endif */
+/*     out << ',' << result.success << std::endl; */
+/* } */
+
+struct ThreadData {
+    thread_coordination::Context ctx;
+    handle_type handle;
+    std::vector<key_type> prefill;
+    Result result{};
+};
+
+void generate_keys(Settings const& settings, ThreadData& thread_data, std::vector<key_type>& keys) {
+    auto id = thread_data.ctx.get_id();
+    std::seed_seq seed{settings.seed, id};
+    std::default_random_engine rng(seed);
+
+    auto first_key = keys.begin() + id * static_cast<std::ptrdiff_t>(settings.elements_per_thread);
+    auto last_key = first_key + static_cast<std::ptrdiff_t>(settings.elements_per_thread);
+    auto key_dist = std::uniform_int_distribution<key_type>(0, settings.max_key);
+    thread_data.ctx.execute_synchronized(
+        [&key_dist, &rng](auto first, auto last) {
+            std::generate(first, last, [&key_dist, &rng]() { return key_dist(rng); });
+        },
+        first_key, last_key);
+
+    if (id == 0) {
+        if (settings.key_distribution == KeyDistribution::Ascending) {
+            std::sort(keys.begin(), keys.end());
+        } else if (settings.key_distribution == KeyDistribution::Descending) {
+            std::sort(keys.begin(), keys.end(), std::greater<>());
+        }
     }
+
+    thread_data.prefill.resize(settings.prefill_per_thread);
+    std::generate(std::begin(thread_data.prefill), std::end(thread_data.prefill),
+                  [&key_dist, &rng]() { return key_dist(rng); });
 }
 
-void execute_mixed(thread_coordination::Context const& ctx, handle_type& handle, std::vector<key_type> const& keys,
-                   SharedData& shared_data) {
-    long long num_failed_pops = 0;
+void push(ThreadData& thread_data, key_type key) {
 #ifdef QUALITY
-    auto& push_log = shared_data.push_log[static_cast<std::size_t>(ctx.get_id())];
-    push_log.reserve(push_log.size() + keys.size());
-    auto& pop_log = shared_data.pop_log[static_cast<std::size_t>(ctx.get_id())];
-    pop_log.reserve(keys.size());
-#endif
-    auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
-        for (auto i = start_index; i < start_index + count; ++i) {
-#ifdef QUALITY
-            auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
-            handle.push({keys[i], v});
-            auto tick = quality::clock_type::now();
-            push_log.push_back({tick, keys[i]});
+    auto value = operation_log::pack(thread_data.ctx.get_id(), thread_data.result.log.pushes.size());
 #else
-                handle.push({keys[i], keys[i]});
+    auto value = key;
 #endif
-            PriorityQueue::value_type retval;
-            while (!handle.try_pop(retval)) {
-                ++num_failed_pops;
+    thread_data.handle.push({key, value});
+#ifdef QUALITY
+    auto tick = get_tick();
+    thread_data.result.log.pushes.push_back({tick, key});
+#endif
+}
+
+bool try_pop(ThreadData& thread_data, pq_type::value_type& retval) {
+#ifdef QUALITY
+    auto tick = get_tick();
+#endif
+    if (!thread_data.handle.try_pop(retval)) {
+        ++thread_data.result.num_failed_pops;
+        return false;
+    }
+#ifdef QUALITY
+    thread_data.result.log.pops.push_back({tick, retval.first, retval.second});
+#endif
+    return true;
+}
+
+void prefill(ThreadData& thread_data) {
+    if (thread_data.prefill.empty()) {
+        return;
+    }
+
+#ifdef QUALITY
+    thread_data.result.log.pushes.reserve(thread_data.prefill.size());
+#endif
+
+    thread_data.ctx.execute_synchronized([&thread_data]() {
+        for (auto key : thread_data.prefill) {
+            push(thread_data, key);
+        }
+    });
+}
+
+void execute_mixed(ThreadData& thread_data, std::vector<key_type> const& keys) {
+#ifdef QUALITY
+    thread_data.result.log.pushes.reserve(thread_data.result.log.pushes.size() + keys.size());
+    thread_data.result.log.pops.reserve(keys.size());
+#endif
+    auto [t_start, t_end] = thread_data.ctx.execute_synchronized_blockwise(keys.size(), [&](auto start, auto count) {
+        for (auto i = start; i < start + count; ++i) {
+            push(thread_data, keys[i]);
+            pq_type::value_type retval;
+            while (!try_pop(thread_data, retval)) {
             }
-#ifdef QUALITY
-            tick = quality::clock_type::now();
-            pop_log.emplace_back(tick, retval.second);
-#endif
         }
+        thread_data.result.num_pops += count;
+        thread_data.result.num_pushes += count;
     });
-    shared_data.num_failed_pops += num_failed_pops;
-    shared_data.update_work_time(work_time);
+    thread_data.result.start_time = t_start;
+    thread_data.result.end_time = t_end;
 }
 
-void execute_split_push(thread_coordination::Context const& ctx, handle_type& handle, std::vector<key_type> const& keys,
-                        SharedData& shared_data) {
+void execute_split_push(ThreadData& thread_data, std::vector<key_type> const& keys) {
 #ifdef QUALITY
-    auto& push_log = shared_data.push_log[static_cast<std::size_t>(ctx.get_id())];
-    push_log.reserve(push_log.size() + keys.size());
+    thread_data.result.log.pushes.reserve(thread_data.result.log.pushes.size() + keys.size());
 #endif
-    auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
-        for (auto i = start_index; i < start_index + count; ++i) {
-#ifdef QUALITY
-            auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
-            handle.push({keys[i], v});
-            auto tick = quality::clock_type::now();
-            push_log.push_back({tick, keys[i]});
-#else
-                handle.push({keys[i], keys[i]});
-#endif
+    auto [t_start, t_end] = thread_data.ctx.execute_synchronized_blockwise(keys.size(), [&](auto start, auto count) {
+        for (auto i = start; i < start + count; ++i) {
+            push(thread_data, keys[i]);
         }
+        thread_data.result.num_pushes += count;
     });
-    shared_data.update_work_time(work_time);
+    thread_data.result.start_time = t_start;
+    thread_data.result.end_time = t_end;
 }
 
-void execute_split_pop(thread_coordination::Context const& ctx, handle_type& handle, SharedData& shared_data,
-                       std::size_t num_elements) {
-    long long num_failed_pops = 0;
+void execute_split_pop(ThreadData& thread_data, std::atomic_llong& pop_count) {
 #ifdef QUALITY
-    auto& pop_log = shared_data.pop_log[static_cast<std::size_t>(ctx.get_id())];
-    pop_log.reserve(num_elements);
+    thread_data.result.log.pops.reserve(pop_count.load(std::memory_order_relaxed));
 #endif
-    auto work_time = ctx.execute_synchronized([&, num_elements]() {
+    auto [t_start, t_end] = thread_data.ctx.execute_synchronized([&thread_data, &pop_count]() {
         do {
             long long num_pops = 0;
-            PriorityQueue::value_type retval;
-            while (handle.try_pop(retval)) {
-#ifdef QUALITY
-                auto tick = quality::clock_type::now();
-                pop_log.emplace_back(tick, static_cast<std::uint32_t>(retval.second));
-#endif
+            pq_type::value_type retval;
+            while (try_pop(thread_data, retval)) {
                 ++num_pops;
             }
-            ++num_failed_pops;
+            ++thread_data.result.num_failed_pops;
             if (num_pops == 0) {
-                if (shared_data.num_pops.load(std::memory_order_relaxed) >= static_cast<long long>(num_elements)) {
+                if (pop_count.load(std::memory_order_relaxed) <= 0) {
                     break;
                 }
             } else {
-                if (shared_data.num_pops.fetch_add(num_pops, std::memory_order_relaxed) + num_pops >=
-                    static_cast<long long>(num_elements)) {
+                thread_data.result.num_pops += num_pops;
+                if (pop_count.fetch_sub(num_pops, std::memory_order_relaxed) - num_pops <= 0) {
                     break;
                 }
             }
         } while (true);
     });
-    assert(shared_data.num_pops.load(std::memory_order_relaxed) == static_cast<long long>(num_elements));
-    shared_data.update_work_time(work_time);
-    shared_data.num_failed_pops += num_failed_pops;
+    thread_data.result.start_time = t_start;
+    thread_data.result.end_time = t_end;
 }
 
-void execute_increment(thread_coordination::Context const& ctx, handle_type& handle, std::vector<key_type> const& keys,
-                       SharedData& shared_data) {
-    long long num_failed_pops = 0;
+void execute_increment(ThreadData& thread_data, std::vector<key_type> const& keys) {
 #ifdef QUALITY
-    auto& push_log = shared_data.push_log[static_cast<std::size_t>(ctx.get_id())];
-    push_log.reserve(push_log.size() + keys.size());
-    auto& pop_log = shared_data.pop_log[static_cast<std::size_t>(ctx.get_id())];
-    pop_log.reserve(keys.size());
+    thread_data.result.log.pushes.reserve(thread_data.result.log.pushes.size() + keys.size());
+    thread_data.result.log.pops.reserve(keys.size());
 #endif
-    auto work_time = ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
-        for (auto i = start_index; i < start_index + count; ++i) {
-            PriorityQueue::value_type retval;
-            while (!handle.try_pop(retval)) {
-                ++num_failed_pops;
+    auto [t_start, t_end] =
+        thread_data.ctx.execute_synchronized_blockwise(keys.size(), [&](auto start_index, auto count) {
+            for (auto i = start_index; i < start_index + count; ++i) {
+                pq_type::value_type retval;
+                while (!try_pop(thread_data, retval)) {
+                }
+                push(thread_data, retval.first + keys[i]);
             }
-#ifdef QUALITY
-            auto tick = quality::clock_type::now();
-            pop_log.emplace_back(tick, retval.second);
-            auto v = quality::packed_value::pack(ctx.get_id(), push_log.size());
-            handle.push({retval.first + keys[i], v});
-            tick = quality::clock_type::now();
-            push_log.push_back({tick, retval.first + keys[i]});
-#else
-            handle.push({retval.first + keys[i], keys[i]});
-#endif
-        }
-    });
-    shared_data.num_failed_pops += num_failed_pops;
-    shared_data.update_work_time(work_time);
-}
-
-void benchmark_thread(thread_coordination::Context ctx, Settings const& settings, PriorityQueue& pq,
-                      std::vector<key_type>& keys, SharedData& shared_data) {
-    std::seed_seq seed{settings.seed, ctx.get_id()};
-    std::default_random_engine rng(seed);
-
-    if (ctx.get_id() == 0) {
-        std::clog << "Generating keys..." << std::flush;
-    }
-    ctx.execute_synchronized([&, id = ctx.get_id()]() { generate_workload(settings, keys, id, rng); });
-
-    if (ctx.get_id() == 0) {
-        std::clog << "done\nPrefilling..." << std::flush;
-    }
-
-#ifdef QUALITY
-    shared_data.push_log[static_cast<std::size_t>(ctx.get_id())].reserve(settings.prefill_per_thread);
-#endif
-
-    handle_type handle = pq.get_handle(ctx.get_id());
-
-    if (settings.prefill_per_thread > 0) {
-#ifdef QUALITY
-        auto& push_log = shared_data.push_log[static_cast<std::size_t>(ctx.get_id())];
-#endif
-        auto key_dist = std::uniform_int_distribution<key_type>(1, settings.max_key);
-        ctx.execute_synchronized([&, n = settings.prefill_per_thread]() {
-            for (std::size_t i = 0; i < n; ++i) {
-                auto key = key_dist(rng);
-#ifdef QUALITY
-                auto v = quality::packed_value::pack(ctx.get_id(), i);
-                handle.push({key, v});
-                push_log.push_back({{}, key});
-#else
-                handle.push({key, key});
-#endif
-            }
+            thread_data.result.num_pops += count;
+            thread_data.result.num_pushes += count;
         });
-    }
+    thread_data.result.start_time = t_start;
+    thread_data.result.end_time = t_end;
+}
 
-#ifdef MQ_COUNT_STATS
-    handle.stats.reset();
-#endif
-
-    if (ctx.get_id() == 0) {
-        std::clog << "done\nRunning benchmark..." << std::flush;
-    }
-
+void execute_benchmark(Settings const& settings, ThreadData& thread_data, std::vector<key_type> const& keys) {
 #ifdef WITH_PAPI
-    bool papi_started = false;
     int event_set = PAPI_NULL;
+    bool papi_started = false;
     if (settings.enable_performance_counter) {
-        papi_started = start_performance_counter(event_set);
-        if (!papi_started) {
-            ctx.write(std::cerr) << "Failed to start counters\n";
-            shared_data.success = false;
+        try {
+            start_papi(event_set);
+            papi_started = true;
+        } catch (std::exception const& e) {
+            thread_data.ctx.write(std::cerr) << "Error: " << e.what() << '\n';
+            thread_data.result.papi_counter.fill(-1);
         }
     }
 #endif
 
     switch (settings.work_mode) {
-        case Settings::WorkMode::Mixed:
-            execute_mixed(ctx, handle, keys, shared_data);
+        case WorkMode::Mixed:
+            execute_mixed(thread_data, keys);
             break;
-        case Settings::WorkMode::Split:
-            if (ctx.get_id() < settings.num_push_threads) {
-                execute_split_push(ctx, handle, keys, shared_data);
+        case WorkMode::Split:
+            if (thread_data.ctx.get_id() < settings.num_push_threads) {
+                execute_split_push(thread_data, keys);
             } else {
-                execute_split_pop(ctx, handle, shared_data,
-                                  (settings.prefill_per_thread + settings.elements_per_thread) *
-                                      static_cast<std::size_t>(settings.num_threads));
+                static std::atomic_llong pop_count =
+                    static_cast<long long>(settings.prefill_per_thread + settings.elements_per_thread) *
+                    settings.num_threads;
+                execute_split_pop(thread_data, pop_count);
             }
             break;
-        case Settings::WorkMode::Increment:
-            execute_increment(ctx, handle, keys, shared_data);
+        case WorkMode::Increment:
+            execute_increment(thread_data, keys);
             break;
     }
 
 #ifdef WITH_PAPI
-    if (papi_started) {
-        std::array<long long, 2> counter{};
-        if (int ret = PAPI_stop(event_set, counter.data()); ret != PAPI_OK) {
-            ctx.write(std::cerr) << "Failed to stop counters\n";
-            shared_data.success = false;
-        } else {
-            shared_data.l1d_cache_misses += counter[0];
-            shared_data.l2_cache_misses += counter[1];
+    if (settings.enable_performance_counter && papi_started) {
+        if (int ret = PAPI_stop(event_set, thread_data.result.papi_counter.data()); ret != PAPI_OK) {
+            thread_data.ctx.write(std::cerr) << "Error: Failed to stop performance counters\n";
+            thread_data.result.papi_counter.fill(-1);
         }
     }
 #endif
-
 #ifdef MQ_COUNT_STATS
-    shared_data.num_locking_failed += handle.stats.num_locking_failed;
-    shared_data.num_resets += handle.stats.num_resets;
-    shared_data.use_counts += handle.stats.use_counts;
+    thread_data.result.counters = thread_data.handle.get_counters();
 #endif
+}
 
-    if (ctx.get_id() == 0) {
+void benchmark_thread(Settings const& settings, ThreadData& thread_data, std::vector<key_type>& keys) {
+    if (thread_data.ctx.get_id() == 0) {
+        std::clog << "Generating keys..." << std::flush;
+    }
+    generate_keys(settings, thread_data, keys);
+    if (thread_data.ctx.get_id() == 0) {
+        std::clog << "done\nPrefilling..." << std::flush;
+    }
+    prefill(thread_data);
+#ifdef MQ_COUNT_STATS
+    thread_data.handle.reset_counters();
+#endif
+    if (thread_data.ctx.get_id() == 0) {
+        std::clog << "done\nRunning benchmark..." << std::flush;
+    }
+    execute_benchmark(settings, thread_data, keys);
+    if (thread_data.ctx.get_id() == 0) {
         std::clog << "done" << std::endl;
     }
 }
 
-void print_settings(Settings const& settings, PriorityQueueConfig const& pq_config) {
-    std::clog << "Threads: " << settings.num_threads << '\n'
-              << "Prefill per thread: " << settings.prefill_per_thread << '\n'
-              << "Elements per thread: " << settings.elements_per_thread << '\n'
-              << "Operation mode: " << settings.work_mode_str();
-    if (settings.work_mode == Settings::WorkMode::Split) {
-        std::clog << " (" << settings.num_push_threads << " push)";
-    }
-    std::clog << '\n';
-    std::clog << "Element distribution: " << settings.element_distribution_str() << '\n'
-              << "Max key: " << static_cast<unsigned long>(settings.max_key) << '\n'
-              << "Seed: " << settings.seed << '\n';
-    std::clog << "Priority queue configuration: ";
-    print_pq_config(pq_config);
-    std::clog << '\n' << '\n';
-}
-
-void print_shared_data(Settings const& settings, SharedData const& shared_data) {
-    std::clog << "Work time (s): " << std::setprecision(3)
-              << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
-              << '\n';
-    std::clog << "Failed pops: " << shared_data.num_failed_pops << '\n';
-#ifdef WITH_PAPI
-    if (settings.enable_performance_counter) {
-        std::clog << "L1d cache misses: " << shared_data.l1d_cache_misses << '\n';
-        std::clog << "L2 cache misses: " << shared_data.l2_cache_misses << '\n';
-    }
-#endif
-#ifdef MQ_COUNT_STATS
-    std::clog << "Failed locks per operation: "
-              << static_cast<double>(shared_data.num_locking_failed) /
-            static_cast<double>(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread)
-              << '\n';
-    std::clog << "Average queue use count: "
-              << static_cast<double>(shared_data.use_counts) / static_cast<double>(shared_data.num_resets) << '\n';
-#endif
-
-    std::cout << "threads,prefill,elements,work-mode,push-threads,element-distribution,max-key,seed,work-time,"
-                 "failed-pops,l1d-cache-misses,l2-cache-misses,num-resets,use-counts,success\n";
-    std::cout << settings.num_threads << ',' << settings.prefill_per_thread << ',' << settings.elements_per_thread
-              << ',' << settings.work_mode_str() << ',' << settings.num_push_threads << ','
-              << settings.element_distribution_str() << ',' << static_cast<unsigned long>(settings.max_key) << ','
-              << settings.seed << ',' << std::fixed << std::setprecision(3)
-              << std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count()
-              << ',' << shared_data.num_failed_pops;
-#ifdef WITH_PAPI
-    if (settings.enable_performance_counter) {
-        std::cout << ',' << shared_data.l1d_cache_misses << ',' << shared_data.l2_cache_misses;
-    } else {
-        std::cout << ",n/a,n/a";
-    }
-#else
-    std::cout << ",n/a,n/a";
-#endif
-#ifdef MQ_COUNT_STATS
-    std::cout << ',' << shared_data.num_resets << ',' << shared_data.use_counts;
-#else
-    std::cout << ",n/a,n/a";
-#endif
-    std::cout << ',' << shared_data.success.load() << std::endl;
-}
-
-bool run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config) {
-    auto pq = create_pq<PriorityQueue>(
-        settings.num_threads, settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads), pq_config);
-    std::vector<key_type> keys(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
-    SharedData shared_data;
-#ifdef QUALITY
-    shared_data.pop_log.resize(static_cast<std::size_t>(settings.num_threads));
-    shared_data.push_log.resize(static_cast<std::size_t>(settings.num_threads));
-#endif
-
-#ifdef WITH_PAPI
-    if (settings.enable_performance_counter) {
-        if (!init_papi()) {
-            shared_data.success = false;
-        }
-    }
-#endif
-
-    thread_coordination::TaskHandle task_handle(settings.num_threads, benchmark_thread, settings, std::ref(pq),
-                                                std::ref(keys), std::ref(shared_data));
+void run_benchmark(Settings const& settings, pq_type& pq) {
+    auto keys = std::vector<key_type>(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
+    std::vector<Result> results(settings.num_threads);
+    thread_coordination::TaskHandle task_handle(settings.num_threads, [&](auto ctx) {
+        ThreadData thread_data{ctx, pq.get_handle()};
+        benchmark_thread(settings, thread_data, keys);
+        results[ctx.get_id()] = std::move(thread_data.result);
+    });
     task_handle.wait();
 
 #ifdef QUALITY
+    std::vector<operation_log::OperationLog> logs;
+    for (auto const& result : results) {
+        logs.push_back(std::move(result.log));
+    }
+    auto sorted_logs = operation_log::sort_logs(logs);
     if (!settings.log_file.empty()) {
-        std::clog << "Writing logs..." << std::flush;
+        std::clog << "Writing operation logs..." << std::flush;
         try {
-            quality::write_logs(shared_data.push_log, shared_data.pop_log, settings.log_file);
+            operation_log::write_logs(sorted_logs, settings.log_file);
             std::clog << "done" << std::endl;
         } catch (std::exception const& e) {
-            std::clog << "failed: " << e.what() << std::endl;
-            shared_data.success = false;
+            std::clog << "failed\n" << std::endl;
+            std::cerr << "Error: " << e.what() << std::endl;
         }
     }
-    std::clog << "Checking logs..." << std::flush;
+    std::clog << "Computing quality histogram..." << std::flush;
     try {
-        quality::fix_logs(shared_data.push_log, shared_data.pop_log);
+        auto histogram = operation_log::to_histogram(sorted_logs);
+        std::clog << "done\nWriting quality histogram..." << std::flush;
+        std::ofstream out(settings.histogram_file);
+        if (!out) {
+            throw std::runtime_error("Failed to open file: " + settings.histogram_file.string());
+        }
+        out << sorted_logs.pops.size() << '\n';
+        for (std::size_t i = 0; i < std::max(histogram.ranks.size(), histogram.delays.size()); ++i) {
+            out << i << ' ' << (i < histogram.ranks.size() ? histogram.ranks[i] : 0) << ' '
+                << (i < histogram.delays.size() ? histogram.delays[i] : 0) << '\n';
+        }
         std::clog << "done" << std::endl;
     } catch (std::runtime_error const& e) {
-        std::clog << "failed: " << e.what() << std::endl;
-        shared_data.success = false;
+        std::clog << "failed" << std::endl;
+        std::cerr << "Error: " << e.what() << std::endl;
     }
-    if (shared_data.success && !settings.histogram_file.empty()) {
+#endif
+    print_result(results);
+
+    if (!settings.result_file.empty()) {
         try {
-            quality::write_histogram(shared_data.push_log, shared_data.pop_log, settings.histogram_file);
-            std::clog << "done" << std::endl;
-        } catch (std::runtime_error const& e) {
-            std::clog << "failed: " << e.what() << std::endl;
-            shared_data.success = false;
+            /* write_csv(results, settings.result_file); */
+        } catch (std::exception const& e) {
+            std::cerr << "Error: " << e.what() << std::endl;
         }
     }
-#endif
-
-    std::clog << '\n';
-    print_shared_data(settings, shared_data);
-    return shared_data.success.load();
-}
-
-void print_header() {
-    std::clog << "Built on " << __DATE__ << ' ' << __TIME__ << " with:\n";
-#ifdef NDEBUG
-    std::clog << "  Release build\n";
-#else
-    std::clog << "  Debug build\n";
-#endif
-#ifdef __clang__
-    std::clog << "  Clang " << __clang_version__ << '\n';
-#elif defined(__GNUC__)
-    std::clog << "  GCC " << __VERSION__ << '\n';
-#else
-    std::clog << "  Unknown compiler\n";
-#endif
-#ifdef WITH_PAPI
-    std::clog << "  PAPI " << PAPI_VER_CURRENT << '\n';
-#else
-    std::clog << "  PAPI disabled\n";
-#endif
-#ifdef MQ_COUNT_STATS
-    std::clog << "  MQ_COUNT_STATS enabled\n";
-#else
-    std::clog << "  MQ_COUNT_STATS disabled\n";
-#endif
-    std::clog << "  Priority queue: " << pq_name << '\n';
-#ifdef USE_UINT8
-    std::clog << "  Data type: uint8_t\n";
-#else
-    std::clog << "  Data type: unsigned long\n";
-#endif
 }
 
 int main(int argc, char* argv[]) {
@@ -638,10 +606,10 @@ int main(int argc, char* argv[]) {
     }
     std::clog << '\n' << '\n';
 
-    Settings settings{};
+    Settings settings;
     cxxopts::Options options(argv[0]);
-    // clang-format off
     options.add_options()
+        // clang-format off
         ("h,help", "Print this help")
         ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("p,prefill", "The prefill per thread", cxxopts::value<std::size_t>(settings.prefill_per_thread), "NUMBER")
@@ -651,60 +619,66 @@ int main(int argc, char* argv[]) {
         ("e,element-distribution", "Specify the element distribution ([u]niform, [a]scending, [d]escending)", cxxopts::value<char>(), "STRING")
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
         ("s,seed", "Specify the initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
+        ("x,result-file", "Path to write results to in CSV format", cxxopts::value<std::filesystem::path>(settings.result_file), "PATH")
 #ifdef QUALITY
         ("q,histogram-file", "Path to write the histogram to", cxxopts::value<std::filesystem::path>(settings.histogram_file), "PATH")
-        ("x,log-file", "Path to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
+        ("l,log-file", "Path to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
 #endif
 #ifdef WITH_PAPI
         ("r,pc", "Enable performance counter", cxxopts::value<>(settings.enable_performance_counter))
 #endif
+        // clang-format on
         ;
-    // clang-format on
-    add_pq_options(options);
+    pq_type::add_options(options);
 
-    PriorityQueueConfig pq_config;
-
-    {
-        cxxopts::ParseResult result;
-        try {
-            result = options.parse(argc, argv);
-        } catch (cxxopts::OptionParseException const& e) {
-            std::cerr << "Error parsing arguments: " << e.what() << '\n';
-            std::cerr << options.help() << std::endl;
-            return 1;
-        }
-        if (result.count("help") > 0) {
-            std::cerr << options.help() << std::endl;
-            return 0;
-        }
-        if (result.count("work-mode") > 0) {
-            auto work_mode = result["work-mode"].as<char>();
-            if (!settings.set_work_mode(work_mode)) {
-                std::cerr << "Invalid work mode: " << result["work-mode"].as<char>() << '\n';
-                std::cerr << options.help() << std::endl;
-                return 1;
-            }
-        }
-        if (result.count("element-distribution") > 0) {
-            auto element_distribution = result["element-distribution"].as<char>();
-            if (!settings.set_element_distribution(element_distribution)) {
-                std::cerr << "Invalid element distribution: " << result["element-distribution"].as<char>() << '\n';
-                std::cerr << options.help() << std::endl;
-                return 1;
-            }
-        }
-        pq_config = get_pq_options(result);
-    }
-
-    print_settings(settings, pq_config);
-
-    if (!settings.validate()) {
-        std::cerr << "Invalid settings\n";
+    cxxopts::ParseResult result;
+    try {
+        result = options.parse(argc, argv);
+    } catch (cxxopts::OptionParseException const& e) {
+        std::cerr << "Error parsing arguments: " << e.what() << '\n';
         std::cerr << options.help() << std::endl;
         return 1;
     }
+    if (result.count("help") > 0) {
+        std::cerr << options.help() << std::endl;
+        return 0;
+    }
+    if (result.count("work-mode") > 0) {
+        auto work_mode = result["work-mode"].as<char>();
+        if (!settings.set_work_mode(work_mode)) {
+            std::cerr << "Invalid work mode: " << result["work-mode"].as<char>() << '\n';
+            std::cerr << options.help() << std::endl;
+            return 1;
+        }
+    }
+    if (result.count("element-distribution") > 0) {
+        auto key_distribution = result["element-distribution"].as<char>();
+        if (!settings.set_key_distribution(key_distribution)) {
+            std::cerr << "Invalid element distribution: " << result["element-distribution"].as<char>() << '\n';
+            std::cerr << options.help() << std::endl;
+            return 1;
+        }
+    }
 
-    bool success = run_benchmark(settings, pq_config);
+    print_settings(settings);
 
-    return success ? 0 : 1;
+    if (!settings.validate()) {
+        return 1;
+    }
+
+#ifdef WITH_PAPI
+    if (settings.enable_performance_counter) {
+        try {
+            init_papi();
+        } catch (std::exception const& e) {
+            std::cerr << "Error: " << e.what() << '\n';
+            std::clog << "Performance counter disabled" << std::endl;
+            settings.enable_performance_counter = false;
+        }
+    }
+#endif
+
+    auto pq = pq_type(settings.num_threads,
+                      settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads), result);
+    run_benchmark(settings, pq);
 }

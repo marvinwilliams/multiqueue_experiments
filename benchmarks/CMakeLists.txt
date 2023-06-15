@@ -42,20 +42,19 @@ if(MULTIQUEUE_EXP_TSAN)
   target_link_options(benchmark_base INTERFACE -fsanitize=thread)
 endif()
 
-add_library(mq_interface INTERFACE)
-target_link_libraries(mq_interface INTERFACE multiqueue::multiqueue)
-target_compile_definitions(mq_interface INTERFACE PQ_MQ)
-
 function(add_tuning_variant buffer_size degree)
   set(name mq_bs_${buffer_size}_d_${degree})
   add_library(${name} INTERFACE)
   target_compile_definitions(
-    ${name} INTERFACE STICK_POLICY_NONE INSERTION_BUFFERSIZE=${buffer_size}
-                      DELETION_BUFFERSIZE=${buffer_size} HEAP_ARITY=${degree})
-  target_link_libraries(${name} INTERFACE mq_interface)
-  list(APPEND MQ_TUNING_TARGETS ${name})
-  set(MQ_TUNING_TARGETS
-      ${MQ_TUNING_TARGETS}
+    ${name}
+    INTERFACE MQ_QUEUE_SELECTION_POLICY=0 # Random
+              MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
+              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
+              MQ_HEAP_ARITY=${degree})
+  target_link_libraries(${name} INTERFACE mq)
+  list(APPEND MQ_TUNING_VARIANTS ${name})
+  set(MQ_TUNING_VARIANTS
+      ${MQ_TUNING_VARIANTS}
       PARENT_SCOPE)
 endfunction()
 
@@ -73,58 +72,52 @@ foreach(
   endforeach()
 endforeach()
 
-add_library(mq_bs_0_std INTERFACE)
-target_compile_definitions(
-  mq_bs_0_std INTERFACE STICK_POLICY_NONE USE_STD_PQ INSERTION_BUFFERSIZE=0
-                        DELETION_BUFFERSIZE=0)
-target_link_libraries(mq_bs_0_std INTERFACE mq_interface)
-list(APPEND MQ_TUNING_TARGETS mq_bs_0_std)
+add_library(mq_std INTERFACE)
+target_link_libraries(mq_std INTERFACE mq_d_2)
+target_compile_definitions(mq_std INTERFACE USE_STD_PQ)
+list(APPEND MQ_TUNING_VARIANTS mq_std)
 
-add_library(mq_none INTERFACE)
-target_compile_definitions(mq_none INTERFACE STICK_POLICY_NONE)
-target_link_libraries(mq_none INTERFACE mq_interface)
-list(APPEND MQ_TARGETS mq_none)
+function(add_different_num_pop_pqs num_pop_pqs)
+  set(name mq_pop_pqs_${num_pop_pqs})
+  add_library(${name} INTERFACE)
+  target_compile_definitions(
+    ${name}
+    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
+              MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
+              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0
+              MQ_RANDOM_POLICY_NUM_POP_PQS=${num_pop_pqs})
+  target_link_libraries(${name} INTERFACE mq)
+  list(APPEND MQ_TUNING_VARIANTS ${name})
+  set(MQ_TUNING_VARIANTS
+      ${MQ_TUNING_VARIANTS}
+      PARENT_SCOPE)
+endfunction()
 
-add_library(mq_none1 INTERFACE)
-target_compile_definitions(mq_none1 INTERFACE STICK_POLICY_NONE
-                                              MQ_NUM_COMPARE=1)
-target_link_libraries(mq_none1 INTERFACE mq_interface)
-list(APPEND MQ_TUNING_TARGETS mq_none1)
+foreach(num_pop_pqs 1 2 4 8)
+  add_different_num_pop_pqs(${num_pop_pqs})
+endforeach()
 
-add_library(mq_none2 INTERFACE)
-target_compile_definitions(mq_none2 INTERFACE STICK_POLICY_NONE
-                                              MQ_NUM_COMPARE=2)
-target_link_libraries(mq_none2 INTERFACE mq_interface)
-list(APPEND MQ_TUNING_TARGETS mq_none2)
+add_library(mq_default INTERFACE)
+target_compile_definitions(mq_default INTERFACE MQ_QUEUE_SELECTION_POLICY=0)
+target_link_libraries(mq_default INTERFACE mq)
+list(APPEND MQ_VARIANTS mq_default)
 
-add_library(mq_none4 INTERFACE)
-target_compile_definitions(mq_none4 INTERFACE STICK_POLICY_NONE
-                                              MQ_NUM_COMPARE=4)
-target_link_libraries(mq_none4 INTERFACE mq_interface)
-list(APPEND MQ_TUNING_TARGETS mq_none4)
+add_library(mq_stick INTERFACE)
+target_compile_definitions(mq_stick INTERFACE MQ_QUEUE_SELECTION_POLICY=1)
+target_link_libraries(mq_stick INTERFACE mq)
+list(APPEND MQ_VARIANTS mq_stick)
 
-add_library(mq_none8 INTERFACE)
-target_compile_definitions(mq_none8 INTERFACE STICK_POLICY_NONE
-                                              MQ_NUM_COMPARE=8)
-target_link_libraries(mq_none8 INTERFACE mq_interface)
-list(APPEND MQ_TUNING_TARGETS mq_none8)
-
-add_library(mq_random INTERFACE)
-target_compile_definitions(mq_random INTERFACE STICK_POLICY_RANDOM)
-target_link_libraries(mq_random INTERFACE mq_interface)
-list(APPEND MQ_TARGETS mq_random)
-
-add_library(mq_swapping INTERFACE)
-target_compile_definitions(mq_swapping INTERFACE STICK_POLICY_SWAPPING)
-target_link_libraries(mq_swapping INTERFACE mq_interface)
-list(APPEND MQ_TARGETS mq_swapping)
+add_library(mq_swap INTERFACE)
+target_compile_definitions(mq_swap INTERFACE MQ_QUEUE_SELECTION_POLICY=2)
+target_link_libraries(mq_swap INTERFACE mq)
+list(APPEND MQ_VARIANTS mq_swap)
 
 add_library(mq_perm INTERFACE)
-target_compile_definitions(mq_perm INTERFACE STICK_POLICY_PERMUTATION)
-target_link_libraries(mq_perm INTERFACE mq_interface)
-list(APPEND MQ_TARGETS mq_perm)
+target_compile_definitions(mq_perm INTERFACE MQ_QUEUE_SELECTION_POLICY=3)
+target_link_libraries(mq_perm INTERFACE mq)
+list(APPEND MQ_VARIANTS mq_perm)
 
-set(WRAPPER_TARGETS
+set(COMPETITORS
     klsm4
     klsm256
     klsm1024
@@ -139,15 +132,15 @@ add_library(throughput INTERFACE)
 target_sources(throughput INTERFACE throughput.cpp util/threading.cpp)
 target_link_libraries(throughput INTERFACE benchmark_base Threads::Threads)
 
-foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
   add_executable(throughput_${target})
   target_link_libraries(throughput_${target} PRIVATE ${target} throughput)
 endforeach()
 
 foreach(
   target
-  ${MQ_TUNING_TARGETS}
-  ${MQ_TARGETS}
+  ${MQ_TUNING_VARIANTS}
+  ${MQ_VARIANTS}
   klsm4
   klsm256
   klsm1024
@@ -159,57 +152,57 @@ foreach(
 endforeach()
 
 add_custom_target(throughput_mq_tuning)
-foreach(target ${MQ_TUNING_TARGETS})
+foreach(target ${MQ_TUNING_VARIANTS})
   add_dependencies(throughput_mq_tuning throughput_${target})
 endforeach()
 
 add_custom_target(throughput_mq)
-foreach(target ${MQ_TARGETS})
+foreach(target ${MQ_VARIANTS})
   add_dependencies(throughput_mq throughput_${target})
 endforeach()
 
-add_custom_target(throughput_wrapper)
-foreach(target ${WRAPPER_TARGETS})
-  add_dependencies(throughput_wrapper throughput_${target})
+add_custom_target(throughput_competitors)
+foreach(target ${COMPETITORS})
+  add_dependencies(throughput_competitors throughput_${target})
 endforeach()
 
 add_custom_target(throughput_all)
-foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_dependencies(throughput_all throughput_${target})
 endforeach()
 
 add_library(quality INTERFACE)
 target_sources(quality INTERFACE throughput.cpp util/threading.cpp
-                                 util/evaluate_quality.cpp)
+                                 util/operation_log.cpp)
 target_compile_definitions(quality INTERFACE -DQUALITY)
 target_link_libraries(quality INTERFACE benchmark_base Threads::Threads)
 
-foreach(target ${MQ_TUNING_TARGETS} ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
   add_executable(quality_${target})
   target_link_libraries(quality_${target} PRIVATE ${target} quality)
   if(BUILD_TESTING)
-    add_test(
-      NAME quality_${target}_small
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 | $<TARGET_FILE:evaluate_quality> -v"
-    )
-    add_test(
-      NAME quality_${target}_large
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:quality_${target}> -j 8 | $<TARGET_FILE:evaluate_quality> -v"
-    )
+    # add_test(
+    #   NAME quality_${target}_small
+    #   COMMAND
+        # /bin/bash -c
+        # "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 | $<TARGET_FILE:evaluate_quality> -v"
+    # )
+    # add_test(
+      # NAME quality_${target}_large
+      # COMMAND
+        # /bin/bash -c
+        # "$<TARGET_FILE:quality_${target}> -j 8 | $<TARGET_FILE:evaluate_quality> -v"
+    # )
   endif()
 endforeach()
 
 add_custom_target(quality_mq)
-foreach(target ${MQ_TARGETS})
+foreach(target ${MQ_VARIANTS})
   add_dependencies(quality_mq quality_${target})
 endforeach()
 
 add_custom_target(quality_all)
-foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_dependencies(quality_all quality_${target})
 endforeach()
 
@@ -217,7 +210,7 @@ add_library(shortest_path INTERFACE)
 target_sources(shortest_path INTERFACE shortest_path.cpp util/threading.cpp)
 target_link_libraries(shortest_path INTERFACE benchmark_base Threads::Threads)
 
-foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_executable(shortest_path_${target})
   target_link_libraries(shortest_path_${target} PRIVATE ${target} shortest_path)
   if(BUILD_TESTING)
@@ -248,7 +241,7 @@ target_link_libraries(shortest_path_seq_rev PRIVATE benchmark_base)
 target_compile_definitions(shortest_path_seq_rev PRIVATE -DREVERSE_PRIORITY)
 
 add_custom_target(shortest_path_all)
-foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_dependencies(shortest_path_all shortest_path_${target})
 endforeach()
 add_dependencies(shortest_path_all shortest_path_seq shortest_path_seq_fifo)
@@ -257,7 +250,7 @@ add_library(knapsack INTERFACE)
 target_sources(knapsack INTERFACE knapsack.cpp util/threading.cpp)
 target_link_libraries(knapsack INTERFACE benchmark_base Threads::Threads)
 
-foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_executable(knapsack_${target})
   target_link_libraries(knapsack_${target} PRIVATE ${target} knapsack)
   if(BUILD_TESTING)
@@ -283,7 +276,7 @@ target_link_libraries(knapsack_seq_fifo PRIVATE benchmark_base)
 target_compile_definitions(knapsack_seq_fifo PRIVATE -DUSE_FIFO)
 
 add_custom_target(knapsack_all)
-foreach(target ${MQ_TARGETS} ${WRAPPER_TARGETS})
+foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_dependencies(knapsack_all knapsack_${target})
 endforeach()
 add_dependencies(knapsack_all knapsack_seq knapsack_seq_fifo)

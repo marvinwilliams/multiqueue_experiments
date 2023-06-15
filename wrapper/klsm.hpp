@@ -4,6 +4,8 @@
 
 #include "k_lsm/k_lsm.h"
 
+#include "cxxopts.hpp"
+
 #include <algorithm>
 #include <cstdio>
 #include <limits>
@@ -15,15 +17,20 @@ namespace wrapper {
 
 // No known limitations
 
-template <typename KeyType, typename T, int Relaxation>
-class Klsm {
+template <typename KeyType, typename T, bool Min>
+class KLsm {
    public:
     using key_type = KeyType;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
 
    private:
-    using pq_type = kpq::k_lsm<key_type, mapped_type, Relaxation>;
+#ifdef KLSM_K
+    static constexpr auto relaxation = KLSM_K;
+#else
+    static constexpr auto relaxation = 256;
+#endif
+    using pq_type = kpq::k_lsm<key_type, mapped_type, relaxation>;
 
    public:
     class Handle {
@@ -34,10 +41,19 @@ class Klsm {
         }
 
         void push(value_type const& value) {
-            pq_.insert(value.first, value.second);
+            pq_.insert(Min ? value.first : std::numeric_limits<key_type>::max - value.first - 1, value.second);
         }
+
         bool try_pop(value_type& retval) {
-            return pq_.delete_min(retval.first, retval.second);
+            if (Min) {
+                return pq_.delete_min(retval.first, retval.second);
+            } else {
+                if (!pq_.delete_min(retval.first, retval.second)) {
+                    return false;
+                }
+                retval.first = std::numeric_limits<key_type>::max - retval.first - 1;
+                return true;
+            }
         }
     };
 
@@ -47,23 +63,21 @@ class Klsm {
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    Klsm(int num_threads, std::size_t initial_capacity);
+    static void add_options(cxxopts::Options& /*options*/) {
+    }
 
-    Handle get_handle(int id);
+    KLsm(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*options*/)
+        : pq_(new pq_type()) {
+    }
 
-    static std::ostream& describe(std::ostream& out) {
-        out << "klsm\n";
-        out << "Relaxation: " << Relaxation << '\n';
+    Handle get_handle() {
+        return Handle{*pq_.get()};
+    }
+
+    std::ostream& describe(std::ostream& out) {
+        out << "k-LSM (k: " << relaxation << ')';
         return out;
     }
 };
 
-template <typename KeyType, typename T, int Relaxation>
-Klsm<KeyType, T, Relaxation>::Klsm(int /*unused*/, std::size_t /*unused*/) : pq_(new pq_type()) {
-}
-
-template <typename KeyType, typename T, int Relaxation>
-typename Klsm<KeyType, T, Relaxation>::Handle Klsm<KeyType, T, Relaxation>::get_handle(int /*unused*/) {
-    return Handle{*pq_.get()};
-}
 }  // namespace wrapper

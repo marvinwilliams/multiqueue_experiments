@@ -1,8 +1,8 @@
 #pragma once
-#ifndef WRAPPER_SPRAYLIST_HPP_INCLUDED
-#define WRAPPER_SPRAYLIST_HPP_INCLUDED
 
 // Adapted from klsm
+
+#include "cxxopts.hpp"
 
 #include <cstdint>
 #include <limits>
@@ -15,7 +15,14 @@ using thread_data_t = struct thread_data;
 
 namespace wrapper {
 
+template <typename Key = unsigned long, typename T = unsigned long, bool Min = true>
 class Spraylist {
+    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
+                  "Only unsigned long as Key and T are supported");
+};
+
+template <bool Min>
+class Spraylist<unsigned long, unsigned long, Min> {
     struct sl_intset_deleter {
         void operator()(sl_intset_t*);
     };
@@ -38,8 +45,7 @@ class Spraylist {
 
     using handle_type = Handle;
 
-    static constexpr key_type min_valid_key = std::numeric_limits<key_type>::min();
-    // Use INT_MAX_32
+    // Uses INT_MAX_32
     static constexpr key_type max_valid_key = std::numeric_limits<std::uint32_t>::max() - 1UL;
     static_assert(std::numeric_limits<unsigned long>::max() == -1UL);
 
@@ -50,16 +56,17 @@ class Spraylist {
     int num_threads_;
 
    public:
-    explicit Spraylist(int num_threads, std::size_t initial_capacity);
+    static void add_options(cxxopts::Options& /*options*/) {
+    }
 
-    Handle get_handle(int id);
+    explicit Spraylist(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& options);
 
-    static std::ostream& describe(std::ostream& out) {
-        out << "spraylist\n";
+    Handle get_handle();
+
+    std::ostream& describe(std::ostream& out) {
+        out << "Spraylist";
         return out;
     }
 };
 
 }  // namespace wrapper
-
-#endif
