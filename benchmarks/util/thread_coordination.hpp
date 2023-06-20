@@ -17,7 +17,10 @@
 namespace thread_coordination {
 
 using clock_type = std::chrono::steady_clock;
-using timepoint_type = clock_type::time_point;
+struct time_result_type {
+clock_type::time_point start;
+clock_type::time_point end;
+};
 
 namespace detail {
 template <class CharT, class Traits>
@@ -42,8 +45,6 @@ class ScopedOutput {
 };
 
 struct SharedData {
-    using clock_type = std::chrono::steady_clock;
-
     int num_threads;
     utils::Barrier barrier;
     std::mutex write_mutex;
@@ -58,8 +59,6 @@ struct SharedData {
 class Context {
     template <typename Affinity>
     friend class TaskHandle;
-
-    using duration_type = detail::SharedData::clock_type::duration;
 
     detail::SharedData& shared_data_;
     int id_;
@@ -91,22 +90,21 @@ class Context {
     }
 
     template <typename Work, typename... Args>
-    std::pair<timepoint_type, timepoint_type> execute_synchronized(Work work, Args&&... args) const {
+    time_result_type execute_synchronized(Work work, Args&&... args) const {
         shared_data_.barrier.wait();
-        auto t1 = std::chrono::steady_clock::now();
+        auto t1 = clock_type::now();
         work(std::forward<Args>(args)...);
-        auto t2 = std::chrono::steady_clock::now();
+        auto t2 = clock_type::now();
         shared_data_.barrier.wait();
         return {t1, t2};
     }
 
     template <typename Integer, typename Work, typename... Args>
-    std::pair<timepoint_type, timepoint_type> execute_synchronized_blockwise(Integer n, Work work,
-                                                                             Args&&... args) const {
+    time_result_type execute_synchronized_blockwise(Integer n, Work work, Args&&... args) const {
         static constexpr auto block_size = static_cast<std::size_t>(1) << 12;
 
         shared_data_.barrier.wait();
-        auto t1 = std::chrono::steady_clock::now();
+        auto t1 = clock_type::now();
         while (true) {
             auto start_index =
                 static_cast<Integer>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
@@ -116,7 +114,7 @@ class Context {
             auto count = std::min(static_cast<Integer>(block_size), n - start_index);
             work(static_cast<Integer>(start_index), count, args...);  // no perfect forwarding here
         }
-        auto t2 = std::chrono::steady_clock::now();
+        auto t2 = clock_type::now();
         shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });
         return {t1, t2};
     }

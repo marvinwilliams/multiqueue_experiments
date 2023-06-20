@@ -174,24 +174,21 @@ endforeach()
 add_library(quality INTERFACE)
 target_sources(quality INTERFACE throughput.cpp util/threading.cpp
                                  util/operation_log.cpp)
-target_compile_definitions(quality INTERFACE -DQUALITY)
+target_compile_definitions(
+  quality INTERFACE -DQUALITY $<$<CONFIG:Debug>:-DREPLAY_TREE_DEBUG>)
 target_link_libraries(quality INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
   add_executable(quality_${target})
   target_link_libraries(quality_${target} PRIVATE ${target} quality)
   if(BUILD_TESTING)
-    # add_test(
-    #   NAME quality_${target}_small
-    #   COMMAND
-        # /bin/bash -c
-        # "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 | $<TARGET_FILE:evaluate_quality> -v"
-    # )
-    # add_test(
-      # NAME quality_${target}_large
-      # COMMAND
-        # /bin/bash -c
-        # "$<TARGET_FILE:quality_${target}> -j 8 | $<TARGET_FILE:evaluate_quality> -v"
+    # add_test( NAME quality_${target}_small COMMAND
+    # /bin/bash -c "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 |
+    # $<TARGET_FILE:evaluate_quality> -v"
+    # ) add_test(
+    # NAME quality_${target}_large COMMAND
+    # /bin/bash -c "$<TARGET_FILE:quality_${target}> -j 8 |
+    # $<TARGET_FILE:evaluate_quality> -v"
     # )
   endif()
 endforeach()

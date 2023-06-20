@@ -41,7 +41,7 @@ class KLsm {
         }
 
         void push(value_type const& value) {
-            pq_.insert(Min ? value.first : std::numeric_limits<key_type>::max - value.first - 1, value.second);
+            pq_.insert(Min ? value.first : std::numeric_limits<key_type>::max() - value.first - 1, value.second);
         }
 
         bool try_pop(value_type& retval) {
@@ -51,7 +51,7 @@ class KLsm {
                 if (!pq_.delete_min(retval.first, retval.second)) {
                     return false;
                 }
-                retval.first = std::numeric_limits<key_type>::max - retval.first - 1;
+                retval.first = std::numeric_limits<key_type>::max() - retval.first - 1;
                 return true;
             }
         }

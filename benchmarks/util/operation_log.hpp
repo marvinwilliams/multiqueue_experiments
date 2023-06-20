@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
+#include <ostream>
 #include <vector>
 
 namespace operation_log {
@@ -31,12 +32,17 @@ constexpr unsigned long pack(int thread_id, std::size_t elem_id) noexcept {
 struct Push {
     std::uint64_t tick;
     unsigned long key;
+    friend bool operator<(Push const& a, Push const& b) noexcept {
+        return a.tick < b.tick;
+    }
 };
 
 struct Pop {
     std::uint64_t tick;
-    unsigned long key;
     unsigned long data;
+    friend bool operator<(Pop const& a, Pop const& b) noexcept {
+        return a.tick < b.tick;
+    }
 };
 
 struct Element {
@@ -54,18 +60,14 @@ struct OperationLog {
     std::vector<Pop> pops;
 };
 
-struct SortedLogs {
-    std::vector<Operation> pushes;
-    std::vector<Pop> pops;
-};
-
 struct Histogram {
     std::vector<std::size_t> ranks;
     std::vector<std::size_t> delays;
 };
 
-void write_logs(SortedLogs const& logs, std::filesystem::path const& file);
-SortedLogs sort_logs(std::vector<OperationLog> const& logs);
-Histogram to_histogram(SortedLogs const& logs);
+void verify_logs(std::vector<OperationLog> const& logs);
+void write_logs(std::vector<OperationLog> const& log, std::ostream& out);
+Histogram to_histogram(std::vector<OperationLog> const& logs);
+void write_histogram(Histogram const& histogram, std::ostream& out);
 
 }  // namespace operation_log

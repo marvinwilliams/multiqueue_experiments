@@ -14,17 +14,18 @@
 #include <stdexcept>
 #include <vector>
 
-operation_log::SortedLogs operation_log::sort_logs(std::vector<OperationLog> const& logs) {
-    auto num_pops = std::accumulate(logs.begin(), logs.end(), 0UL,
-                                    [](std::size_t sum, auto const& l) { return sum + l.pops.size(); });
-    auto num_pushes = std::accumulate(logs.begin(), logs.end(), 0UL,
-                                      [](std::size_t sum, auto const& l) { return sum + l.pushes.size(); });
-    SortedLogs sorted_logs;
-    sorted_logs.pushes.reserve(num_pushes);
-    sorted_logs.pops.reserve(num_pops);
-
-    std::vector<std::vector<bool>> popped;
-    popped.reserve(logs.size());
+// Note that a push might be after the pop because the tick is recorded
+// after the push is performed.
+void operation_log::verify_logs(std::vector<operation_log::OperationLog> const& logs) {
+    for (auto const& l : logs) {
+        if (!std::is_sorted(l.pushes.begin(), l.pushes.end())) {
+            throw std::runtime_error{"Inconsistent push order"};
+        }
+        if (!std::is_sorted(l.pops.begin(), l.pops.end())) {
+            throw std::runtime_error{"Inconsistent pop order"};
+        }
+    }
+    auto popped = std::vector<std::vector<bool>>();
     for (auto const& l : logs) {
         popped.emplace_back(l.pushes.size(), false);
     }
@@ -39,97 +40,110 @@ operation_log::SortedLogs operation_log::sort_logs(std::vector<OperationLog> con
             if (elem_id >= thread_pushes.size()) {
                 throw std::runtime_error{"Popped element has invalid element id: " + std::to_string(elem_id)};
             }
-            if (thread_pushes[elem_id].key != op.key) {
-                throw std::runtime_error{"Popped element has wrong key"};
-            }
-            if (op.tick < thread_pushes[elem_id].tick) {
-                op.tick = thread_pushes[elem_id].tick;
-            }
-
             if (popped[static_cast<std::size_t>(thread_id)][elem_id]) {
                 throw std::runtime_error{"Popped the same element twice"};
             }
             popped[static_cast<std::size_t>(thread_id)][elem_id] = true;
-            sorted_logs.pops.push_back(op);
         }
     }
-    std::sort(sorted_logs.pops.begin(), sorted_logs.pops.end(),
-              [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-    for (int i = 0; i < static_cast<int>(logs.size()); ++i) {
-        for (std::size_t id = 0; id < logs[static_cast<std::size_t>(i)].pushes.size(); ++id) {
-            auto const& e = logs[static_cast<std::size_t>(i)].pushes[id];
-            sorted_logs.pushes.push_back({e.tick, {e.key, pack(i, id)}});
-        }
-    }
-    std::sort(sorted_logs.pushes.begin(), sorted_logs.pushes.end(),
-              [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-    return sorted_logs;
 }
 
-operation_log::Histogram operation_log::to_histogram(SortedLogs const& logs) {
+void operation_log::write_logs(std::vector<OperationLog> const& logs, std::ostream& out) {
+    out << logs.size() << '\n';
+    for (auto const& l : logs) {
+        out << l.pushes.size() << ' ' << l.pops.size() << '\n';
+    }
+    for (std::size_t i = 0; i < logs.size(); ++i) {
+        for (auto const& push : logs[i].pushes) {
+            out << push.tick << " i " << i << ' ' << push.key << '\n';
+        }
+    }
+    for (std::size_t i = 0; i < logs.size(); ++i) {
+        for (auto const& pops : logs[i].pops) {
+            out << pops.tick << " d " << i << ' ' << extract_thread_id(pops.data) << ' ' << extract_elem_id(pops.data)
+                << '\n';
+        }
+    }
+}
+
+operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> const& logs) {
+    auto num_pops = std::accumulate(logs.begin(), logs.end(), 0UL,
+                                    [](std::size_t sum, auto const& l) { return sum + l.pops.size(); });
+    auto num_pushes = std::accumulate(logs.begin(), logs.end(), 0UL,
+                                      [](std::size_t sum, auto const& l) { return sum + l.pushes.size(); });
+
     struct ExtractKey {
-        static unsigned long get(Element const& e) {
+        static auto get(Element const& e) {
             return e.key;
         }
     };
 
-    std::vector<std::size_t> ranks;
-    ranks.reserve(logs.pops.size());
-    std::size_t max_rank = 0;
-    std::vector<std::size_t> delays;
-    delays.reserve(logs.pops.size());
-    std::size_t max_delay = 0;
+    Histogram histogram{};
+    histogram.ranks.reserve(num_pushes);
+    histogram.delays.reserve(num_pops);
 
     ReplayTree<unsigned long, Element, ExtractKey> replay_tree{};
-    auto it = logs.pushes.begin();
-    for (auto const& pop : logs.pops) {
+    std::vector<std::size_t> push_indices(logs.size(), 0);
+    std::vector<std::size_t> pop_indices(logs.size(), 0);
+    auto next_pop = [&logs, &pop_indices]() {
+        auto min_tick = std::numeric_limits<std::size_t>::max();
+        auto min_thread = std::numeric_limits<std::size_t>::max();
+        for (std::size_t i = 0; i < logs.size(); ++i) {
+            if (pop_indices[i] < logs[i].pops.size() && logs[i].pops[pop_indices[i]].tick < min_tick) {
+                min_tick = logs[i].pops[pop_indices[i]].tick;
+                min_thread = i;
+            }
+        }
+        return std::make_pair(min_tick, min_thread);
+    };
+    for (std::size_t i = 0; i < num_pops; ++i) {
+        auto [tick, thread] = next_pop();
+        assert(thread != std::numeric_limits<std::size_t>::max());
+        auto const& pop = logs[thread].pops[pop_indices[thread]];
+        auto push_thread = extract_thread_id(pop.data);
+        auto elem_id = extract_elem_id(pop.data);
+        auto key = logs[static_cast<std::size_t>(push_thread)].pushes[elem_id].key;
         // Inserting everything before next deletion
-        while (it != logs.pushes.end() && it->tick < pop.tick) {
-            replay_tree.insert({it->element.key, it->element.data});
-            ++it;
+        for (std::size_t j = 0; j < logs.size(); ++j) {
+            auto const& p = logs[j].pushes;
+            while (push_indices[j] < logs[j].pushes.size() && p[push_indices[j]].tick <= tick) {
+                replay_tree.insert({p[push_indices[j]].key, pack(static_cast<int>(j), push_indices[j])});
+                std::cout << "Inserting " << p[push_indices[j]].key << " from " << j << '\n';
+                ++push_indices[j];
+            }
         }
-        auto [start, end] = replay_tree.equal_range(pop.key);
-        start = std::find_if(start, end, [&pop](auto const& e) { return e.data == pop.data; });
-        assert(start != end);
-        ranks.push_back(replay_tree.get_rank(pop.key));
-        if (ranks.back() > max_rank) {
-            max_rank = ranks.back();
+        while (push_indices[static_cast<std::size_t>(push_thread)] <= elem_id) {
+            replay_tree.insert({logs[push_thread].pushes[push_indices[push_thread]].key,
+                                pack(static_cast<int>(push_thread), push_indices[push_thread])});
+            std::cout << "Inserting wrong " << logs[push_thread].pushes[push_indices[push_thread]].key << " from "
+                      << push_thread << '\n';
+            ++push_indices[static_cast<std::size_t>(push_thread)];
         }
-        auto [success, delay] = replay_tree.erase(start);
-        assert(success && delay >= 0);
-        delays.push_back(static_cast<std::size_t>(delay));
-        if (delays.back() > max_delay) {
-            max_delay = delays.back();
+        std::cout << "Deleting " << key << " from " << push_thread << '\n';
+        auto [success, rank, delay] = replay_tree.erase({key, pop.data});
+        assert(success);
+        if (histogram.ranks.size() <= rank) {
+            histogram.ranks.resize(rank + 1);
         }
-        replay_tree.increase_delay(pop.key);
-    }
-    Histogram histogram;
-    histogram.ranks.resize(max_rank + 1);
-    histogram.delays.resize(max_delay + 1);
-    for (auto r : ranks) {
-        ++histogram.ranks[r];
-    }
-    for (auto d : delays) {
-        ++histogram.delays[d];
+        ++histogram.ranks[rank];
+        if (histogram.delays.size() <= delay) {
+            histogram.delays.resize(delay + 1);
+        }
+        ++histogram.delays[delay];
+        ++pop_indices[thread];
     }
     return histogram;
 }
 
-void operation_log::write_logs(SortedLogs const& logs, std::filesystem::path const& file) {
-    std::ofstream out(file);
-    if (!out) {
-        throw std::runtime_error("Failed to open file: " + file.string());
+void operation_log::write_histogram(Histogram const& histogram, std::ostream& out) {
+    std::size_t i = 0;
+    for (; i < std::min(histogram.ranks.size(), histogram.delays.size()); ++i) {
+        out << i << ' ' << histogram.ranks[i] << ' ' << histogram.delays[i] << '\n';
     }
-    auto it = logs.pushes.begin();
-    for (auto const& pop : logs.pops) {
-        while (it != logs.pushes.end() && it->tick < pop.tick) {
-            out << it->tick << "i " << extract_thread_id(it->element.data) << ' ' << it->element.key << ' '
-                << it->element.data << '\n';
-        }
-        out << pop.tick << "d " << extract_thread_id(it->element.data) << pop.key << ' ' << it->element.data << '\n';
+    for (; i < histogram.ranks.size(); ++i) {
+        out << i << ' ' << histogram.ranks[i] << ' ' << 0 << '\n';
     }
-    while (it != logs.pushes.end()) {
-        out << it->tick << "i " << extract_thread_id(it->element.data) << ' ' << it->element.key << ' '
-            << it->element.data << '\n';
+    for (; i < histogram.delays.size(); ++i) {
+        out << i << ' ' << 0 << ' ' << histogram.delays[i] << '\n';
     }
 }

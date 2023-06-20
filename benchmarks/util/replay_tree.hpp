@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <istream>
 #include <limits>
@@ -16,7 +17,7 @@
 // *** Debugging Macros
 
 #ifdef REPLAY_TREE_DEBUG
-
+#include <iostream>
 //! Assertion only if REPLAY_TREE_DEBUG is defined. This is not used in verify().
 #define REPLAY_TREE_ASSERT(x) \
     do {                      \
@@ -37,17 +38,11 @@
  * leaf and inner node sizes by assuming a cache line multiple of 256 bytes.
  */
 template <typename Key, typename Value>
-struct btree_default_traits {
+struct replay_tree_default_traits {
     //! If true, the tree will self verify its invariants after each insert() or
     //! erase(). The header must have been compiled with REPLAY_TREE_DEBUG
     //! defined.
     static constexpr bool self_verify = false;
-
-    //! If true, the tree will print out debug information and a tree dump
-    //! during insert() or erase() operation. The header must have been
-    //! compiled with REPLAY_TREE_DEBUG defined and key_type must be std::ostream
-    //! printable.
-    static constexpr bool debug = true;
 
     //! Number of slots in each leaf of the tree. Estimated so that each node
     //! has a size of about 256 bytes.
@@ -55,8 +50,9 @@ struct btree_default_traits {
 
     //! Number of slots in each inner node of the tree. Estimated so that each
     //! node has a size of about 256 bytes.
-    static constexpr int inner_slots = 8 > (256 / (sizeof(Key) + sizeof(void*))) ? 8
-                                                                             : (256 / (sizeof(Key) + sizeof(void*)));
+    static constexpr int inner_slots = 8 > (256 / (sizeof(Key) + sizeof(void*)))
+        ? 8
+        : (256 / (sizeof(Key) + sizeof(void*)));
 
     //! As of stx-btree-0.9, the code does linear search in find_lower() and
     //! find_upper() instead of binary_search, unless the node size is larger
@@ -154,7 +150,7 @@ struct leaf_node : public node {
     }
 
     //! Return key in slot s
-    inline key_type const& key(size_t s) const {
+    inline key_type key(size_t s) const {
         return KeyOfValue::get(slotdata[s]);
     }
 
@@ -187,7 +183,7 @@ struct leaf_node : public node {
  * ideas.
  */
 template <typename Key, typename Value, typename KeyOfValue, typename Compare = std::less<Key>,
-          typename Traits = btree_default_traits<Key, Value>, typename Allocator = std::allocator<char>>
+          typename Traits = replay_tree_default_traits<Key, Value>, typename Allocator = std::allocator<char>>
 class ReplayTree {
    public:
     //! \name Template Parameter Types
@@ -211,7 +207,7 @@ class ReplayTree {
     //! of the tree
     using traits = Traits;
 
-    //! Seventh template parameter: STL allocator for tree nodes
+    //! Sixth template parameter: STL allocator for tree nodes
     using allocator_type = Allocator;
 
     //! \}
@@ -254,11 +250,6 @@ class ReplayTree {
     //! Debug parameter: Enables expensive and thorough checking of the tree
     //! invariants after each insert/erase operation.
     static constexpr bool self_verify = traits::self_verify;
-
-    //! Debug parameter: Prints out lots of debug information about how the
-    //! algorithms change the tree. Requires the header file to be compiled
-    //! with REPLAY_TREE_DEBUG and the key type must be std::ostream printable.
-    static constexpr bool debug = traits::debug;
 
     //! \}
 
@@ -358,6 +349,8 @@ class ReplayTree {
           leaf_node_allocator_(alloc) {
     }
 
+    ReplayTree(ReplayTree&&) = delete;
+    ReplayTree& operator=(ReplayTree&&) = delete;
     //! Constructor initializing an empty tree with a special key
     //! comparison object.
     explicit ReplayTree(const key_compare& kcf, const allocator_type& alloc = allocator_type())
@@ -655,13 +648,15 @@ class ReplayTree {
     template <typename node_type>
     unsigned short find_lower(node_type const* n, key_type const& key) const {
         if constexpr (sizeof(*n) > traits::binsearch_threshold) {
-            if (n->slotuse == 0)
+            if (n->slotuse == 0) {
                 return 0;
+            }
 
-            unsigned short lo = 0, hi = n->slotuse;
+            unsigned short lo = 0;
+            unsigned short hi = n->slotuse;
 
             while (lo < hi) {
-                auto mid = static_cast<unsigned short>((lo + hi) >> 1u);
+                auto mid = static_cast<unsigned short>((lo + hi) >> 1U);
 
                 if (key_lessequal(key, n->key(mid))) {
                     hi = mid;  // key <= mid
@@ -673,8 +668,9 @@ class ReplayTree {
             // verify result using simple linear search
             if (self_verify) {
                 unsigned short i = 0;
-                while (i < n->slotuse && key_less(n->key(i), key))
+                while (i < n->slotuse && key_less(n->key(i), key)) {
                     ++i;
+                }
 
                 REPLAY_TREE_ASSERT(i == lo);
             }
@@ -683,8 +679,9 @@ class ReplayTree {
         } else  // for nodes <= binsearch_threshold do linear search.
         {
             unsigned short lo = 0;
-            while (lo < n->slotuse && key_less(n->key(lo), key))
+            while (lo < n->slotuse && key_less(n->key(lo), key)) {
                 ++lo;
+            }
             return lo;
         }
     }
@@ -696,13 +693,15 @@ class ReplayTree {
     template <typename node_type>
     unsigned short find_upper(const node_type* n, const key_type& key) const {
         if constexpr (sizeof(*n) > traits::binsearch_threshold) {
-            if (n->slotuse == 0)
+            if (n->slotuse == 0) {
                 return 0;
+            }
 
-            unsigned short lo = 0, hi = n->slotuse;
+            unsigned short lo = 0;
+            unsigned short hi = n->slotuse;
 
             while (lo < hi) {
-                auto mid = static_cast<unsigned short>((lo + hi) >> 1u);
+                auto mid = static_cast<unsigned short>((lo + hi) >> 1U);
 
                 if (key_less(key, n->key(mid))) {
                     hi = mid;  // key < mid
@@ -714,8 +713,9 @@ class ReplayTree {
             // verify result using simple linear search
             if (self_verify) {
                 unsigned short i = 0;
-                while (i < n->slotuse && key_lessequal(n->key(i), key))
+                while (i < n->slotuse && key_lessequal(n->key(i), key)) {
                     ++i;
+                }
 
                 REPLAY_TREE_ASSERT(i == hi);
             }
@@ -724,8 +724,9 @@ class ReplayTree {
         } else  // for nodes <= binsearch_threshold do linear search.
         {
             unsigned short lo = 0;
-            while (lo < n->slotuse && key_lessequal(n->key(lo), key))
+            while (lo < n->slotuse && key_lessequal(n->key(lo), key)) {
                 ++lo;
+            }
             return lo;
         }
     }
@@ -763,62 +764,6 @@ class ReplayTree {
     //! \name STL Access Functions Querying the Tree by Descending to a Leaf
     //! \{
 
-    //! Non-STL function checking whether a key is in the tree. The same as
-    //! (find(k) != end()) or (count() != 0).
-    bool exists(key_type const& key) const {
-        node const* n = root_;
-        if (!n)
-            return false;
-
-        while (!n->is_leafnode()) {
-            auto inner = static_cast<InnerNode const*>(n);
-            unsigned short slot = find_lower(inner, key);
-
-            n = inner->childid[slot];
-        }
-
-        auto leaf = static_cast<LeafNode const*>(n);
-
-        unsigned short slot = find_lower(leaf, key);
-        return (slot < leaf->slotuse && key_equal(key, leaf->key(slot)));
-    }
-
-    //! Tries to locate a key in the tree and returns an iterator to the
-    //! key/data slot if found. If unsuccessful it returns end().
-    iterator find(key_type const& key) {
-        node* n = root_;
-        if (!n)
-            return end();
-
-        while (!n->is_leafnode()) {
-            auto inner = static_cast<InnerNode const*>(n);
-            unsigned short slot = find_lower(inner, key);
-
-            n = inner->childid[slot];
-        }
-
-        auto leaf = static_cast<LeafNode*>(n);
-
-        unsigned short slot = find_lower(leaf, key);
-        return (slot < leaf->slotuse && key_equal(key, leaf->key(slot))) ? iterator(leaf, slot) : end();
-    }
-
-    //! Tries to locate a key in the tree and returns an constant iterator to
-    //! the key/data slot if found. If unsuccessful it returns end().
-    const_iterator find(key_type const& key) const {
-        const_iterator(const_cast<self_type*>(this)->find(key));
-    }
-
-    //! Tries to locate a key in the tree and returns the number of identical
-    //! key entries found.
-    size_type count(key_type const& key) const {
-        if (exists(key)) {
-            return 1;
-        } else {
-            return 0;
-        }
-    }
-
     //! Searches the tree and returns an iterator to the first pair equal to
     //! or greater than key, or end() if all keys are smaller.
     iterator lower_bound(key_type const& key) {
@@ -833,7 +778,7 @@ class ReplayTree {
             n = inner->childid[slot];
         }
 
-        LeafNode* leaf = static_cast<LeafNode*>(n);
+        auto* leaf = static_cast<LeafNode*>(n);
 
         unsigned short slot = find_lower(leaf, key);
         return iterator(leaf, slot);
@@ -871,16 +816,6 @@ class ReplayTree {
         return const_iterator(const_cast<self_type*>(this)->upper_bound(key));
     }
 
-    //! Searches the tree and returns both lower_bound() and upper_bound().
-    std::pair<iterator, iterator> equal_range(const key_type& key) {
-        return std::pair<iterator, iterator>(lower_bound(key), upper_bound(key));
-    }
-
-    //! Searches the tree and returns both lower_bound() and upper_bound().
-    std::pair<const_iterator, const_iterator> equal_range(const key_type& key) const {
-        return std::pair<const_iterator, const_iterator>(lower_bound(key), upper_bound(key));
-    }
-
     std::size_t get_rank(key_type const& key) const {
         node* n = root_;
         if (!n)
@@ -903,32 +838,11 @@ class ReplayTree {
         return rank;
     }
 
-    void increase_delay(key_type const& key) {
-        node* n = root_;
-        if (!n)
-            return;
-        while (!n->is_leafnode()) {
-            auto inner = static_cast<InnerNode const*>(n);
-            unsigned short slot = find_lower(inner, key);
-            for (std::size_t i = 0; i < slot; ++i) {
-                add_delay(inner->childid[i], 1);
-            }
-
-            n = inner->childid[slot];
-        }
-
-        auto leaf = static_cast<LeafNode*>(n);
-
-        auto slot = find_lower(leaf, key);
-        for (std::size_t i = 0; i < slot; ++i) {
-            ++leaf->delays[i];
-        }
-    }
-
     void increase_global_delay() {
         node* n = root_;
-        if (!n)
+        if (n == nullptr) {
             return;
+        }
         add_delay(root_, 1);
     }
 
@@ -1001,21 +915,20 @@ class ReplayTree {
             }
 
             return newleaf;
-        } else {
-            auto inner = static_cast<InnerNode const*>(n);
-            auto newinner = allocate_inner(inner->delay, inner->level);
-
-            newinner->slotuse = inner->slotuse;
-            std::copy(inner->slotkey, inner->slotkey + inner->slotuse, newinner->slotkey);
-
-            for (unsigned short slot = 0; slot <= inner->slotuse; ++slot) {
-                newinner->childid[slot] = copy_recursive(inner->childid[slot]);
-            }
-
-            newinner->subtree_size = inner->subtree_size;
-
-            return newinner;
         }
+        auto inner = static_cast<InnerNode const*>(n);
+        auto newinner = allocate_inner(inner->delay, inner->level);
+
+        newinner->slotuse = inner->slotuse;
+        std::copy(inner->slotkey, inner->slotkey + inner->slotuse, newinner->slotkey);
+
+        for (unsigned short slot = 0; slot <= inner->slotuse; ++slot) {
+            newinner->childid[slot] = copy_recursive(inner->childid[slot]);
+        }
+
+        newinner->subtree_size = inner->subtree_size;
+
+        return newinner;
     }
 
     //! \}
@@ -1060,7 +973,7 @@ class ReplayTree {
 
         auto r = insert_descend(root_, key, value, 0, &newkey, &newchild);
 
-        if (newchild) {
+        if (newchild != nullptr) {
             // this only occurs if insert_descend() could not insert the key
             // into the root node, this mean the root is full and a new root
             // needs to be created.
@@ -1077,14 +990,9 @@ class ReplayTree {
 
         ++stats_.size;
 
-#ifdef REPLAY_TREE_DEBUG
-        if (debug)
-            print(std::cout);
-#endif
-
         if (self_verify) {
             verify();
-            REPLAY_TREE_ASSERT(exists(key));
+            /* REPLAY_TREE_ASSERT(exists(key)); */
         }
 
         return r;
@@ -1318,21 +1226,16 @@ class ReplayTree {
         }
     };
 
-    //! \}
-
-   public:
-    //! \name Public Erase Functions
-    //! \{
-
     //! Erase the key/data pair referenced by the iterator.
-    std::pair<bool, std::int64_t> erase(iterator iter) {
+    std::pair<bool, std::size_t> erase(iterator iter) {
         if (self_verify)
             verify();
 
         if (!root_)
-            return {false, 0};
+            return {false, 0UL};
 
         auto [result, delay] = erase_iter_descend(iter, root_, 0, nullptr, nullptr, nullptr, nullptr, nullptr, 0, 0, 0);
+        REPLAY_TREE_ASSERT(delay >= 0);
         bool success = false;
 
         if (!result.has(btree_not_found)) {
@@ -1340,13 +1243,54 @@ class ReplayTree {
             success = true;
         }
 
-#ifdef REPLAY_TREE_DEBUG
-        if (debug)
-            print(std::cout);
-#endif
         if (self_verify)
             verify();
-        return {success, delay};
+        return {success, static_cast<std::size_t>(delay)};
+    }
+
+    //! \}
+
+   public:
+    //! \name Public Erase Functions
+    //! \{
+
+    std::tuple<bool, std::size_t, std::size_t> erase(value_type const& v) {
+        node* n = root_;
+        if (n == nullptr) {
+            return {false, 0, 0};
+        }
+
+        std::size_t rank = 0;
+
+        while (!n->is_leafnode()) {
+            auto inner = static_cast<InnerNode const*>(n);
+            unsigned short slot = find_lower(inner, key_of_value::get(v));
+            for (unsigned short i = 0; i < slot; ++i) {
+                rank += get_subtree_size(inner->childid[i]);
+                add_delay(inner->childid[i], 1);
+            }
+
+            n = inner->childid[slot];
+        }
+
+        auto* leaf = static_cast<LeafNode*>(n);
+
+        unsigned short slot = find_lower(leaf, key_of_value::get(v));
+        rank += slot;
+        for (std::size_t i = 0; i < slot; ++i) {
+            ++leaf->delays[i];
+        }
+        auto it = iterator(leaf, slot);
+        REPLAY_TREE_ASSERT(it != end());
+        REPLAY_TREE_ASSERT(key_of_value::get(*it) == key_of_value::get(v));
+        while (it->data != v.data) {
+            ++it;
+            REPLAY_TREE_ASSERT(it != end());
+            REPLAY_TREE_ASSERT(key_of_value::get(*it) == key_of_value::get(v));
+        }
+        auto [success, delay] = erase(it);
+        REPLAY_TREE_ASSERT(success);
+        return {success, rank, delay};
     }
 
    private:
