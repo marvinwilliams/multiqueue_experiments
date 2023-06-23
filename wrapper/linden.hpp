@@ -6,6 +6,7 @@
 
 #include <limits>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <utility>
 
@@ -33,8 +34,8 @@ class Linden<unsigned long, unsigned long> {
     struct Handle {
         linden_pq_t* pq_;
 
-        void push(value_type const& value) const;
-        bool try_pop(value_type& retval) const;
+        void push(value_type const& value);
+        std::optional<value_type> try_pop();
     };
 
     using handle_type = Handle;

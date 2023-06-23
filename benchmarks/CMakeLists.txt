@@ -129,7 +129,7 @@ set(COMPETITORS
     tbb_pq)
 
 add_library(throughput INTERFACE)
-target_sources(throughput INTERFACE throughput.cpp util/threading.cpp)
+target_sources(throughput INTERFACE stress_test.cpp util/threading.cpp)
 target_link_libraries(throughput INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
@@ -172,7 +172,7 @@ foreach(target ${MQ_VARIANTS} ${COMPETITORS})
 endforeach()
 
 add_library(quality INTERFACE)
-target_sources(quality INTERFACE throughput.cpp util/threading.cpp
+target_sources(quality INTERFACE stress_test.cpp util/threading.cpp
                                  util/operation_log.cpp)
 target_compile_definitions(
   quality INTERFACE -DQUALITY $<$<CONFIG:Debug>:-DREPLAY_TREE_DEBUG>)
@@ -182,14 +182,16 @@ foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
   add_executable(quality_${target})
   target_link_libraries(quality_${target} PRIVATE ${target} quality)
   if(BUILD_TESTING)
-    # add_test( NAME quality_${target}_small COMMAND
-    # /bin/bash -c "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 |
-    # $<TARGET_FILE:evaluate_quality> -v"
-    # ) add_test(
-    # NAME quality_${target}_large COMMAND
-    # /bin/bash -c "$<TARGET_FILE:quality_${target}> -j 8 |
-    # $<TARGET_FILE:evaluate_quality> -v"
-    # )
+    add_test(
+      NAME quality_${target}_seq
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 /dev/null")
+    add_test(
+      NAME quality_${target}
+      COMMAND
+        /bin/bash -c
+        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 8 /dev/null")
   endif()
 endforeach()
 
@@ -203,45 +205,45 @@ foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_dependencies(quality_all quality_${target})
 endforeach()
 
-add_library(shortest_path INTERFACE)
-target_sources(shortest_path INTERFACE shortest_path.cpp util/threading.cpp)
-target_link_libraries(shortest_path INTERFACE benchmark_base Threads::Threads)
+add_library(sssp_dijkstra INTERFACE)
+target_sources(sssp_dijkstra INTERFACE sssp_dijkstra.cpp util/threading.cpp)
+target_link_libraries(sssp_dijkstra INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_VARIANTS} ${COMPETITORS})
-  add_executable(shortest_path_${target})
-  target_link_libraries(shortest_path_${target} PRIVATE ${target} shortest_path)
+  add_executable(sssp_dijkstra_${target})
+  target_link_libraries(sssp_dijkstra_${target} PRIVATE ${target} sssp_dijkstra)
   if(BUILD_TESTING)
     add_test(
-      NAME shortest_path_${target}_small
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:shortest_path_${target}> data/NY_graph.gr data/NY_solution.txt -j 1"
+      NAME sssp_dijkstra_${target}_seq
+      COMMAND /bin/bash -c
+              "$<TARGET_FILE:sssp_dijkstra_${target}> data/NY_graph.gr
+         -j 1"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     add_test(
-      NAME shortest_path_${target}_large
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:shortest_path_${target}> data/CAL_graph.gr data/CAL_solution.txt -j 8"
+      NAME sssp_dijkstra_${target}
+      COMMAND /bin/bash -c
+              "$<TARGET_FILE:sssp_dijkstra_${target}> data/NY_graph.gr
+         -j 8"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()
 
-add_executable(shortest_path_seq shortest_path_seq.cpp)
-target_link_libraries(shortest_path_seq PRIVATE benchmark_base)
+add_executable(sssp_dijkstra_seq sssp_dijkstra_seq.cpp)
+target_link_libraries(sssp_dijkstra_seq PRIVATE benchmark_base)
 
-add_executable(shortest_path_seq_fifo shortest_path_seq.cpp)
-target_link_libraries(shortest_path_seq_fifo PRIVATE benchmark_base)
-target_compile_definitions(shortest_path_seq_fifo PRIVATE -DUSE_FIFO)
+add_executable(sssp_dijkstra_seq_fifo sssp_dijkstra_seq.cpp)
+target_link_libraries(sssp_dijkstra_seq_fifo PRIVATE benchmark_base)
+target_compile_definitions(sssp_dijkstra_seq_fifo PRIVATE -DUSE_FIFO)
 
-add_executable(shortest_path_seq_rev shortest_path_seq.cpp)
-target_link_libraries(shortest_path_seq_rev PRIVATE benchmark_base)
-target_compile_definitions(shortest_path_seq_rev PRIVATE -DREVERSE_PRIORITY)
+add_executable(sssp_dijkstra_seq_rev sssp_dijkstra_seq.cpp)
+target_link_libraries(sssp_dijkstra_seq_rev PRIVATE benchmark_base)
+target_compile_definitions(sssp_dijkstra_seq_rev PRIVATE -DREVERSE_PRIORITY)
 
-add_custom_target(shortest_path_all)
+add_custom_target(sssp_dijkstra_all)
 foreach(target ${MQ_VARIANTS} ${COMPETITORS})
-  add_dependencies(shortest_path_all shortest_path_${target})
+  add_dependencies(sssp_dijkstra_all sssp_dijkstra_${target})
 endforeach()
-add_dependencies(shortest_path_all shortest_path_seq shortest_path_seq_fifo)
+add_dependencies(sssp_dijkstra_all sssp_dijkstra_seq sssp_dijkstra_seq_fifo)
 
 add_library(knapsack INTERFACE)
 target_sources(knapsack INTERFACE knapsack.cpp util/threading.cpp)
@@ -252,16 +254,16 @@ foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   target_link_libraries(knapsack_${target} PRIVATE ${target} knapsack)
   if(BUILD_TESTING)
     add_test(
-      NAME knapsack_${target}_small
+      NAME knapsack_${target}_seq
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:knapsack_${target}> -j 1 -f  data/knapsack_small.txt"
+        "$<TARGET_FILE:knapsack_${target}> -j 1 -f data/knapsack_small.txt"
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
     add_test(
       NAME knapsack_${target}_large
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:knapsack_${target}> -j 8 -f data/knapsack_large.txt"
+        "$<TARGET_FILE:knapsack_${target}> -j 8 -f data/knapsack_large.txt "
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
 endforeach()

@@ -45,16 +45,6 @@ struct Pop {
     }
 };
 
-struct Element {
-    unsigned long key;
-    unsigned long data;
-};
-
-struct Operation {
-    std::uint64_t tick;
-    Element element;
-};
-
 struct OperationLog {
     std::vector<Push> pushes;
     std::vector<Pop> pops;

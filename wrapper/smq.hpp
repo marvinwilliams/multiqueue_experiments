@@ -9,6 +9,7 @@
 #include <cstdio>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <utility>
 
@@ -54,13 +55,12 @@ class StealingMQ {
             return pq_.push(id_, b, e);
         }
 
-        bool try_pop(value_type& retval) {
+        std::optional<value_type> try_pop() {
             auto t = pq_.pop(id_);
-            if (t.is_initialized()) {
-                retval = t.get();
-                return true;
+            if (!t.is_initialized()) {
+                return std::nullopt;
             }
-            return false;
+            return t.get();
         }
     };
 

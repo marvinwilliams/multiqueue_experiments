@@ -41,21 +41,27 @@ void CAPQ<unsigned long, unsigned long, false, remove_min_relax, put_relax, catr
 }
 
 template <bool Min, bool remove_min_relax, bool put_relax, bool catree_adapt>
-bool CAPQ<unsigned long, unsigned long, Min, remove_min_relax, put_relax, catree_adapt>::Handle::try_pop(
-    value_type& retval) {
+auto CAPQ<unsigned long, unsigned long, Min, remove_min_relax, put_relax, catree_adapt>::Handle::try_pop()
+    -> std::optional<value_type> {
+    value_type retval;
     retval.second = capq_remove_min_param(pq_, &retval.first, remove_min_relax, put_relax, catree_adapt);
-    return retval.first != sentinel_;
+    if (retval.first == sentinel_) {
+        return std::nullopt;
+    }
+    return retval;
 }
 
 template <bool remove_min_relax, bool put_relax, bool catree_adapt>
-bool CAPQ<unsigned long, unsigned long, false, remove_min_relax, put_relax, catree_adapt>::Handle::try_pop(
-    value_type& retval) {
+auto CAPQ<unsigned long, unsigned long, false, remove_min_relax, put_relax, catree_adapt>::Handle::try_pop()
+    -> std::optional<value_type> {
+    value_type retval;
     retval.second = capq_remove_min_param(pq_, &retval.first, remove_min_relax, put_relax, catree_adapt);
 
     if (retval.first == sentinel_) {
-        return false;
+        return std::nullopt;
     }
     retval.first = sentinel_ - 1 - retval.first;
+    return retval;
 }
 
 template class CAPQ<unsigned long, unsigned long, true>;

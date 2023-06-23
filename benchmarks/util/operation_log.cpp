@@ -66,17 +66,28 @@ void operation_log::write_logs(std::vector<OperationLog> const& logs, std::ostre
     }
 }
 
+struct Element {
+    unsigned long key;
+    unsigned long data;
+    friend bool operator==(Element const& lhs, Element const& rhs) {
+        return lhs.data == rhs.data;
+    }
+    friend bool operator!=(Element const& lhs, Element const& rhs) {
+        return !(lhs == rhs);
+    }
+};
+
 operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> const& logs) {
+    struct ExtractKey {
+        static auto const& get(Element const& e) {
+            return e.key;
+        }
+    };
+
     auto num_pops = std::accumulate(logs.begin(), logs.end(), 0UL,
                                     [](std::size_t sum, auto const& l) { return sum + l.pops.size(); });
     auto num_pushes = std::accumulate(logs.begin(), logs.end(), 0UL,
                                       [](std::size_t sum, auto const& l) { return sum + l.pushes.size(); });
-
-    struct ExtractKey {
-        static auto get(Element const& e) {
-            return e.key;
-        }
-    };
 
     Histogram histogram{};
     histogram.ranks.reserve(num_pushes);
@@ -100,27 +111,21 @@ operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> c
         auto [tick, thread] = next_pop();
         assert(thread != std::numeric_limits<std::size_t>::max());
         auto const& pop = logs[thread].pops[pop_indices[thread]];
-        auto push_thread = extract_thread_id(pop.data);
+        auto push_thread = static_cast<std::size_t>(extract_thread_id(pop.data));
         auto elem_id = extract_elem_id(pop.data);
-        auto key = logs[static_cast<std::size_t>(push_thread)].pushes[elem_id].key;
+        auto key = logs[push_thread].pushes[elem_id].key;
         // Inserting everything before next deletion
         for (std::size_t j = 0; j < logs.size(); ++j) {
             auto const& p = logs[j].pushes;
-            while (push_indices[j] < logs[j].pushes.size() && p[push_indices[j]].tick <= tick) {
+            for (; push_indices[j] < logs[j].pushes.size() && p[push_indices[j]].tick <= tick; ++push_indices[j]) {
                 replay_tree.insert({p[push_indices[j]].key, pack(static_cast<int>(j), push_indices[j])});
-                std::cout << "Inserting " << p[push_indices[j]].key << " from " << j << '\n';
-                ++push_indices[j];
             }
         }
-        while (push_indices[static_cast<std::size_t>(push_thread)] <= elem_id) {
+        for (; push_indices[push_thread] <= elem_id; ++push_indices[push_thread]) {
             replay_tree.insert({logs[push_thread].pushes[push_indices[push_thread]].key,
                                 pack(static_cast<int>(push_thread), push_indices[push_thread])});
-            std::cout << "Inserting wrong " << logs[push_thread].pushes[push_indices[push_thread]].key << " from "
-                      << push_thread << '\n';
-            ++push_indices[static_cast<std::size_t>(push_thread)];
         }
-        std::cout << "Deleting " << key << " from " << push_thread << '\n';
-        auto [success, rank, delay] = replay_tree.erase({key, pop.data});
+        auto [success, rank, delay] = replay_tree.erase_val({key, pop.data});
         assert(success);
         if (histogram.ranks.size() <= rank) {
             histogram.ranks.resize(rank + 1);

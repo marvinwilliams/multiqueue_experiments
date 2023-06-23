@@ -7,6 +7,7 @@
 #include <ios>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <utility>
 
@@ -37,7 +38,7 @@ class CAPQ<unsigned long, unsigned long, Min> {
         CAPQ* pq_;
 
         void push(value_type const& value);
-        bool try_pop(value_type& retval);
+        std::optional<value_type> try_pop();
     };
 
     using handle_type = Handle;

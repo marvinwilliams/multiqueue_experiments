@@ -150,7 +150,7 @@ struct leaf_node : public node {
     }
 
     //! Return key in slot s
-    inline key_type key(size_t s) const {
+    inline key_type const& key(size_t s) const {
         return KeyOfValue::get(slotdata[s]);
     }
 
@@ -561,6 +561,25 @@ class ReplayTree {
 
         REPLAY_TREE_ASSERT(stats_.size == 0);
     }
+#ifdef REPLAY_TREE_DEBUG
+    void print(std::ostream& os) const {
+        if (root_) {
+            print_node(os, root_, 0, true);
+        }
+    }
+    //! Print out only the leaves via the double linked list.
+    void print_leaves(std::ostream& os) const {
+        os << "leaves:" << std::endl;
+
+        const LeafNode* n = head_leaf_;
+
+        while (n) {
+            os << "  " << n << std::endl;
+
+            n = n->next_leaf;
+        }
+    }
+#endif
 
    private:
     //! Recursively free up nodes.
@@ -1254,7 +1273,7 @@ class ReplayTree {
     //! \name Public Erase Functions
     //! \{
 
-    std::tuple<bool, std::size_t, std::size_t> erase(value_type const& v) {
+    std::tuple<bool, std::size_t, std::size_t> erase_val(value_type const& v) {
         node* n = root_;
         if (n == nullptr) {
             return {false, 0, 0};
@@ -1263,7 +1282,7 @@ class ReplayTree {
         std::size_t rank = 0;
 
         while (!n->is_leafnode()) {
-            auto inner = static_cast<InnerNode const*>(n);
+            auto* inner = static_cast<InnerNode const*>(n);
             unsigned short slot = find_lower(inner, key_of_value::get(v));
             for (unsigned short i = 0; i < slot; ++i) {
                 rank += get_subtree_size(inner->childid[i]);
@@ -1277,13 +1296,13 @@ class ReplayTree {
 
         unsigned short slot = find_lower(leaf, key_of_value::get(v));
         rank += slot;
-        for (std::size_t i = 0; i < slot; ++i) {
+        for (unsigned short i = 0; i < slot; ++i) {
             ++leaf->delays[i];
         }
         auto it = iterator(leaf, slot);
         REPLAY_TREE_ASSERT(it != end());
         REPLAY_TREE_ASSERT(key_of_value::get(*it) == key_of_value::get(v));
-        while (it->data != v.data) {
+        while (*it != v) {
             ++it;
             REPLAY_TREE_ASSERT(it != end());
             REPLAY_TREE_ASSERT(key_of_value::get(*it) == key_of_value::get(v));
@@ -2026,6 +2045,51 @@ class ReplayTree {
 
         assert(testcount == size());
     }
+
+   private:
+#ifdef REPLAY_TREE_DEBUG
+    //! Recursively descend down the tree and print out nodes.
+    static void print_node(std::ostream& os, const node* node, unsigned int depth = 0, bool recursive = false) {
+        for (unsigned int i = 0; i < depth; i++)
+            os << "  ";
+
+        os << "node " << node << " level " << node->level << " slotuse " << node->slotuse << std::endl;
+
+        if (node->is_leafnode()) {
+            const LeafNode* leafnode = static_cast<const LeafNode*>(node);
+
+            for (unsigned int i = 0; i < depth; i++)
+                os << "  ";
+            os << "  leaf prev " << leafnode->prev_leaf << " next " << leafnode->next_leaf << std::endl;
+
+            for (unsigned int i = 0; i < depth; i++)
+                os << "  ";
+
+            for (unsigned short slot = 0; slot < leafnode->slotuse; ++slot) {
+                // os << leafnode->key(slot) << " "
+                //    << "(data: " << leafnode->slotdata[slot] << ") ";
+                os << leafnode->key(slot) << "  ";
+            }
+            os << std::endl;
+        } else {
+            const InnerNode* innernode = static_cast<const InnerNode*>(node);
+
+            for (unsigned int i = 0; i < depth; i++)
+                os << "  ";
+
+            for (unsigned short slot = 0; slot < innernode->slotuse; ++slot) {
+                os << "(" << innernode->childid[slot] << ") " << innernode->slotkey[slot] << " ";
+            }
+            os << "(" << innernode->childid[innernode->slotuse] << ")" << std::endl;
+
+            if (recursive) {
+                for (unsigned short slot = 0; slot < innernode->slotuse + 1; ++slot) {
+                    print_node(os, innernode->childid[slot], depth + 1, recursive);
+                }
+            }
+        }
+    }
+#endif
 
     //! \}
 };

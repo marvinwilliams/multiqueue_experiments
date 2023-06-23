@@ -61,25 +61,20 @@ void Spraylist<unsigned long, unsigned long, false>::Handle::push(value_type con
     sl_add_val(pq_, max_valid_key - value.first, value.second, TRANSACTIONAL);
 }
 
-template <>
-bool Spraylist<unsigned long, unsigned long, true>::Handle::try_pop(value_type& retval) const {
-    int ret;
-    do {
-        ret = spray_delete_min_key(pq_, &retval.first, &retval.second, data_.get());
-    } while (ret == 0 && retval.first != sentinel_);
-    return retval.first != sentinel_;
-}
-
-template <>
-bool Spraylist<unsigned long, unsigned long, false>::Handle::try_pop(value_type& retval) const {
+template <bool Min>
+auto Spraylist<unsigned long, unsigned long, Min>::Handle::try_pop() -> std::optional<value_type> {
+    value_type retval;
     int ret;
     do {
         ret = spray_delete_min_key(pq_, &retval.first, &retval.second, data_.get());
     } while (ret == 0 && retval.first != sentinel_);
     if (retval.first == sentinel_) {
-        return false;
+        return std::nullopt;
     }
-    retval.first = max_valid_key - retval.first;
+    if (!Min) {
+        retval.first = max_valid_key - retval.first;
+    }
+    return retval;
 }
 
 template class Spraylist<unsigned long, unsigned long, true>;

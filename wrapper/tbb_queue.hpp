@@ -4,6 +4,7 @@
 
 #include <tbb/concurrent_queue.h>
 
+#include <optional>
 #include <ostream>
 #include <utility>
 
@@ -29,8 +30,12 @@ class TBBQueue {
         void push(value_type const& value) {
             pq_->push(value);
         }
-        bool try_pop(value_type& retval) {
-            return pq_->try_pop(retval);
+        std::optional<value_type> try_pop() {
+            value_type retval;
+            if (!pq_->try_pop(retval)) {
+                return std::nullopt;
+            }
+            return retval;
         }
     };
 

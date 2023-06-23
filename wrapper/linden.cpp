@@ -44,23 +44,25 @@ void Linden<unsigned long, unsigend long, false>::Handle::push(value_type const&
 }
 
 template <>
-bool Linden<unsigned long, unsigned long, true>::Handle::try_pop(value_type& retval) const {
+auto Linden<unsigned long, unsigned long, true>::Handle::try_pop() -> std::optional<value_type> {
+    value_type retval;
     retval.second = ::deletemin_key(pq_, &retval.first);
     if (retval.first == sentinel_) {
-        return false;
+        return std::nullopt;
     }
     --retval.first;
-    return true;
+    return retval;
 }
 
 template <>
-bool Linden<unsigned long, unsigned long, false>::Handle::try_pop(value_type& retval) const {
+auto Linden<unsigned long, unsigned long, false>::Handle::try_pop() -> std::optional<value_type> {
+    value_type retval;
     retval.second = ::deletemin_key(pq_, &retval.first);
     if (retval.first == sentinel_) {
-        return false;
+        return std::nullopt;
     }
     retval.first = max_valid_key - value.first + 1;
-    return true;
+    return retval;
 }
 
 template <bool Min>

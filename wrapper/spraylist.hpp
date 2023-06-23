@@ -4,6 +4,7 @@
 
 #include "cxxopts.hpp"
 
+#include <optional>
 #include <cstdint>
 #include <limits>
 #include <memory>
@@ -39,8 +40,8 @@ class Spraylist<unsigned long, unsigned long, Min> {
         std::unique_ptr<thread_data_t, thread_data_deleter> data_;
         sl_intset_t* pq_;
 
-        void push(value_type const& value) const;
-        bool try_pop(value_type& retval) const;
+        void push(value_type const& value);
+        std::optional<value_type> try_pop();
     };
 
     using handle_type = Handle;

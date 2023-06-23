@@ -10,6 +10,7 @@
 #include <cstdio>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <ostream>
 #include <utility>
 
@@ -44,16 +45,15 @@ class KLsm {
             pq_.insert(Min ? value.first : std::numeric_limits<key_type>::max() - value.first - 1, value.second);
         }
 
-        bool try_pop(value_type& retval) {
-            if (Min) {
-                return pq_.delete_min(retval.first, retval.second);
-            } else {
-                if (!pq_.delete_min(retval.first, retval.second)) {
-                    return false;
-                }
-                retval.first = std::numeric_limits<key_type>::max() - retval.first - 1;
-                return true;
+        std::optional<value_type> try_pop() {
+            value_type retval;
+            if (!pq_.delete_min(retval.first, retval.second)) {
+                return std::nullopt;
             }
+            if (!Min) {
+                retval.first = std::numeric_limits<key_type>::max() - retval.first - 1;
+            }
+            return retval;
         }
     };
 
