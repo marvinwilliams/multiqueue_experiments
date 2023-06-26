@@ -16,13 +16,15 @@
 
 // Note that a push might be after the pop because the tick is recorded
 // after the push is performed.
-void operation_log::verify_logs(std::vector<operation_log::OperationLog> const& logs) {
+bool operation_log::verify_logs(std::vector<operation_log::OperationLog> const& logs) {
     for (auto const& l : logs) {
         if (!std::is_sorted(l.pushes.begin(), l.pushes.end())) {
-            throw std::runtime_error{"Inconsistent push order"};
+            std::cerr << "Error: Inconsistent push order\n";
+            return false;
         }
         if (!std::is_sorted(l.pops.begin(), l.pops.end())) {
-            throw std::runtime_error{"Inconsistent pop order"};
+            std::cerr << "Error: inconsistent pop order\n";
+            return false;
         }
     }
     auto popped = std::vector<std::vector<bool>>();
@@ -34,18 +36,22 @@ void operation_log::verify_logs(std::vector<operation_log::OperationLog> const& 
             auto thread_id = extract_thread_id(op.data);
             auto elem_id = extract_elem_id(op.data);
             if (thread_id < 0 || thread_id >= static_cast<int>(logs.size())) {
-                throw std::runtime_error{"Popped element from invalid thread: " + std::to_string(thread_id)};
+                std::cerr << "Error: Popped element from invalid thread: " << thread_id << '\n';
+                return false;
             }
             auto const& thread_pushes = logs[static_cast<std::size_t>(thread_id)].pushes;
             if (elem_id >= thread_pushes.size()) {
-                throw std::runtime_error{"Popped element has invalid element id: " + std::to_string(elem_id)};
+                std::cerr << "Popped element has invalid element id: " << elem_id << '\n';
+                return false;
             }
             if (popped[static_cast<std::size_t>(thread_id)][elem_id]) {
-                throw std::runtime_error{"Popped the same element twice"};
+                std::cerr << "Popped the same element twice\n";
+                return false;
             }
             popped[static_cast<std::size_t>(thread_id)][elem_id] = true;
         }
     }
+    return true;
 }
 
 void operation_log::write_logs(std::vector<OperationLog> const& logs, std::ostream& out) {
@@ -116,14 +122,16 @@ operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> c
         auto key = logs[push_thread].pushes[elem_id].key;
         // Inserting everything before next deletion
         for (std::size_t j = 0; j < logs.size(); ++j) {
+            auto val_start = start_value(static_cast<int>(j));
             auto const& p = logs[j].pushes;
             for (; push_indices[j] < logs[j].pushes.size() && p[push_indices[j]].tick <= tick; ++push_indices[j]) {
-                replay_tree.insert({p[push_indices[j]].key, pack(static_cast<int>(j), push_indices[j])});
+                replay_tree.insert({p[push_indices[j]].key, val_start + push_indices[j]});
             }
-        }
-        for (; push_indices[push_thread] <= elem_id; ++push_indices[push_thread]) {
-            replay_tree.insert({logs[push_thread].pushes[push_indices[push_thread]].key,
-                                pack(static_cast<int>(push_thread), push_indices[push_thread])});
+            if (j == push_thread) {
+                for (; push_indices[j] <= elem_id; ++push_indices[j]) {
+                    replay_tree.insert({p[push_indices[j]].key, val_start + push_indices[j]});
+                }
+            }
         }
         auto [success, rank, delay] = replay_tree.erase_val({key, pop.data});
         assert(success);

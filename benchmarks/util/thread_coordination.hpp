@@ -18,8 +18,8 @@ namespace thread_coordination {
 
 using clock_type = std::chrono::steady_clock;
 struct time_result_type {
-clock_type::time_point start;
-clock_type::time_point end;
+    clock_type::time_point start;
+    clock_type::time_point end;
 };
 
 namespace detail {
@@ -92,31 +92,31 @@ class Context {
     template <typename Work, typename... Args>
     time_result_type execute_synchronized(Work work, Args&&... args) const {
         shared_data_.barrier.wait();
-        auto t1 = clock_type::now();
+        auto t_start = clock_type::now();
         work(std::forward<Args>(args)...);
-        auto t2 = clock_type::now();
+        auto t_end = clock_type::now();
         shared_data_.barrier.wait();
-        return {t1, t2};
+        return {t_start, t_end};
     }
 
-    template <typename Integer, typename Work, typename... Args>
-    time_result_type execute_synchronized_blockwise(Integer n, Work work, Args&&... args) const {
+    template <typename It, typename Work, typename... Args>
+    time_result_type execute_synchronized_blockwise(It begin, It end, Work work, Args&&... args) const {
         static constexpr auto block_size = static_cast<std::size_t>(1) << 12;
 
         shared_data_.barrier.wait();
-        auto t1 = clock_type::now();
+        auto t_start = clock_type::now();
+        auto n = static_cast<std::size_t>(std::distance(begin, end));
         while (true) {
-            auto start_index =
-                static_cast<Integer>(shared_data_.index.fetch_add(block_size, std::memory_order_relaxed));
+            auto start_index = shared_data_.index.fetch_add(block_size, std::memory_order_relaxed);
             if (start_index >= n) {
                 break;
             }
-            auto count = std::min(static_cast<Integer>(block_size), n - start_index);
-            work(static_cast<Integer>(start_index), count, args...);  // no perfect forwarding here
+            auto end_index = std::min(n, start_index + block_size);
+            work(begin + start_index, begin + end_index, args...);  // no perfect forwarding here
         }
-        auto t2 = clock_type::now();
+        auto t_end = clock_type::now();
         shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });
-        return {t1, t2};
+        return {t_start, t_end};
     }
 };
 
