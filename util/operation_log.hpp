@@ -57,10 +57,7 @@ class LoggingHandle : public PriorityQueue::handle_type {
     OperationLog log_;
 
     std::uint64_t get_tick() noexcept {
-        timespec ts{};
-        clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
-        return static_cast<std::uint64_t>(
-            (std::chrono::seconds(ts.tv_sec) + std::chrono::nanoseconds(ts.tv_nsec)).count());
+        return static_cast<std::uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
     }
 
    public:
