@@ -1,6 +1,8 @@
 #ifndef GALOIS_STEALINGMULTIQUEUE_H
 #define GALOIS_STEALINGMULTIQUEUE_H
 
+// adapted to standalone from https://github.com/npostnikova/mq-based-schedulers
+
 #include <algorithm>
 #include <atomic>
 #include <chrono>
@@ -32,7 +34,7 @@ namespace WorkList {
 template <typename T, typename Compare, std::size_t STEAL_NUM, std::size_t D = 4>
 class HeapWithStealBuffer {
     using value_type = T;
-    typedef std::size_t index_t;
+    using index_t = std::size_t;
     // Local priority queue.
     std::vector<T> heap;
     // Other threads steal the whole buffer at once.
@@ -152,7 +154,7 @@ class HeapWithStealBuffer {
 
     //! Extract min from the structure: both the buffer and the heap
     //! are considered. Called from the owner-thread.
-    bool extractMin(value_type& val) {
+  std::optional<value_type> extractMin() {
         if (heap.empty()) {
             // Only check the steal buffer.
             return tryStealLocally();
@@ -161,7 +163,7 @@ class HeapWithStealBuffer {
         auto bufferMin = getBufferMin(raceFlag);
         if (!isDummy(bufferMin) && compare(heap[0], bufferMin)) {
             auto stolen = tryStealLocally();
-            if (stolen.is_initialized()) {
+            if (stolen) {
                 fillBuffer();
                 return stolen;
             }
@@ -185,7 +187,7 @@ class HeapWithStealBuffer {
     std::optional<T> tryStealLocally() {
         bool raceFlag = false;  // useless now
         auto stolen = trySteal(raceFlag);
-        if (stolen.is_initialized()) {
+        if (stolen) {
             auto elements = *stolen;
             for (std::size_t i = 1; i < STEAL_NUM && !isDummy(elements[i]); i++) {
                 pushLocally(elements[i]);
@@ -262,36 +264,14 @@ class HeapWithStealBuffer {
 template <typename T, typename Compare, std::size_t STEAL_NUM, std::size_t D>
 T HeapWithStealBuffer<T, Compare, STEAL_NUM, D>::dummy;
 
-template <typename Key, typename T, typename Comparer = std::less<Key>, std::size_t StealProb = 1 << 8,
-          std::size_t StealBatchSize = 1 << 8, bool Concurrent = true>
+template <typename T, typename Comparer, size_t StealProb, size_t StealBatchSize, bool Concurrent = true>
 class StealingMultiQueue {
-   public:
-    using value_type = std::pair<Key, T>;
-
-    class value_compare {
-        friend StealingMultiQueue;
-        [[no_unique_address]] Comparer comp;
-
-        explicit value_compare(Comparer const& compare = Comparer{}) : comp{compare} {
-        }
-
-       public:
-        constexpr bool operator()(value_type const& lhs, value_type const& rhs) const noexcept {
-            return comp(lhs.first, rhs.first);
-        }
-    };
-
    private:
-    typedef HeapWithStealBuffer<value_type, value_compare, StealBatchSize, 4> Heap;
+    using Heap = HeapWithStealBuffer<T, Comparer, StealBatchSize, 4>;
     std::unique_ptr<AlignedObject<Heap>[]> heaps;
     std::unique_ptr<AlignedObject<std::vector<T>>[]> stealBuffers;
     Comparer compare;
-    const std::size_t nQ;
-
-    int get_tid() noexcept {
-        static std::atomic_int id_count = 0;
-        static thread_local int const id(id_count.fetch_add(1));
-    }
+    const size_t nQ;
 
     //! Thread local random.
     uint32_t random() {
@@ -303,14 +283,13 @@ class StealingMultiQueue {
     }
 
     //! Index of a random heap.
-    std::size_t rand_heap() {
+    size_t rand_heap() {
         return random() % nQ;
     }
 
     //! Tries to steal from a random queue.
     //! Repeats if failed because of a race.
-    std::optional<T> trySteal() {
-        auto tId = get_tid();
+    std::optional<T> trySteal(int tId) {
         T localMin = heaps[tId].data.getMinWriter();
         bool nextIterNeeded = true;
         while (nextIterNeeded) {
@@ -324,12 +303,12 @@ class StealingMultiQueue {
                 // Nothing to steal.
                 continue;
             }
-            if (Heap::isDummy(localMin) || compare(localMin.first, randMin.first)) {
+            if (Heap::isDummy(localMin) || compare(localMin, randMin)) {
                 auto stolen = randH->trySteal(nextIterNeeded);
-                if (stolen.is_initialized()) {
+                if (stolen) {
                     auto& buffer = stealBuffers[tId].data;
                     auto elements = *stolen;
-                    for (std::size_t i = 1; i < elements.size() && !Heap::isDummy(elements[i]); i++) {
+                    for (size_t i = 1; i < elements.size() && !Heap::isDummy(elements[i]); i++) {
                         buffer.push_back(elements[i]);
                     }
                     std::reverse(buffer.begin(), buffer.end());
@@ -337,7 +316,7 @@ class StealingMultiQueue {
                 }
             }
         }
-        return std::optional<T>();
+        return std::nullopt;
     }
 
    public:
@@ -347,7 +326,19 @@ class StealingMultiQueue {
         stealBuffers = std::make_unique<AlignedObject<std::vector<T>>[]>(nQ);
     }
 
-    typedef T value_type;
+    using value_type = T;
+
+    //! Change the concurrency flag.
+    template <bool _concurrent>
+    struct rethread {
+        using type = StealingMultiQueue<T, Comparer, StealProb, StealBatchSize, _concurrent>;
+    };
+
+    //! Change the type the worklist holds.
+    template <typename T_>
+    struct retype {
+        using type = StealingMultiQueue<T_, Comparer, StealProb, StealBatchSize, Concurrent>;
+    };
 
     template <typename RangeTy>
     unsigned int push_initial(const RangeTy& range) {
@@ -356,8 +347,7 @@ class StealingMultiQueue {
     }
 
     template <typename Iter>
-    unsigned int push(Iter b, Iter e) {
-        auto tId = get_tid();
+    unsigned int push(int tId, Iter b, Iter e) {
         if (b == e)
             return 0;
         unsigned int pushedNum = 0;
@@ -370,46 +360,28 @@ class StealingMultiQueue {
         return pushedNum;
     }
 
-    unsigned int push() {
-        auto tId = get_tid();
-        if (b == e)
-            return 0;
-        unsigned int pushedNum = 0;
-        Heap* heap = &heaps[tId].data;
-        while (b != e) {
-            heap->pushLocally(*b++);
-            pushedNum++;
-        }
-        heap->fillBufferIfStolen();
-        return pushedNum;
-    }
-
-    bool try_pop(value_type& val) {
-        auto tId = get_tid();
+    std::optional<T> pop(int tId) {
         auto& buffer = stealBuffers[tId].data;
         if (!buffer.empty()) {
-            val = buffer.back();
+            auto val = buffer.back();
             buffer.pop_back();
             heaps[tId].data.fillBufferIfStolen();
-            return true;
+            return val;
         }
+        std::optional<T> emptyResult;
         // rand == 0 -- try to steal
         // otherwise, pop locally
         if (nQ > 1 && random() % StealProb == 0) {
-            std::optional<T> stolen = trySteal();
-            if (stolen.is_initialized()) {
-                val = *stolen;
-                return true;
-            }
+            std::optional<T> stolen = trySteal(tId);
+            if (stolen)
+                return stolen;
         }
         auto minVal = heaps[tId].data.extractMin();
-        if (minVal.is_initialized()) {
-            val = *minVal;
-            return true;
-        }
+        if (minVal)
+            return minVal;
 
         // Our heap is empty.
-        return nQ == 1 ? false : trySteal(val);
+        return nQ == 1 ? emptyResult : trySteal(tId);
     }
 };
 

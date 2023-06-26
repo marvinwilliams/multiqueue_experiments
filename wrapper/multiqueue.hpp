@@ -8,13 +8,13 @@
 #include <utility>
 
 namespace multiqueue::queue_selection {
-template <std::size_t>
+template <unsigned int>
 class Random;
-template <std::size_t>
+template <unsigned int>
 class StickRandom;
-template <std::size_t>
+template <unsigned int>
 class SwapAssignment;
-template <std::size_t>
+template <unsigned int>
 class GlobalPermutation;
 }  // namespace multiqueue::queue_selection
 
@@ -65,7 +65,7 @@ class MultiQueue : public multiqueue::MultiQueue<Key, std::pair<Key, T>,
     }
 
     MultiQueue(int num_threads, std::size_t initial_capacity, config_type const &config)
-        : base_type(config.factor * num_threads, initial_capacity, config) {
+        : base_type(static_cast<std::size_t>(config.factor * num_threads), initial_capacity, config) {
     }
 
     std::ostream &describe(std::ostream &out) {
@@ -76,7 +76,7 @@ class MultiQueue : public multiqueue::MultiQueue<Key, std::pair<Key, T>,
     }
 };
 
-template <typename Key, typename T, bool Min, std::size_t N>
+template <typename Key, typename T, bool Min, unsigned N>
 class MultiQueue<Key, T, Min, multiqueue::queue_selection::Random<N>>
     : public multiqueue::MultiQueue<Key, std::pair<Key, T>,
                                     std::conditional_t<Min, std::greater<Key>, std::less<Key>>> {
@@ -89,12 +89,12 @@ class MultiQueue<Key, T, Min, multiqueue::queue_selection::Random<N>>
     };
 
     static void add_options(cxxopts::Options &options, config_type &config) {
-        options.add_options()("c,factor", "The number of queues per thread",
-                              cxxopts::value<int>(config.factor), "NUMBER");
+        options.add_options()("c,factor", "The number of queues per thread", cxxopts::value<int>(config.factor),
+                              "NUMBER");
     }
 
     MultiQueue(int num_threads, std::size_t initial_capacity, config_type const &config)
-        : base_type(config.factor * num_threads, initial_capacity, config) {
+        : base_type(static_cast<std::size_t>(config.factor * num_threads), initial_capacity, config) {
     }
 
     std::ostream &describe(std::ostream &out) {

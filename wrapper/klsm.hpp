@@ -18,20 +18,16 @@ namespace wrapper {
 
 // No known limitations
 
-template <typename KeyType, typename T, bool Min>
+template <typename KeyType, typename T, bool Min, int Relaxation>
 class KLsm {
    public:
     using key_type = KeyType;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
+    struct config_type {};
 
    private:
-#ifdef KLSM_K
-    static constexpr auto relaxation = KLSM_K;
-#else
-    static constexpr auto relaxation = 256;
-#endif
-    using pq_type = kpq::k_lsm<key_type, mapped_type, relaxation>;
+    using pq_type = kpq::k_lsm<key_type, mapped_type, Relaxation>;
 
    public:
     class Handle {
@@ -63,10 +59,10 @@ class KLsm {
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/) {
+    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
     }
 
-    KLsm(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*options*/)
+    KLsm(int /*num_threads*/, std::size_t /*initial_capacity*/, config_type const& /*options*/)
         : pq_(new pq_type()) {
     }
 
@@ -75,7 +71,7 @@ class KLsm {
     }
 
     std::ostream& describe(std::ostream& out) {
-        out << "k-LSM (k: " << relaxation << ')';
+        out << "k-LSM (k: " << Relaxation << ')';
         return out;
     }
 };

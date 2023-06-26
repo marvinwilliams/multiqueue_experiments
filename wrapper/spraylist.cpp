@@ -11,8 +11,6 @@ extern "C" {
 #undef min
 #undef max
 
-#include "cxxopts.hpp"
-
 #include <cstddef>
 #include <iostream>
 #include <memory>
@@ -33,7 +31,7 @@ void Spraylist<unsigned long, unsigned long, Min>::thread_data_deleter::operator
 
 template <bool Min>
 Spraylist<unsigned long, unsigned long, Min>::Spraylist(int num_threads, std::size_t initial_capacity,
-                                                        cxxopts::ParseResult const& /*options*/)
+                                                        config_type const& /*options*/)
     : num_threads_(num_threads) {
     ssalloc_init(num_threads_);
     *levelmax = floor_log_2(initial_capacity);
@@ -41,7 +39,7 @@ Spraylist<unsigned long, unsigned long, Min>::Spraylist(int num_threads, std::si
 }
 
 template <bool Min>
-auto Spraylist<unsigned long, unsigned long, Min>::get_handle() {
+auto Spraylist<unsigned long, unsigned long, Min>::get_handle() -> Handle {
     ssalloc_init(num_threads_);
     seeds = seed_rand();
     auto thread_data = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
@@ -52,12 +50,12 @@ auto Spraylist<unsigned long, unsigned long, Min>::get_handle() {
 }
 
 template <>
-void Spraylist<unsigned long, unsigned long, true>::Handle::push(value_type const& value) const {
+void Spraylist<unsigned long, unsigned long, true>::Handle::push(value_type const& value) {
     sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
 }
 
 template <>
-void Spraylist<unsigned long, unsigned long, false>::Handle::push(value_type const& value) const {
+void Spraylist<unsigned long, unsigned long, false>::Handle::push(value_type const& value) {
     sl_add_val(pq_, max_valid_key - value.first, value.second, TRANSACTIONAL);
 }
 

@@ -17,8 +17,9 @@ class TBBPriorityQueue {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<key_type>, std::less<key_type>>;
+    struct config_type {};
     class value_compare {
-        friend class TBBPriorityQueue<KeyType, T, key_compare>;
+        friend class TBBPriorityQueue<KeyType, T, Min>;
         [[no_unique_address]] key_compare comp;
 
         explicit value_compare(key_compare const& c) : comp{c} {
@@ -57,10 +58,10 @@ class TBBPriorityQueue {
     pq_type pq_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/) {
+    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
     }
 
-    TBBPriorityQueue(int /*num_threads*/, std::size_t initial_capacity, cxxopts::ParseResult const& /*options*/)
+    TBBPriorityQueue(int /*num_threads*/, std::size_t initial_capacity, config_type const& /*options*/)
         : pq_(initial_capacity, value_compare{key_compare{}}) {
     }
 

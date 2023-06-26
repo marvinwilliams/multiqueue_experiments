@@ -46,9 +46,9 @@ using value_type = unsigned long;
 
 using pq_type = PriorityQueue<key_type, value_type, true>;
 #ifdef QUALITY
-using handle_type = operation_log::LoggingHandle<pq_type::handle_type>;
+using handle_type = operation_log::LoggingHandle<pq_type>;
 #else
-using handle_type = CountingHandle<pq_type::handle_type>;
+using handle_type = CountingHandle<pq_type>;
 #endif
 using ctx_type = thread_coordination::Context;
 
@@ -94,7 +94,6 @@ struct Settings {
     key_type max_key = 1 << 30;
 #endif
     int seed = 1;
-    std::filesystem::path result_file;
 #ifdef QUALITY
     std::filesystem::path log_file;
 #endif
@@ -110,10 +109,6 @@ bool validate_settings(Settings const& settings) {
     }
     if (settings.max_key <= 0) {
         std::cerr << "Error: Max key must be greater than 0\n";
-        return false;
-    }
-    if (settings.result_file.empty()) {
-        std::cerr << "Error: Result file must not be empty\n";
         return false;
     }
 #ifdef USE_PAPI
@@ -143,7 +138,6 @@ void write_settings(Settings const& settings, std::ostream& out) {
         out << '\n';
     }
 #endif
-    out << "Result file: " << settings.result_file << '\n';
 #ifdef QUALITY
     if (!settings.log_file.empty()) {
         out << "Log operations to: " << settings.log_file << '\n';
@@ -267,10 +261,20 @@ struct BenchmarkResult {
 };
 
 #ifndef QUALITY
-void write_csv(std::vector<BenchmarkResult> const& stats, std::ostream& out) {
-    for (const auto& s : stats) {
+void write_result(Settings const& settings, std::vector<BenchmarkResult> const& stats, std::ostream& out) {
+    out << "thread,start_time,end_time,pushes,pops,failed_pops,locked_push_pq,empty_pop_pqs,"
+           "locked_pop_pq,stale_pop_pq";
+#ifdef USE_PAPI
+    for (auto const& e : settings.papi_events) {
+        out << ',' << e;
+    }
+#endif
+    out << '\n';
+    for (int i = 0; i < settings.num_threads; ++i) {
+        auto const& s = stats[static_cast<std::size_t>(i)];
         // clang-format off
-        out << s.work_time.start.time_since_epoch().count() << ','
+        out << i << ','
+            << s.work_time.start.time_since_epoch().count() << ','
             << s.work_time.end.time_since_epoch().count() << ','
             << s.op_counters.push << ','
             << s.op_counters.pop << ','
@@ -307,6 +311,7 @@ BenchmarkResult execute_benchmark(Settings const& settings, ctx_type const& ctx,
     int event_set = PAPI_NULL;
     bool papi_started = false;
     if (!settings.papi_events.empty()) {
+        result.papi_counter.resize(settings.papi_events.size());
         try {
             event_set = start_papi(settings.papi_events);
             papi_started = true;
@@ -356,17 +361,17 @@ std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
     auto pq =
         pq_type(settings.num_threads, settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads),
                 settings.pq_settings);
-    std::cout << "Priority queue: ";
-    pq.describe(std::cout) << '\n';
+    std::clog << "Priority queue: ";
+    pq.describe(std::clog) << '\n';
     auto keys = std::vector<key_type>(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
     std::vector<BenchmarkResult> results(static_cast<std::size_t>(settings.num_threads));
     thread_coordination::TaskHandle task_handle(settings.num_threads, [&](auto ctx) {
 #ifdef QUALITY
-        auto handle = handle_type(ctx.get_id(), pq.get_handle());
+        auto handle = handle_type(ctx.get_id(), pq);
         handle.reserve_push_log(2 * (settings.prefill_per_thread + settings.elements_per_thread));
         handle.reserve_pop_log(2 * settings.elements_per_thread);
 #else
-        auto handle = handle_type(pq.get_handle());
+        auto handle = handle_type(pq);
 #endif
         if (ctx.get_id() == 0) {
             std::clog << "Preparing..." << std::flush;
@@ -377,13 +382,13 @@ std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
                       << "ms)" << std::endl;
             std::clog << "Running benchmark..." << std::flush;
             t_start = std::chrono::steady_clock::now();
-            results[ctx.get_id()] = execute_benchmark(settings, ctx, handle, keys);
+            results[static_cast<std::size_t>(ctx.get_id())] = execute_benchmark(settings, ctx, handle, keys);
             t_end = std::chrono::steady_clock::now();
             std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count()
                       << "ms)" << std::endl;
         } else {
             prepare(settings, ctx, handle, keys);
-            results[ctx.get_id()] = execute_benchmark(settings, ctx, handle, keys);
+            results[static_cast<std::size_t>(ctx.get_id())] = execute_benchmark(settings, ctx, handle, keys);
         }
     });
     task_handle.wait();
@@ -419,7 +424,7 @@ KeyDistribution parse_key_distribution(char c) {
 }
 
 int main(int argc, char* argv[]) {
-    write_build_info(std::cout);
+    write_build_info(std::clog);
     Settings settings;
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()
@@ -432,7 +437,6 @@ int main(int argc, char* argv[]) {
         ("d,key-dist", "Specify the key distribution ([u]niform, [a]scending, [d]escending)", cxxopts::value<char>(), "STRING")
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
         ("s,seed", "Specify the initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
-        ("x,result-file", "Path to write per-thread results to in CSV format", cxxopts::value<std::filesystem::path>(settings.result_file), "PATH")
 #ifdef QUALITY
         ("l,log-file", "Path to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
 #endif
@@ -442,7 +446,6 @@ int main(int argc, char* argv[]) {
         // clang-format on
         ;
     pq_type::add_options(cmd, settings.pq_settings);
-    cmd.parse_positional({"result-file"});
     try {
         auto args = cmd.parse(argc, argv);
         if (args.count("help") > 0) {
@@ -461,17 +464,13 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    std::cout << '\n';
-    std::cout << "Command line:";
+    std::clog << '\n';
+    std::clog << "Command line:";
     for (int i = 0; i < argc; ++i) {
-        std::cout << ' ' << argv[i];
+        std::clog << ' ' << argv[i];
     }
-    std::cout << '\n';
-    write_settings(settings, std::cout);
-
-    if (!validate_settings(settings)) {
-        return EXIT_FAILURE;
-    }
+    std::clog << '\n';
+    write_settings(settings, std::clog);
 
 #ifdef USE_PAPI
     if (!settings.papi_events.empty()) {
@@ -486,9 +485,7 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    auto result_file = std::ofstream(settings.result_file);
-    if (!result_file) {
-        std::cerr << "Error: Could not open result file " << settings.result_file << " for writing" << std::endl;
+    if (!validate_settings(settings)) {
         return EXIT_FAILURE;
     }
 
@@ -527,8 +524,8 @@ int main(int argc, char* argv[]) {
     auto histogram = operation_log::to_histogram(logs);
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << "ms)\n";
-    operation_log::write_histogram(histogram, result_file);
+    operation_log::write_histogram(histogram, std::cout);
 #else
-    write_csv(results, result_file);
+    write_result(settings, results, std::cout);
 #endif
 }

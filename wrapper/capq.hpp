@@ -11,12 +11,15 @@
 #include <ostream>
 #include <utility>
 
-using CAPQ = struct fpasl_catree_set;
-struct CAPQ_deleter {
-    void operator()(CAPQ*);
-};
+using capq_type = struct fpasl_catree_set;
 
 namespace wrapper {
+
+namespace detail {
+struct CAPQ_deleter {
+    void operator()(capq_type*);
+};
+}  // namespace detail
 
 // GC has MAX_THREADS = 128
 // (unsigned long) -1 is signaling empty
@@ -33,9 +36,9 @@ class CAPQ<unsigned long, unsigned long, Min> {
     using key_type = unsigned long;
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
-
+    struct config_type {};
     struct Handle {
-        CAPQ* pq_;
+        capq_type* pq_;
 
         void push(value_type const& value);
         std::optional<value_type> try_pop();
@@ -49,15 +52,17 @@ class CAPQ<unsigned long, unsigned long, Min> {
    private:
     static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
-    alignas(64) std::unique_ptr<CAPQ, CAPQ_deleter> pq_;
+    alignas(64) std::unique_ptr<capq_type, detail::CAPQ_deleter> pq_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/) {
+    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
     }
 
-    CAPQ(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& options);
+    CAPQ(int num_threads, std::size_t initial_capacity, config_type const& config);
 
-    Handle get_handle();
+    Handle get_handle() {
+        return Handle{pq_.get()};
+    }
 
     std::ostream& describe(std::ostream& out) {
         out << "CA-PQ";

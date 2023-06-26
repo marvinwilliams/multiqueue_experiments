@@ -35,6 +35,7 @@ class Spraylist<unsigned long, unsigned long, Min> {
     using key_type = unsigned long;
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
+    struct config_type {};
 
     struct Handle {
         std::unique_ptr<thread_data_t, thread_data_deleter> data_;
@@ -57,10 +58,10 @@ class Spraylist<unsigned long, unsigned long, Min> {
     int num_threads_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/) {
+    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
     }
 
-    explicit Spraylist(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& options);
+    explicit Spraylist(int num_threads, std::size_t initial_capacity, config_type const& config);
 
     Handle get_handle();
 

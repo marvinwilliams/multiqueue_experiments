@@ -1,11 +1,12 @@
 #pragma once
 
+#include "StealingMultiQueue.hpp"
+
+#include "cxxopts.hpp"
+
 #include <algorithm>
+#include <atomic>
 #include <chrono>
-
-#include "Galois/WorkList/StealingMultiQueue.h"
-
-#include <algorithm>
 #include <cstdio>
 #include <limits>
 #include <memory>
@@ -15,20 +16,21 @@
 
 namespace wrapper {
 
-template <typename Key, typename T, typename Compare = std::less<Key>, std::size_t StealProb = 8,
-          std::size_t StealBatchSize = 8>
+template <typename Key, typename T, bool Min, std::size_t StealProb, std::size_t StealBatchSize>
 class StealingMQ {
    public:
     using key_type = Key;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
+    struct config_type {};
+    using key_comp = std::conditional_t<Min, std::greater<Key>, std::less<Key>>;
 
    private:
     class value_compare {
-        [[no_unique_address]] Compare comp;
+        [[no_unique_address]] key_comp comp;
 
        public:
-        explicit value_compare(Compare const& compare = Compare{}) : comp{compare} {
+        explicit value_compare(key_comp const& compare = key_comp{}) : comp{compare} {
         }
 
         constexpr bool operator()(value_type const& lhs, value_type const& rhs) const noexcept {
@@ -50,17 +52,8 @@ class StealingMQ {
             pq_.push(id_, &value, (&value) + 1);
         }
 
-        template <typename Iter>
-        unsigned int push(Iter b, Iter e) {
-            return pq_.push(id_, b, e);
-        }
-
         std::optional<value_type> try_pop() {
-            auto t = pq_.pop(id_);
-            if (!t.is_initialized()) {
-                return std::nullopt;
-            }
-            return t.get();
+            return pq_.pop(id_);
         }
     };
 
@@ -70,19 +63,22 @@ class StealingMQ {
     alignas(64) std::unique_ptr<pq_type> pq_;
 
    public:
-    StealingMQ(int num_threads, std::size_t initial_capacity);
+    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
+    }
 
-    Handle get_handle(int id);
+    explicit StealingMQ(int num_threads, std::size_t /*initial_capacity*/, config_type const& /*config*/)
+        : pq_(new pq_type(num_threads)) {
+    }
+
+    Handle get_handle() {
+        static std::atomic_int id{0};
+        return Handle{*pq_.get(), id.fetch_add(1)};
+    }
+
+    std::ostream& describe(std::ostream& out) {
+        out << "Stealing MultiQueue (StealProb=" << StealProb << ", StealBatchSize=" << StealBatchSize << ")";
+        return out;
+    }
 };
 
-template <typename Key, typename T, typename Compare, std::size_t StealProb, std::size_t StealBatchSize>
-StealingMQ<Key, T, Compare, StealProb, StealBatchSize>::StealingMQ(int num_threads, std::size_t /*unused*/)
-    : pq_(new pq_type(num_threads)) {
-}
-
-template <typename Key, typename T, typename Compare, std::size_t StealProb, std::size_t StealBatchSize>
-typename StealingMQ<Key, T, Compare, StealProb, StealBatchSize>::Handle
-StealingMQ<Key, T, Compare, StealProb, StealBatchSize>::get_handle(int id) {
-    return Handle{*pq_.get(), id};
-}
 }  // namespace wrapper

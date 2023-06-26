@@ -76,14 +76,14 @@ class LoggingHandle : public PriorityQueue::handle_type {
         log_.pops.reserve(size);
     }
 
-    void push(typename base_type::key_type const& key) {
+    void push(typename PriorityQueue::key_type const& key) {
         base_type::push({key, value_});
         auto tick = get_tick();
         log_.pushes.push_back({tick, key});
         ++value_;
     }
 
-    std::optional<typename base_type::value_type> try_pop() {
+    std::optional<typename PriorityQueue::value_type> try_pop() {
         auto tick = get_tick();
         auto retval = base_type::try_pop();
         if (!retval) {

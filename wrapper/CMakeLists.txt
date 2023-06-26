@@ -1,10 +1,11 @@
 set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
-set(SMQ_DIR "${CMAKE_SOURCE_DIR}/third_party/smq/Galois-2.2.1")
+# set(SMQ_DIR "${CMAKE_SOURCE_DIR}/third_party/smq/Galois-2.2.1")
 
 add_library(wrapper INTERFACE)
-target_include_directories(wrapper INTERFACE "..")
+target_include_directories(wrapper INTERFACE ${CMAKE_SOURCE_DIR}
+                                             ${CMAKE_SOURCE_DIR}/third_party)
 
 add_library(mq INTERFACE)
 target_link_libraries(mq INTERFACE multiqueue::multiqueue wrapper)
@@ -45,9 +46,9 @@ target_compile_definitions(
 
 add_library(smq INTERFACE)
 target_link_libraries(smq INTERFACE wrapper)
-target_include_directories(smq SYSTEM INTERFACE ${SMQ_DIR}/include)
+# target_include_directories(smq SYSTEM INTERFACE ${SMQ_DIR}/include)
 set_property(TARGET smq PROPERTY pq_name smq)
-target_compile_definitions(smq INTERFACE PQ_STEALING_MQ)
+target_compile_definitions(smq INTERFACE PQ_SMQ)
 
 add_library(
   linden STATIC
@@ -57,7 +58,7 @@ add_library(
   ${KLSM_DIR}/lib/spraylist_linden/gc/ptst.c
   linden.cpp)
 target_link_libraries(linden PUBLIC wrapper)
-target_compile_options(linden PRIVATE -w -std=gnu++11)
+target_compile_options(linden PRIVATE -w -std=gnu++17)
 target_compile_definitions(linden PRIVATE INTEL
                                           CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
@@ -75,11 +76,11 @@ add_library(
   ${KLSM_DIR}/lib/capq/gc/gc.c
   ${KLSM_DIR}/lib/capq/gc/ptst.c
   capq.cpp)
-target_link_libraries(capq PUBLIC wrapper linden)
+target_link_libraries(capq PUBLIC wrapper)
 target_include_directories(
   capq PRIVATE ${KLSM_DIR}/lib ${EXTERNAL_DIR}/klsm/lib/capq
                ${KLSM_DIR}/lib/capq/qdlocksrc)
-target_compile_options(capq PRIVATE -w -std=gnu++11)
+target_compile_options(capq PRIVATE -w -std=gnu++17)
 target_compile_definitions(capq PRIVATE INTEL
                                         CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_compile_definitions(capq INTERFACE PQ_CAPQ)
@@ -96,7 +97,7 @@ add_library(
   ${KLSM_DIR}/lib/spraylist_linden/ssalloc.c
   spraylist.cpp)
 target_link_libraries(spraylist PUBLIC wrapper)
-target_compile_options(spraylist PRIVATE -w -std=gnu11)
+target_compile_options(spraylist PRIVATE -w -std=gnu17)
 target_compile_definitions(
   spraylist
   PRIVATE INTEL

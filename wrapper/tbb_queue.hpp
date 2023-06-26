@@ -17,6 +17,7 @@ class TBBQueue {
     using key_type = KeyType;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
+    struct config_type {};
 
    private:
     using pq_type = tbb::concurrent_queue<value_type>;
@@ -45,10 +46,10 @@ class TBBQueue {
     pq_type pq_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/) {
+    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
     }
 
-    TBBQueue(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*options*/) {
+    TBBQueue(int /*num_threads*/, std::size_t /*initial_capacity*/, config_type const& /*options*/) {
     }
 
     Handle get_handle() {

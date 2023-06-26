@@ -19,7 +19,7 @@ class Linden {
 };
 
 template <bool Min>
-class Linden<unsigned long, unsigned long> {
+class Linden<unsigned long, unsigned long, Min> {
     struct linden_pq_t;
     struct pq_deleter {
         void operator()(linden_pq_t*);
@@ -28,8 +28,8 @@ class Linden<unsigned long, unsigned long> {
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
-
     using value_type = std::pair<key_type, mapped_type>;
+    struct config_type {};
 
     struct Handle {
         linden_pq_t* pq_;
@@ -52,10 +52,10 @@ class Linden<unsigned long, unsigned long> {
     alignas(64) std::unique_ptr<linden_pq_t, pq_deleter> pq_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/) {
+    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
     }
 
-    Linden(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& options);
+    Linden(int num_threads, std::size_t initial_capacity, config_type const& options);
 
     Handle get_handle();
 

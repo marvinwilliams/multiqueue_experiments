@@ -151,12 +151,21 @@ operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> c
 void operation_log::write_histogram(Histogram const& histogram, std::ostream& out) {
     std::size_t i = 0;
     for (; i < std::min(histogram.ranks.size(), histogram.delays.size()); ++i) {
+        if (histogram.ranks[i] == 0 && histogram.delays[i] == 0) {
+            continue;
+        }
         out << i << ' ' << histogram.ranks[i] << ' ' << histogram.delays[i] << '\n';
     }
     for (; i < histogram.ranks.size(); ++i) {
+        if (histogram.ranks[i] == 0) {
+            continue;
+        }
         out << i << ' ' << histogram.ranks[i] << ' ' << 0 << '\n';
     }
     for (; i < histogram.delays.size(); ++i) {
+        if (histogram.delays[i] == 0) {
+            continue;
+        }
         out << i << ' ' << 0 << ' ' << histogram.delays[i] << '\n';
     }
 }

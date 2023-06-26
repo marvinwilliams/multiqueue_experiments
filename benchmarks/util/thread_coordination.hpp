@@ -48,7 +48,7 @@ struct SharedData {
     int num_threads;
     utils::Barrier barrier;
     std::mutex write_mutex;
-    alignas(64) std::atomic_size_t index{0};
+    alignas(64) std::atomic<std::ptrdiff_t> index{0};
 
     explicit SharedData(int n) : num_threads{n}, barrier{n} {
     }
@@ -101,11 +101,11 @@ class Context {
 
     template <typename It, typename Work, typename... Args>
     time_result_type execute_synchronized_blockwise(It begin, It end, Work work, Args&&... args) const {
-        static constexpr auto block_size = static_cast<std::size_t>(1) << 12;
+        static constexpr auto block_size = static_cast<std::ptrdiff_t>(1) << 12;
 
         shared_data_.barrier.wait();
         auto t_start = clock_type::now();
-        auto n = static_cast<std::size_t>(std::distance(begin, end));
+        auto n = static_cast<std::ptrdiff_t>(std::distance(begin, end));
         while (true) {
             auto start_index = shared_data_.index.fetch_add(block_size, std::memory_order_relaxed);
             if (start_index >= n) {

@@ -7,8 +7,6 @@ extern "C" {
 #undef min
 #undef max
 
-#include "cxxopts.hpp"
-
 #include <cstddef>
 #include <iostream>
 #include <utility>
@@ -28,18 +26,18 @@ void Linden<unsigned long, unsigned long, Min>::pq_deleter::operator()(linden_pq
 
 template <bool Min>
 Linden<unsigned long, unsigned long, Min>::Linden(int /* num_threads */, std::size_t /*unused*/,
-                                                  cxxopts::ParseResult const& /*options*/) {
+                                                  config_type const& /*options*/) {
     _init_gc_subsystem();
     pq_.reset(static_cast<linden_pq_t*>(pq_init(32)));
 }
 
 template <>
-void Linden<unsigned long, unsigend long, true>::Handle::push(value_type const& value) const {
+void Linden<unsigned long, unsigned long, true>::Handle::push(value_type const& value) {
     ::insert(pq_, value.first + 1, value.second);
 }
 
 template <>
-void Linden<unsigned long, unsigend long, false>::Handle::push(value_type const& value) const {
+void Linden<unsigned long, unsigned long, false>::Handle::push(value_type const& value) {
     ::insert(pq_, max_valid_key - value.first + 1, value.second);
 }
 
@@ -61,12 +59,12 @@ auto Linden<unsigned long, unsigned long, false>::Handle::try_pop() -> std::opti
     if (retval.first == sentinel_) {
         return std::nullopt;
     }
-    retval.first = max_valid_key - value.first + 1;
+    retval.first = max_valid_key - retval.first + 1;
     return retval;
 }
 
 template <bool Min>
-auto Linden<unsigned long, unsigned long, Min>::get_handle() {
+auto Linden<unsigned long, unsigned long, Min>::get_handle() -> Handle {
     auto h = Handle{};
     h.pq_ = pq_.get();
     return h;
