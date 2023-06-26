@@ -783,6 +783,32 @@ class ReplayTree {
     //! \name STL Access Functions Querying the Tree by Descending to a Leaf
     //! \{
 
+    //! Tries to locate a key in the tree and returns an iterator to the
+    //! key/data slot if found. If unsuccessful it returns end().
+    iterator find(key_type const& key) {
+        node* n = root_;
+        if (!n)
+            return end();
+
+        while (!n->is_leafnode()) {
+            auto inner = static_cast<InnerNode const*>(n);
+            unsigned short slot = find_lower(inner, key);
+
+            n = inner->childid[slot];
+        }
+
+        auto leaf = static_cast<LeafNode*>(n);
+
+        unsigned short slot = find_lower(leaf, key);
+        return (slot < leaf->slotuse && key_equal(key, leaf->key(slot))) ? iterator(leaf, slot) : end();
+    }
+
+    //! Tries to locate a key in the tree and returns an constant iterator to
+    //! the key/data slot if found. If unsuccessful it returns end().
+    const_iterator find(key_type const& key) const {
+        const_iterator(const_cast<self_type*>(this)->find(key));
+    }
+
     //! Searches the tree and returns an iterator to the first pair equal to
     //! or greater than key, or end() if all keys are smaller.
     iterator lower_bound(key_type const& key) {
