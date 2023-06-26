@@ -57,16 +57,16 @@ struct Traits : multiqueue::defaults::Traits {
     static constexpr unsigned int num_pop_pqs = 2;
 #endif
 #if MQ_QUEUE_SELECTION_POLICY == 0
-    using queue_selection_policy = multiqueue::queue_selection::Random<num_pop_pqs>;
+    using queue_selection_policy_type = multiqueue::queue_selection::Random<num_pop_pqs>;
     static constexpr auto queue_selection_policy_name = "random";
 #elif MQ_QUEUE_SELECTION_POLICY == 1
-    using queue_selection_policy = multiqueue::queue_selection::StickRandom<num_pop_pqs>;
+    using queue_selection_policy_type = multiqueue::queue_selection::StickRandom<num_pop_pqs>;
     static constexpr auto queue_selection_policy_name = "stick random";
 #elif MQ_QUEUE_SELECTION_POLICY == 2
-    using queue_selection_policy = multiqueue::queue_selection::SwapAssignment<num_pop_pqs>;
+    using queue_selection_policy_type = multiqueue::queue_selection::SwapAssignment<num_pop_pqs>;
     static constexpr auto queue_selection_policy_name = "swap assignment";
 #elif MQ_QUEUE_SELECTION_POLICY == 3
-    using queue_selection_policy = multiqueue::queue_selection::GlobalPermutation<num_pop_pqs>;
+    using queue_selection_policy_type = multiqueue::queue_selection::GlobalPermutation<num_pop_pqs>;
     static constexpr auto queue_selection_policy_name = "global permutation";
 #else
 #error "Invalid MQ_QUEUE_SELECTION_POLICY"
