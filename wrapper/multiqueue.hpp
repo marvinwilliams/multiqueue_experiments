@@ -17,7 +17,7 @@
 #endif
 
 namespace detail {
-struct Traits : multiqueue::defaults::Traits {
+struct Traits {
 #ifdef MQ_COMPARE_STRICT
     static constexpr bool strict_comparison = true;
 #else
@@ -30,6 +30,8 @@ struct Traits : multiqueue::defaults::Traits {
 #endif
 #ifdef MQ_NUM_POP_TRIES
     static constexpr unsigned int num_pop_tries = MQ_NUM_POP_TRIES;
+#else
+    static constexpr unsigned int num_pop_tries = 1;
 #endif
 #ifdef MQ_NOSCAN_ON_FAILED_POP
     static constexpr bool scan_on_failed_pop = false;
