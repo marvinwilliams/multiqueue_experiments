@@ -185,17 +185,29 @@ void prepare(Settings const& settings, ctx_type const& ctx, handle_type& handle,
     auto last_key = first_key + static_cast<std::ptrdiff_t>(settings.elements_per_thread);
     auto key_dist = std::uniform_int_distribution<key_type>(0, settings.max_key);
     ctx.execute_synchronized(
-        [&key_dist, &rng](auto first, auto last) {
-            std::generate(first, last, [&key_dist, &rng]() { return key_dist(rng); });
+        [&](auto first, auto last) {
+            switch (settings.key_distribution) {
+                case KeyDistribution::Uniform: {
+                    std::generate(first, last, [&key_dist, &rng]() { return key_dist(rng); });
+                    break;
+                }
+                case KeyDistribution::Ascending: {
+                    auto i = static_cast<std::size_t>(std::distance(keys.begin(), first));
+                    for (; first != last; ++first, ++i) {
+                        *first = static_cast<key_type>((i * settings.max_key) / keys.size() + 1);
+                    }
+                    break;
+                }
+                case KeyDistribution::Descending: {
+                    auto i = static_cast<std::size_t>(std::distance(first, keys.end()) - 1);
+                    for (; first != last; ++first, --i) {
+                        *first = static_cast<key_type>((i * settings.max_key) / keys.size() + 1);
+                    }
+                    break;
+                }
+            }
         },
         first_key, last_key);
-    if (id == 0) {
-        if (settings.key_distribution == KeyDistribution::Ascending) {
-            std::sort(keys.begin(), keys.end());
-        } else if (settings.key_distribution == KeyDistribution::Descending) {
-            std::sort(keys.begin(), keys.end(), std::greater<>());
-        }
-    }
 
     std::vector<key_type> prefill_keys(settings.prefill_per_thread);
     std::generate(std::begin(prefill_keys), std::end(prefill_keys), [&key_dist, &rng]() { return key_dist(rng); });

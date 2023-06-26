@@ -2,55 +2,84 @@
 
 #include "multiqueue/multiqueue.hpp"
 
+#include "multiqueue/queue_selection/global_permutation.hpp"
+#include "multiqueue/queue_selection/random.hpp"
+#include "multiqueue/queue_selection/stick_random.hpp"
+#include "multiqueue/queue_selection/swap_assignment.hpp"
+
 #include "cxxopts.hpp"
 
 #include <ostream>
 #include <utility>
 
-namespace multiqueue::queue_selection {
-template <unsigned int>
-class Random;
-template <unsigned int>
-class StickRandom;
-template <unsigned int>
-class SwapAssignment;
-template <unsigned int>
-class GlobalPermutation;
-}  // namespace multiqueue::queue_selection
+#ifndef MQ_QUEUE_SELECTION_POLICY
+#define MQ_QUEUE_SELECTION_POLICY 1
+#endif
 
 namespace detail {
-template <typename QueueSelectionPolicy>
-struct QueueSelectionPolicyTraits {
-    static constexpr auto name = "unknown";
-};
-template <std::size_t N>
-struct QueueSelectionPolicyTraits<multiqueue::queue_selection::Random<N>> {
-    static constexpr auto name = "random";
-};
-template <std::size_t N>
-struct QueueSelectionPolicyTraits<multiqueue::queue_selection::StickRandom<N>> {
-    static constexpr auto name = "stick random";
-};
-template <std::size_t N>
-struct QueueSelectionPolicyTraits<multiqueue::queue_selection::SwapAssignment<N>> {
-    static constexpr auto name = "swap assignment";
-};
-template <std::size_t N>
-struct QueueSelectionPolicyTraits<multiqueue::queue_selection::GlobalPermutation<N>> {
-    static constexpr auto name = "global permutation";
+struct Traits : multiqueue::defaults::Traits {
+#ifdef MQ_COMPARE_STRICT
+    static constexpr bool strict_comparison = true;
+#else
+    static constexpr bool strict_comparison = false;
+#endif
+#ifdef MQ_COUNT_STATS
+    static constexpr bool count_stats = true;
+#else
+    static constexpr bool count_stats = false;
+#endif
+#ifdef MQ_NUM_POP_TRIES
+    static constexpr unsigned int num_pop_tries = MQ_NUM_POP_TRIES;
+#endif
+#ifdef MQ_NOSCAN_ON_FAILED_POP
+    static constexpr bool scan_on_failed_pop = false;
+#else
+    static constexpr bool scan_on_failed_pop = true;
+#endif
+#ifdef MQ_HEAP_ARITY
+    static constexpr unsigned int heap_arity = MQ_HEAP_ARITY;
+#else
+    static constexpr unsigned int heap_arity = 8;
+#endif
+#ifdef MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE
+    static constexpr std::size_t insertion_buffersize = MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE;
+#else
+    static constexpr std::size_t insertion_buffersize = 64;
+#endif
+#ifdef MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE
+    static constexpr std::size_t deletion_buffersize = MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE;
+#else
+    static constexpr std::size_t deletion_buffersize = 64;
+#endif
+#ifdef MQ_NUM_POP_PQS
+    static constexpr unsigned int num_pop_pqs = MQ_NUM_POP_PQS;
+#else
+    static constexpr unsigned int num_pop_pqs = 2;
+#endif
+#if MQ_QUEUE_SELECTION_POLICY == 0
+    using queue_selection_policy = multiqueue::queue_selection::Random<num_pop_pqs>;
+    static constexpr auto queue_selection_policy_name = "random";
+#elif MQ_QUEUE_SELECTION_POLICY == 1
+    using queue_selection_policy = multiqueue::queue_selection::StickRandom<num_pop_pqs>;
+    static constexpr auto queue_selection_policy_name = "stick random";
+#elif MQ_QUEUE_SELECTION_POLICY == 2
+    using queue_selection_policy = multiqueue::queue_selection::SwapAssignment<num_pop_pqs>;
+    static constexpr auto queue_selection_policy_name = "swap assignment";
+#elif MQ_QUEUE_SELECTION_POLICY == 3
+    using queue_selection_policy = multiqueue::queue_selection::GloGlobalPermutation<num_pop_pqs>;
+    static constexpr auto queue_selection_policy_name = "global permutation";
+#else
+#error "Invalid MQ_QUEUE_SELECTION_POLICY"
+#endif
 };
 }  // namespace detail
 
 namespace wrapper {
 
-template <typename Key, typename T, bool Min = true,
-          typename QueueSelectionPolicy = typename multiqueue::MultiQueue<
-              Key, std::pair<Key, T>,
-              std::conditional_t<Min, std::greater<Key>, std::less<Key>>>::traits_type::queue_selection_policy_type>
-class MultiQueue : public multiqueue::MultiQueue<Key, std::pair<Key, T>,
-                                                 std::conditional_t<Min, std::greater<Key>, std::less<Key>>> {
-    using base_type =
-        multiqueue::MultiQueue<Key, std::pair<Key, T>, std::conditional_t<Min, std::greater<Key>, std::less<Key>>>;
+template <typename Key, typename Value, typename Compare, typename Traits = detail::Traits,
+          typename Policy = typename Traits::queue_selection_policy_type>
+class MultiQueue : public multiqueue::MultiQueue<Key, Value, Compare, Traits> {
+    using base_type = multiqueue::MultiQueue<Key, Value, Compare, Traits>;
 
    public:
     struct config_type : base_type::queue_selection_config_type {
@@ -69,19 +98,21 @@ class MultiQueue : public multiqueue::MultiQueue<Key, std::pair<Key, T>,
     }
 
     std::ostream &describe(std::ostream &out) {
-        out << "MultiQueue (pqs: " << this->num_pqs()
-            << ", queue selection: " << detail::QueueSelectionPolicyTraits<QueueSelectionPolicy>::name
+        out << "MultiQueue [comparisons: " << (Traits::strict_comparison ? "strict" : "non-strict")
+            << ", pop tries: " << Traits::num_pop_tries
+            << ", scan on failed pop: " << (Traits::scan_on_failed_pop ? "true" : "false")
+            << ", heap arity: " << Traits::heap_arity << ", buffersizes (i/d): " << Traits::insertion_buffersize << '/'
+            << Traits::deletion_buffersize << ", queue selection: " << Traits::queue_selection_policy_name
+            << ", pop pqs: " << Traits::num_pop_pqs << "] (pqs: " << this->num_pqs()
             << ", stickiness: " << this->get_queue_selection_config().stickiness << ')';
         return out;
     }
 };
 
-template <typename Key, typename T, bool Min, unsigned N>
-class MultiQueue<Key, T, Min, multiqueue::queue_selection::Random<N>>
-    : public multiqueue::MultiQueue<Key, std::pair<Key, T>,
-                                    std::conditional_t<Min, std::greater<Key>, std::less<Key>>> {
-    using base_type =
-        multiqueue::MultiQueue<Key, std::pair<Key, T>, std::conditional_t<Min, std::greater<Key>, std::less<Key>>>;
+template <typename Key, typename Value, typename Compare, typename Traits, unsigned N>
+class MultiQueue<Key, Value, Compare, Traits, multiqueue::queue_selection::Random<N>>
+    : public multiqueue::MultiQueue<Key, Value, Compare, Traits> {
+    using base_type = multiqueue::MultiQueue<Key, Value, Compare, Traits>;
 
    public:
     struct config_type : base_type::queue_selection_config_type {
@@ -98,7 +129,12 @@ class MultiQueue<Key, T, Min, multiqueue::queue_selection::Random<N>>
     }
 
     std::ostream &describe(std::ostream &out) {
-        out << "MultiQueue (pqs: " << this->num_pqs() << ", queue selection: random)";
+        out << "MultiQueue [comparisons: " << (Traits::strict_comparison ? "strict" : "non-strict")
+            << ", pop tries: " << Traits::num_pop_tries
+            << ", scan on failed pop: " << (Traits::scan_on_failed_pop ? "true" : "false")
+            << ", heap arity: " << Traits::heap_arity << ", buffersizes (i/d): " << Traits::insertion_buffersize << '/'
+            << Traits::deletion_buffersize << ", queue selection: " << Traits::queue_selection_policy_name
+            << ", pop pqs: " << Traits::num_pop_pqs << "] (pqs: " << this->num_pqs() << ')';
         return out;
     }
 };

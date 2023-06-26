@@ -16,14 +16,13 @@
 
 namespace wrapper {
 
-template <typename Key, typename T, bool Min, std::size_t StealProb, std::size_t StealBatchSize>
+template <typename Key, typename Value, typename Compare = std::less<Key>, std::size_t StealProb = 8, std::size_t StealBatchSize = 8>
 class StealingMQ {
    public:
     using key_type = Key;
-    using mapped_type = T;
-    using value_type = std::pair<key_type, mapped_type>;
+    using value_type = Value;
     struct config_type {};
-    using key_comp = std::conditional_t<Min, std::greater<Key>, std::less<Key>>;
+    using key_comp = Compare;
 
    private:
     class value_compare {

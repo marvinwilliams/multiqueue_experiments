@@ -51,6 +51,11 @@ bool operation_log::verify_logs(std::vector<operation_log::OperationLog> const& 
             popped[static_cast<std::size_t>(thread_id)][elem_id] = true;
         }
     }
+    auto num_failed_pops = std::accumulate(logs.begin(), logs.end(), 0UL,
+                                           [](std::size_t sum, auto const& l) { return sum + l.failed_pops; });
+    if (num_failed_pops > 0) {
+        std::cerr << "Warning: " << num_failed_pops << " failed pops\n";
+    }
     return true;
 }
 

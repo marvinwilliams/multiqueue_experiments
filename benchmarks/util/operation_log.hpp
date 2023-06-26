@@ -47,7 +47,7 @@ struct Pop {
 struct OperationLog {
     std::vector<Push> pushes;
     std::vector<Pop> pops;
-    std::vector<uint64_t> failed_pops;
+    long long failed_pops = 0;
 };
 
 template <typename PriorityQueue>
@@ -64,8 +64,7 @@ class LoggingHandle : public PriorityQueue::handle_type {
     }
 
    public:
-    explicit LoggingHandle(int id, PriorityQueue& pq)
-        : base_type(pq.get_handle()), value_(start_value(id)) {
+    explicit LoggingHandle(int id, PriorityQueue& pq) : base_type(pq.get_handle()), value_(start_value(id)) {
     }
 
     void reserve_push_log(std::size_t size) {
@@ -87,7 +86,7 @@ class LoggingHandle : public PriorityQueue::handle_type {
         auto tick = get_tick();
         auto retval = base_type::try_pop();
         if (!retval) {
-            log_.failed_pops.push_back(tick);
+            ++log_.failed_pops;
             return std::nullopt;
         }
         log_.pops.push_back({tick, retval->second});

@@ -11,12 +11,11 @@
 namespace wrapper {
 
 // Min is ignored since this is a FIFO
-template <typename KeyType, typename T, bool /*Min*/>
+template <typename KeyType, typename Value>
 class TBBQueue {
    public:
     using key_type = KeyType;
-    using mapped_type = T;
-    using value_type = std::pair<key_type, mapped_type>;
+    using value_type = Value;
     struct config_type {};
 
    private:

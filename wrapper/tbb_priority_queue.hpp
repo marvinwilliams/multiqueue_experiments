@@ -10,16 +10,15 @@
 
 namespace wrapper {
 
-template <typename KeyType, typename T, bool Min>
+template <typename KeyType, typename Value, typename Compare = std::less<KeyType>>
 class TBBPriorityQueue {
    public:
     using key_type = KeyType;
-    using mapped_type = T;
-    using value_type = std::pair<key_type, mapped_type>;
-    using key_compare = std::conditional_t<Min, std::greater<key_type>, std::less<key_type>>;
+    using value_type = Value;
+    using key_compare = Compare;
     struct config_type {};
     class value_compare {
-        friend class TBBPriorityQueue<KeyType, T, Min>;
+        friend class TBBPriorityQueue<KeyType, Value, Compare>;
         [[no_unique_address]] key_compare comp;
 
         explicit value_compare(key_compare const& c) : comp{c} {

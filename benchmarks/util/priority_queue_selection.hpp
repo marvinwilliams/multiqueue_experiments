@@ -12,7 +12,8 @@
 #if defined PQ_MQ
 #include "wrapper/multiqueue.hpp"
 template <typename Key, typename T, bool Min>
-using PriorityQueue = wrapper::MultiQueue<Key, T, Min>;
+using PriorityQueue =
+    wrapper::MultiQueue<Key, std::pair<Key, T>, std::conditional_t<Min, std::greater<Key>, std::less<Key>>>;
 #elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
 template <typename Key, typename T, bool Min>
@@ -35,11 +36,12 @@ using PriorityQueue = wrapper::Spraylist<Key, T, Min>;
 #elif defined PQ_TBB_PQ
 #include "wrapper/tbb_priority_queue.hpp"
 template <typename Key, typename T, bool Min>
-using PriorityQueue = wrapper::TBBPriorityQueue<Key, T, Min>;
+using PriorityQueue =
+    wrapper::TBBPriorityQueue<Key, std::pair<Key, T>, std::conditional_t<Min, std::greater<Key>, std::less<Key>>>;
 #elif defined PQ_TBB_FIFO
 #include "wrapper/tbb_queue.hpp"
 template <typename Key, typename T, bool Min>
-using PriorityQueue = wrapper::TBBQueue<Key, T, Min>;
+using PriorityQueue = wrapper::TBBQueue<Key, std::pair<Key, T>>;
 #elif defined PQ_SMQ
 #include "wrapper/smq.hpp"
 #ifndef SMQ_STEAL_PROB
@@ -49,7 +51,7 @@ using PriorityQueue = wrapper::TBBQueue<Key, T, Min>;
 #define SMQ_STEAL_BATCH_SIZE 8
 #endif
 template <typename Key, typename T, bool Min>
-using PriorityQueue = wrapper::StealingMQ<Key, T, Min, SMQ_STEAL_PROB, SMQ_STEAL_BATCH_SIZE>;
+using PriorityQueue = wrapper::StealingMQ<Key, std::pair<Key, T>, std::conditional_t<Min, std::greater<Key>, std::less<Key>>, SMQ_STEAL_PROB, SMQ_STEAL_BATCH_SIZE>;
 #else
 #error No valid PQ specified
 #endif
