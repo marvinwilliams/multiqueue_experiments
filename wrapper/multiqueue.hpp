@@ -66,7 +66,7 @@ struct Traits : multiqueue::defaults::Traits {
     using queue_selection_policy = multiqueue::queue_selection::SwapAssignment<num_pop_pqs>;
     static constexpr auto queue_selection_policy_name = "swap assignment";
 #elif MQ_QUEUE_SELECTION_POLICY == 3
-    using queue_selection_policy = multiqueue::queue_selection::GloGlobalPermutation<num_pop_pqs>;
+    using queue_selection_policy = multiqueue::queue_selection::GlobalPermutation<num_pop_pqs>;
     static constexpr auto queue_selection_policy_name = "global permutation";
 #else
 #error "Invalid MQ_QUEUE_SELECTION_POLICY"

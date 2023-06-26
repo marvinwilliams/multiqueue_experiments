@@ -1,7 +1,7 @@
 add_library(benchmark_base INTERFACE)
 target_include_directories(
   benchmark_base INTERFACE "${CMAKE_SOURCE_DIR}/third_party"
-                           "${CMAKE_CURRENT_SOURCE_DIR}/util")
+                           "${CMAKE_SOURCE_DIR}/util")
 target_compile_options(
   benchmark_base
   INTERFACE
@@ -129,7 +129,8 @@ set(COMPETITORS
     tbb_pq)
 
 add_library(throughput INTERFACE)
-target_sources(throughput INTERFACE stress_test.cpp util/threading.cpp)
+target_sources(throughput INTERFACE stress_test.cpp
+                                    "${CMAKE_SOURCE_DIR}/util/threading.cpp")
 target_link_libraries(throughput INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
@@ -172,8 +173,9 @@ foreach(target ${MQ_VARIANTS} ${COMPETITORS})
 endforeach()
 
 add_library(quality INTERFACE)
-target_sources(quality INTERFACE stress_test.cpp util/threading.cpp
-                                 util/operation_log.cpp)
+target_sources(
+  quality INTERFACE stress_test.cpp "${CMAKE_SOURCE_DIR}/util/threading.cpp"
+                    "${CMAKE_SOURCE_DIR}/util/operation_log.cpp")
 target_compile_definitions(
   quality INTERFACE -DQUALITY $<$<CONFIG:Debug>:-DREPLAY_TREE_DEBUG>)
 target_link_libraries(quality INTERFACE benchmark_base Threads::Threads)
@@ -206,7 +208,8 @@ foreach(target ${MQ_VARIANTS} ${COMPETITORS})
 endforeach()
 
 add_library(sssp_dijkstra INTERFACE)
-target_sources(sssp_dijkstra INTERFACE sssp_dijkstra.cpp util/threading.cpp)
+target_sources(sssp_dijkstra INTERFACE sssp_dijkstra.cpp
+                                       "${CMAKE_SOURCE_DIR}/util/threading.cpp")
 target_link_libraries(sssp_dijkstra INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_VARIANTS} ${COMPETITORS})
@@ -246,7 +249,8 @@ endforeach()
 add_dependencies(sssp_dijkstra_all sssp_dijkstra_seq sssp_dijkstra_seq_fifo)
 
 add_library(knapsack INTERFACE)
-target_sources(knapsack INTERFACE knapsack.cpp util/threading.cpp)
+target_sources(knapsack INTERFACE knapsack.cpp
+                                  "${CMAKE_SOURCE_DIR}/util/threading.cpp")
 target_link_libraries(knapsack INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_VARIANTS} ${COMPETITORS})

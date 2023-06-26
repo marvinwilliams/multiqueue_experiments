@@ -411,9 +411,9 @@ WorkMode parse_work_mode(char c) {
     switch (c) {
         case 'm':
             return WorkMode::Mixed;
-        case 'p':
+        case 'u':
             return WorkMode::Push;
-        case 'd':
+        case 'o':
             return WorkMode::Pop;
         case 'i':
             return WorkMode::Increment;
@@ -445,7 +445,7 @@ int main(int argc, char* argv[]) {
         ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("p,prefill", "The prefill per thread", cxxopts::value<std::size_t>(settings.prefill_per_thread), "NUMBER")
         ("n,keys", "The number of keys per thread", cxxopts::value<std::size_t>(settings.elements_per_thread), "NUMBER")
-        ("w,work-mode", "Specify the work mode ([m]ixed, [s]plit, [i]ncrement)", cxxopts::value<char>(), "STRING")
+        ("w,work-mode", "Specify the work mode ([m]ixed, p[u]sh, p[o]p, [i]ncrement)", cxxopts::value<char>(), "STRING")
         ("d,key-dist", "Specify the key distribution ([u]niform, [a]scending, [d]escending)", cxxopts::value<char>(), "STRING")
         ("m,max", "Specify the max key", cxxopts::value<key_type>(settings.max_key), "NUMBER")
         ("s,seed", "Specify the initial seed", cxxopts::value<int>(settings.seed), "NUMBER")

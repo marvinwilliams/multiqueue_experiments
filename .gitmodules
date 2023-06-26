@@ -10,3 +10,7 @@
 [submodule "smq"]
 	path = third_party/smq
 	url = https://github.com/marvinwilliams/mq-based-schedulers.git
+[submodule "multiqueue"]
+	path = multiqueue
+	url = https://github.com/marvinwilliams/multiqueue
+	branch = devel
