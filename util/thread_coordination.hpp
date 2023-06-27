@@ -101,7 +101,7 @@ class Context {
 
     template <typename It, typename Work, typename... Args>
     time_result_type execute_synchronized_blockwise(It begin, It end, Work work, Args&&... args) const {
-        static constexpr auto block_size = static_cast<std::ptrdiff_t>(1) << 14;
+        static constexpr auto block_size = static_cast<std::ptrdiff_t>(1) << 12;
 
         shared_data_.barrier.wait();
         auto t_start = clock_type::now();

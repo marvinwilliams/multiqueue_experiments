@@ -65,11 +65,13 @@ class LoggingHandle : public PriorityQueue::handle_type {
     }
 
     void reserve_push_log(std::size_t size) {
-        log_.pushes.reserve(size);
+        log_.pushes.resize(size);
+        log_.pushes.clear();
     }
 
     void reserve_pop_log(std::size_t size) {
-        log_.pops.reserve(size);
+        log_.pops.resize(size);
+        log_.pops.clear();
     }
 
     void push(typename PriorityQueue::key_type const& key) {

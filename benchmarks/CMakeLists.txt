@@ -72,11 +72,6 @@ foreach(
   endforeach()
 endforeach()
 
-add_library(mq_std INTERFACE)
-target_link_libraries(mq_std INTERFACE mq_d_2)
-target_compile_definitions(mq_std INTERFACE USE_STD_PQ)
-list(APPEND MQ_TUNING_VARIANTS mq_std)
-
 function(add_different_num_pop_pqs num_pop_pqs)
   set(name mq_pop_pqs_${num_pop_pqs})
   add_library(${name} INTERFACE)
@@ -146,6 +141,7 @@ foreach(
   klsm256
   klsm1024
   klsm4096
+  smq
   tbb_pq)
   add_executable(throughput_${target}_uint8)
   target_link_libraries(throughput_${target}_uint8 PRIVATE ${target} throughput)
@@ -188,12 +184,12 @@ foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
       NAME quality_${target}_seq
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 /dev/null")
+        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 1 > /dev/null")
     add_test(
       NAME quality_${target}
       COMMAND
         /bin/bash -c
-        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 8 /dev/null")
+        "$<TARGET_FILE:quality_${target}> -p 10000 -n 10000 -j 8 > /dev/null")
   endif()
 endforeach()
 

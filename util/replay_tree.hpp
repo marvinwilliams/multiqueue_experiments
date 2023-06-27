@@ -17,7 +17,6 @@
 // *** Debugging Macros
 
 #ifdef REPLAY_TREE_DEBUG
-#include <iostream>
 //! Assertion only if REPLAY_TREE_DEBUG is defined. This is not used in verify().
 #define REPLAY_TREE_ASSERT(x) \
     do {                      \
