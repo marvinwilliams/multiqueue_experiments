@@ -102,14 +102,14 @@ class LoggingHandle : public PriorityQueue::handle_type {
     }
 };
 
-struct Histogram {
-    std::vector<std::size_t> ranks;
-    std::vector<std::size_t> delays;
+struct Metrics {
+    std::size_t rank_error;
+    std::size_t delay;
 };
 
 bool verify_logs(std::vector<OperationLog> const& logs);
 void write_logs(std::vector<OperationLog> const& log, std::ostream& out);
-Histogram to_histogram(std::vector<OperationLog> const& logs);
-void write_histogram(Histogram const& histogram, std::ostream& out);
+std::vector<Metrics> replay_logs(std::vector<OperationLog> const& logs);
+void write_metrics(std::vector<Metrics> const& metrics, std::ostream& out);
 
 }  // namespace operation_log

@@ -531,12 +531,12 @@ int main(int argc, char* argv[]) {
     if (!operation_log::verify_logs(logs)) {
         return false;
     }
-    std::clog << "Computing quality histogram..." << std::flush;
+    std::clog << "Replaying logs..." << std::flush;
     auto t_start = std::chrono::steady_clock::now();
-    auto histogram = operation_log::to_histogram(logs);
+    auto metrics = operation_log::replay_logs(logs);
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << "ms)\n";
-    operation_log::write_histogram(histogram, std::cout);
+    operation_log::write_metrics(metrics, std::cout);
 #else
     write_result(settings, results, std::cout);
 #endif

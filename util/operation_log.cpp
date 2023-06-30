@@ -51,8 +51,8 @@ bool operation_log::verify_logs(std::vector<operation_log::OperationLog> const& 
             popped[static_cast<std::size_t>(thread_id)][elem_id] = true;
         }
     }
-    auto num_failed_pops = std::accumulate(logs.begin(), logs.end(), 0LL,
-                                           [](auto sum, auto const& l) { return sum + l.failed_pops; });
+    auto num_failed_pops =
+        std::accumulate(logs.begin(), logs.end(), 0LL, [](auto sum, auto const& l) { return sum + l.failed_pops; });
     if (num_failed_pops > 0) {
         std::cerr << "Warning: " << num_failed_pops << " failed pops\n";
     }
@@ -88,7 +88,7 @@ struct Element {
     }
 };
 
-operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> const& logs) {
+std::vector<operation_log::Metrics> operation_log::replay_logs(std::vector<OperationLog> const& logs) {
     struct ExtractKey {
         static auto const& get(Element const& e) {
             return e.key;
@@ -97,12 +97,6 @@ operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> c
 
     auto num_pops = std::accumulate(logs.begin(), logs.end(), 0UL,
                                     [](std::size_t sum, auto const& l) { return sum + l.pops.size(); });
-    auto num_pushes = std::accumulate(logs.begin(), logs.end(), 0UL,
-                                      [](std::size_t sum, auto const& l) { return sum + l.pushes.size(); });
-
-    Histogram histogram{};
-    histogram.ranks.reserve(num_pushes);
-    histogram.delays.reserve(num_pops);
 
     ReplayTree<unsigned long, Element, ExtractKey> replay_tree{};
     std::vector<std::size_t> push_indices(logs.size(), 0);
@@ -118,6 +112,7 @@ operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> c
         }
         return std::make_pair(min_tick, min_thread);
     };
+    std::vector<Metrics> metrics(num_pops);
     for (std::size_t i = 0; i < num_pops; ++i) {
         auto [tick, thread] = next_pop();
         assert(thread != std::numeric_limits<std::size_t>::max());
@@ -140,37 +135,14 @@ operation_log::Histogram operation_log::to_histogram(std::vector<OperationLog> c
         }
         auto [success, rank, delay] = replay_tree.erase_val({key, pop.data});
         assert(success);
-        if (histogram.ranks.size() <= rank) {
-            histogram.ranks.resize(rank + 1);
-        }
-        ++histogram.ranks[rank];
-        if (histogram.delays.size() <= delay) {
-            histogram.delays.resize(delay + 1);
-        }
-        ++histogram.delays[delay];
+        metrics[i] = {rank, delay};
         ++pop_indices[thread];
     }
-    return histogram;
+    return metrics;
 }
 
-void operation_log::write_histogram(Histogram const& histogram, std::ostream& out) {
-    std::size_t i = 0;
-    for (; i < std::min(histogram.ranks.size(), histogram.delays.size()); ++i) {
-        if (histogram.ranks[i] == 0 && histogram.delays[i] == 0) {
-            continue;
-        }
-        out << i << ' ' << histogram.ranks[i] << ' ' << histogram.delays[i] << '\n';
-    }
-    for (; i < histogram.ranks.size(); ++i) {
-        if (histogram.ranks[i] == 0) {
-            continue;
-        }
-        out << i << ' ' << histogram.ranks[i] << ' ' << 0 << '\n';
-    }
-    for (; i < histogram.delays.size(); ++i) {
-        if (histogram.delays[i] == 0) {
-            continue;
-        }
-        out << i << ' ' << 0 << ' ' << histogram.delays[i] << '\n';
+void operation_log::write_metrics(std::vector<Metrics> const& metrics, std::ostream& out) {
+    for (auto const& m : metrics) {
+        out << m.rank_error << ' ' << m.delay << '\n';
     }
 }
