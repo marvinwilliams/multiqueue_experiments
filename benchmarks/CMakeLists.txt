@@ -80,7 +80,7 @@ function(add_different_num_pop_pqs num_pop_pqs)
     INTERFACE MQ_QUEUE_SELECTION_POLICY=0
               MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
               MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0
-              MQ_RANDOM_POLICY_NUM_POP_PQS=${num_pop_pqs})
+              MQ_NUM_POP_PQS=${num_pop_pqs})
   target_link_libraries(${name} INTERFACE mq)
   list(APPEND MQ_TUNING_VARIANTS ${name})
   set(MQ_TUNING_VARIANTS
