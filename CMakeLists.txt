@@ -50,9 +50,10 @@ set(L1_CACHE_LINESIZE
 set(PAGESIZE
     ${DEFAULT_PAGESIZE}
     CACHE STRING "Specify the assumed pagesize (bytes)")
-option(MULTIQUEUE_EXP_COMPARE_STRICT "Repeat comparison if key is stale" OFF)
+option(MULTIQUEUE_EXP_COMPARE_STRICT "Repeat comparison if key is stale" ON)
 option(MULTIQUEUE_EXP_COUNT_STATS "Count various stats" OFF)
-option(MULTIQUEUE_EXP_NO_SCAN_ON_FAILED_POP "Don't scan queues for elements if popping failes" OFF)
+option(MULTIQUEUE_EXP_NO_SCAN_ON_FAILED_POP
+       "Don't scan queues for elements if popping failes" OFF)
 
 if(NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")
   message(SEND_ERROR "Invalid L1 cache linesize")
