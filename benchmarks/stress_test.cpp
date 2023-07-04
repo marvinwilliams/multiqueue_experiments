@@ -377,7 +377,8 @@ std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
     pq.describe(std::clog) << '\n';
     auto keys = std::vector<key_type>(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
     std::vector<BenchmarkResult> results(static_cast<std::size_t>(settings.num_threads));
-    thread_coordination::TaskHandle task_handle(settings.num_threads, [&](auto ctx) {
+    thread_coordination::affinity::NUMA numa_affinity{CORES_PER_NUMA_NODE,NUM_NUMA_NODES};
+    thread_coordination::TaskHandle task_handle(numa_affinity, settings.num_threads, [&](auto ctx) {
 #ifdef QUALITY
         auto handle = handle_type(ctx.get_id(), pq);
         handle.reserve_push_log(2 * (settings.prefill_per_thread + settings.elements_per_thread));

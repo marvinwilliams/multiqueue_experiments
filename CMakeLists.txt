@@ -50,6 +50,12 @@ set(L1_CACHE_LINESIZE
 set(PAGESIZE
     ${DEFAULT_PAGESIZE}
     CACHE STRING "Specify the assumed pagesize (bytes)")
+set(NUM_NUMA_NODES
+    1
+    CACHE STRING "Specify the number of NUMA nodes")
+set(CORES_PER_NUMA_NODE
+    256
+    CACHE STRING "Specify the number of cores per NUMA node")
 option(MULTIQUEUE_EXP_COMPARE_STRICT "Repeat comparison if key is stale" ON)
 option(MULTIQUEUE_EXP_COUNT_STATS "Count various stats" OFF)
 option(MULTIQUEUE_EXP_NO_SCAN_ON_FAILED_POP

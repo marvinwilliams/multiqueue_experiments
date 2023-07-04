@@ -10,6 +10,8 @@ target_compile_options(
 target_compile_definitions(benchmark_base
                            INTERFACE L1_CACHE_LINESIZE=${L1_CACHE_LINESIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGESIZE=${PAGESIZE})
+target_compile_definitions(benchmark_base INTERFACE CORES_PER_NUMA_NODE=${CORES_PER_NUMA_NODE})
+target_compile_definitions(benchmark_base INTERFACE NUM_NUMA_NODES=${NUM_NUMA_NODES})
 target_compile_features(benchmark_base INTERFACE cxx_std_17)
 
 if(MULTIQUEUE_EXP_PERFORMANCE_COUNTERS)
