@@ -4,7 +4,7 @@ set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
 # set(SMQ_DIR "${CMAKE_SOURCE_DIR}/third_party/smq/Galois-2.2.1")
 
 add_library(wrapper INTERFACE)
-target_include_directories(wrapper INTERFACE ${CMAKE_SOURCE_DIR}
+target_include_directories(wrapper SYSTEM INTERFACE ${CMAKE_SOURCE_DIR}
                                              ${CMAKE_SOURCE_DIR}/third_party)
 
 add_library(mq INTERFACE)

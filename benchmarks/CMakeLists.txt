@@ -92,6 +92,22 @@ foreach(num_pop_pqs 1 2 4 8)
   add_different_num_pop_pqs(${num_pop_pqs})
 endforeach()
 
+add_library(mq_std_pq INTERFACE)
+target_compile_definitions(
+  mq_std_pq
+  INTERFACE MQ_QUEUE_SELECTION_POLICY=0 MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
+            MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0 MQ_USE_STD_PQ)
+target_link_libraries(mq_std_pq INTERFACE mq)
+list(APPEND MQ_TUNING_VARIANTS mq_std_pq)
+
+add_library(mq_btree INTERFACE)
+target_compile_definitions(
+  mq_btree
+  INTERFACE MQ_QUEUE_SELECTION_POLICY=0 MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
+            MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0 MQ_USE_BTREE)
+target_link_libraries(mq_btree INTERFACE mq)
+list(APPEND MQ_TUNING_VARIANTS mq_btree)
+
 add_library(mq_default INTERFACE)
 target_compile_definitions(mq_default INTERFACE MQ_QUEUE_SELECTION_POLICY=0)
 target_link_libraries(mq_default INTERFACE mq)
