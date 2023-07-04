@@ -211,6 +211,11 @@ foreach(target ${MQ_TUNING_VARIANTS} ${MQ_VARIANTS} ${COMPETITORS})
   endif()
 endforeach()
 
+add_custom_target(quality_mq_tuningg)
+foreach(target ${MQ_TUNING_VARIANTS})
+  add_dependencies(quality_mq_tuning quality_${target})
+endforeach()
+
 add_custom_target(quality_mq)
 foreach(target ${MQ_VARIANTS})
   add_dependencies(quality_mq quality_${target})
