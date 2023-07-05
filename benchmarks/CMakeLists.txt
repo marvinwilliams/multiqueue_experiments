@@ -44,12 +44,12 @@ if(MULTIQUEUE_EXP_TSAN)
   target_link_options(benchmark_base INTERFACE -fsanitize=thread)
 endif()
 
-function(add_tuning_variant buffer_size degree)
-  set(name mq_bs_${buffer_size}_d_${degree})
+function(add_tuning_variant buffer_size degree policy)
+  set(name mq_bs_${buffer_size}_d_${degree}_p_${policy})
   add_library(${name} INTERFACE)
   target_compile_definitions(
     ${name}
-    INTERFACE MQ_QUEUE_SELECTION_POLICY=0 # Random
+    INTERFACE MQ_QUEUE_SELECTION_POLICY=${policy}
               MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
               MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
               MQ_HEAP_ARITY=${degree})
@@ -70,7 +70,10 @@ foreach(
   128
   512)
   foreach(degree 2 4 8 16 64)
-    add_tuning_variant(${buffer_size} ${degree})
+    add_tuning_variant(${buffer_size} ${degree} 0)
+    add_tuning_variant(${buffer_size} ${degree} 1)
+    add_tuning_variant(${buffer_size} ${degree} 2)
+    add_tuning_variant(${buffer_size} ${degree} 3)
   endforeach()
 endforeach()
 
