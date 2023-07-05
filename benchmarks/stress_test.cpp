@@ -126,8 +126,8 @@ void write_settings(Settings const& settings, std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n'
         << "Prefill per thread: " << settings.prefill_per_thread << '\n'
         << "Elements per thread: " << settings.elements_per_thread << '\n'
-        << "Operation mode: " << work_mode_name(settings.work_mode) << '\n';
-    out << "Key distribution: " << key_distribution_name(settings.key_distribution) << '\n'
+        << "Operation mode: " << work_mode_name(settings.work_mode) << '\n'
+        << "Key distribution: " << key_distribution_name(settings.key_distribution) << '\n'
         << "Max key: " << static_cast<unsigned long>(settings.max_key) << '\n'
         << "Seed: " << settings.seed << '\n';
 #ifdef USE_PAPI
@@ -282,8 +282,8 @@ void write_result(Settings const& settings, std::vector<BenchmarkResult> const& 
     }
 #endif
     out << '\n';
-    for (int i = 0; i < settings.num_threads; ++i) {
-        auto const& s = stats[static_cast<std::size_t>(i)];
+    for (std::size_t i = 0; i < stats.size(); ++i) {
+        auto const& s = stats[i];
         // clang-format off
         out << i << ','
             << s.work_time.start.time_since_epoch().count() << ','
@@ -377,7 +377,7 @@ std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
     pq.describe(std::clog) << '\n';
     auto keys = std::vector<key_type>(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
     std::vector<BenchmarkResult> results(static_cast<std::size_t>(settings.num_threads));
-    thread_coordination::affinity::NUMA numa_affinity{CORES_PER_NUMA_NODE,NUM_NUMA_NODES};
+    thread_coordination::affinity::NUMA numa_affinity{CORES_PER_NUMA_NODE, NUM_NUMA_NODES};
     thread_coordination::TaskHandle task_handle(numa_affinity, settings.num_threads, [&](auto ctx) {
 #ifdef QUALITY
         auto handle = handle_type(ctx.get_id(), pq);

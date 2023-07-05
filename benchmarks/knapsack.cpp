@@ -1,5 +1,6 @@
+#include "build_info.hpp"
 #include "knapsack_instance.hpp"
-#include "priority_queue_factory.hpp"
+#include "priority_queue_selection.hpp"
 #include "termination_detection.hpp"
 #include "thread_coordination.hpp"
 
@@ -24,42 +25,10 @@
 #include <utility>
 #include <vector>
 
-#ifdef MQ_HAS_MAX
+using pq_type = PriorityQueue<unsigned long, unsigned long, false>;
+using handle_type = pq_type::handle_type;
 
-using PriorityQueue = DefaultMaxPriorityQueue;
-
-void push(PriorityQueue& pq, PriorityQueue::value_type const& v) {
-    pq.push(v);
-}
-
-bool try_pop(PriorityQueue& pq, PriorityQueue::value_type& v) {
-    return pq.try_pop(v);
-}
-
-#else
-
-using PriorityQueue = DefaultMinPriorityQueue;
-
-static constexpr unsigned long max_key = 1 << 28;
-
-void push(PriorityQueue::Handle& h, PriorityQueue::value_type v) {
-    h.push({max_key - v.first, v.second});
-}
-
-bool try_pop(PriorityQueue::Handle& h, PriorityQueue::value_type& v) {
-    bool success = h.try_pop(v);
-    if (!success) {
-        return false;
-    }
-    v.first = max_key - v.first;
-    return true;
-}
-
-#endif
-
-using handle_type = PriorityQueue::Handle;
-
-using thread_coordination::timepoint_type;
+using ctx_type = thread_coordination::Context;
 
 static_assert(sizeof(unsigned long) >= sizeof(std::uint64_t), "64bit unsigned long required");
 using payload_type = unsigned long;
@@ -70,13 +39,13 @@ static constexpr std::uint8_t bits_for_value = 24;
 static_assert(bits_for_index + bits_for_free_capacity + bits_for_value <= std::numeric_limits<payload_type>::digits,
               "Too many bits required for payload");
 
-constexpr payload_type to_payload(std::size_t index, unsigned long free_capacity, unsigned long value) noexcept {
+constexpr payload_type to_payload(std::size_t index, long long free_capacity, long long value) noexcept {
     assert(index < (1UL << bits_for_index));
-    assert(free_capacity < (1UL << bits_for_free_capacity));
-    assert(value < (1UL << bits_for_value));
-    payload_type payload = value;
+    assert(free_capacity < static_cast<long long>(1UL << bits_for_free_capacity));
+    assert(value < static_cast<long long>(1UL << bits_for_value));
+    auto payload = static_cast<payload_type>(value);
     payload <<= bits_for_free_capacity;
-    payload |= free_capacity;
+    payload |= static_cast<payload_type>(free_capacity);
     payload <<= bits_for_index;
     payload |= index;
     return payload;
@@ -86,270 +55,234 @@ struct Settings {
     int num_threads = 4;
     std::filesystem::path knapsack_file;
     int seed = 1;
-    unsigned long solution = 0;
+    long long solution = 0;
+    pq_type::config_type pq_settings{};
 };
 
-struct ThreadData {
-    handle_type pq_handle;
+void write_settings(Settings const& settings, std::ostream& out) {
+    out << "Threads: " << settings.num_threads << '\n'
+        << "Seed: " << settings.seed << '\n'
+        << "Problem file: " << settings.knapsack_file << '\n'
+        << "Reference solution: " << settings.solution << '\n';
+}
+
+struct ThreadStats {
+    thread_coordination::time_result_type work_time{};
     long long pushed_nodes{0};
     long long ignored_nodes{0};
     long long processed_nodes{0};
 };
 
 struct SharedData {
-    alignas(L1_CACHE_LINESIZE) std::atomic_ulong best_value{0};
-    std::atomic<timepoint_type> start_time{timepoint_type::max()};
-    std::atomic<timepoint_type> end_time{timepoint_type::min()};
-    std::atomic_llong pushed_nodes{0};
-    std::atomic_llong ignored_nodes{0};
-    std::atomic_llong processed_nodes{0};
-    termination_detection::Data termination_detection_data;
+    KnapsackInstance instance;
+    std::atomic_llong solution{0};
+    termination_detection::Data termination_detection_data{};
 
-    void update_work_time(std::pair<timepoint_type, timepoint_type> const& work_time) {
-        auto old_start = start_time.load(std::memory_order_relaxed);
-        while (work_time.first < old_start &&
-               !start_time.compare_exchange_weak(old_start, work_time.first, std::memory_order_relaxed)) {
+    void update_solution(long long current_solution, long long new_solution) noexcept {
+        while (new_solution > current_solution &&
+               !solution.compare_exchange_weak(current_solution, new_solution, std::memory_order_relaxed)) {
         }
-        auto old_end = start_time.load(std::memory_order_relaxed);
-        while (work_time.second > old_end &&
-               !end_time.compare_exchange_weak(old_end, work_time.second, std::memory_order_relaxed)) {
-        }
-    }
-
-    void update_counters(ThreadData const& thread_data) {
-        pushed_nodes.fetch_add(thread_data.pushed_nodes, std::memory_order_relaxed);
-        ignored_nodes.fetch_add(thread_data.ignored_nodes, std::memory_order_relaxed);
-        processed_nodes.fetch_add(thread_data.processed_nodes, std::memory_order_relaxed);
     }
 };
 
-unsigned long lower_bound(KnapsackInstance const& instance, unsigned long capacity, std::size_t index) noexcept {
-    unsigned long value{0};
-    while (index < instance.items.size() && instance.items[index].weight <= capacity) {
-        capacity -= instance.items[index].weight;
-        value += instance.items[index].value;
+long long lower_bound(KnapsackInstance const& instance, long long capacity, std::size_t index) noexcept {
+    long long value{0};
+    while (index < instance.size() && instance.items()[index].weight <= capacity) {
+        capacity -= instance.items()[index].weight;
+        value += instance.items()[index].value;
         ++index;
     }
     return value;
 }
 
-unsigned long upper_bound(KnapsackInstance const& instance, unsigned long capacity, std::size_t index) noexcept {
-    assert(index <= instance.items.size());
-    unsigned long value_offset = instance.prefix_sum[index].value;
-    unsigned long target_capacity = instance.prefix_sum[index].weight + capacity;
-    while (index != instance.prefix_sum.size()) {
-        if (instance.prefix_sum[index].weight > target_capacity) {
-            double fraction = static_cast<double>(target_capacity - instance.prefix_sum[index - 1].weight) /
-                static_cast<double>(instance.items[index - 1].weight);
-            return (instance.prefix_sum[index - 1].value - value_offset) +
-                static_cast<unsigned long>(static_cast<double>(instance.items[index - 1].value) * fraction);
+long long upper_bound(KnapsackInstance const& instance, long long capacity, std::size_t index) noexcept {
+    assert(index <= instance.size());
+    long long value_offset = instance.prefix_sum()[index].value;
+    long long target_capacity = instance.prefix_sum()[index].weight + capacity;
+    while (index != instance.prefix_sum().size()) {
+        if (instance.prefix_sum()[index].weight > target_capacity) {
+            double fraction = static_cast<double>(target_capacity - instance.prefix_sum()[index - 1].weight) /
+                static_cast<double>(instance.items()[index - 1].weight);
+            return (instance.prefix_sum()[index - 1].value - value_offset) +
+                static_cast<long long>(static_cast<double>(instance.items()[index - 1].value) * fraction);
         }
         ++index;
     }
     // All items fit
-    return instance.prefix_sum[index - 1].value - value_offset;
+    return instance.prefix_sum()[index - 1].value - value_offset;
 }
 
-void process_node(PriorityQueue::value_type const& node, SharedData& shared_data, ThreadData& data,
-                  KnapsackInstance const& instance) {
-    auto best_value = shared_data.best_value.load(std::memory_order_relaxed);
-    if (node.first <= best_value) {
-        // The upper bound of this node is worse than the currently best value
-        /* std::cout << "Ignored " << node.first << std::endl; */
-        ++data.ignored_nodes;
-        return;
+bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
+    auto node = handle.try_pop();
+    if (!node) {
+        return false;
     }
-    ++data.processed_nodes;
-    auto e = node.second;
+    auto solution = data.solution.load(std::memory_order_relaxed);
+    auto ub = static_cast<long long>(node->first);
+    if (ub <= solution) {
+        // The upper bound of this node is worse than the current solution
+        ++stats.ignored_nodes;
+        return true;
+    }
+    ++stats.processed_nodes;
+    auto e = node->second;
     std::size_t index = e & ((1UL << bits_for_index) - 1);
     e >>= bits_for_index;
-    unsigned long free_capacity = e & ((1UL << bits_for_free_capacity) - 1);
-    assert(free_capacity <= instance.capacity);
+    auto free_capacity = static_cast<long long>(e & ((1UL << bits_for_free_capacity) - 1));
+    assert(free_capacity <= data.instance.capacity());
     e >>= bits_for_free_capacity;
-    unsigned long value = e & ((1UL << bits_for_value) - 1);
-    /* std::cout << "Popped " << node.first << ' ' << index << ' ' << free_capacity << ' ' << value << std::endl; */
-    if (index == instance.items.size()) {
-        while (value > best_value &&
-               !shared_data.best_value.compare_exchange_weak(best_value, value, std::memory_order_relaxed)) {
-        }
-        return;
+    auto value = static_cast<long long>(e & ((1UL << bits_for_value) - 1));
+    if (index == data.instance.size()) {
+        data.update_solution(solution, static_cast<long long>(value));
+        return true;
     }
-    if (instance.items[index].weight <= free_capacity) {
-        auto new_value = value + instance.items[index].value;
-        auto new_capacity = free_capacity - instance.items[index].weight;
-        /* std::cout << "pushed " << node.first << ' ' << index + 1 << ' ' << new_capacity << ' ' << new_value */
-        /*           << std::endl; */
+    if (data.instance.items()[index].weight <= free_capacity) {
+        auto new_value = value + data.instance.items()[index].value;
+        auto new_capacity = free_capacity - data.instance.items()[index].weight;
         auto payload = to_payload(index + 1, new_capacity, new_value);
-        push(data.pq_handle, {node.first, payload});
-        ++data.pushed_nodes;
+        handle.push({ub, payload});
+        ++stats.pushed_nodes;
     }
-    auto upper_bound_without_next = value + upper_bound(instance, free_capacity, index + 1);
-    if (upper_bound_without_next <= best_value) {
-        return;
+    auto upper_bound_without_next = value + upper_bound(data.instance, free_capacity, index + 1);
+    if (upper_bound_without_next <= solution) {
+        return true;
     }
-    push(data.pq_handle, {upper_bound_without_next, to_payload(index + 1, free_capacity, value)});
-    /* std::cout << "pushed " << upper_bound_without_next << ' ' << index + 1 << ' ' << free_capacity << ' ' << value */
-    /*           << std::endl; */
-    ++data.pushed_nodes;
+    handle.push({upper_bound_without_next, to_payload(index + 1, free_capacity, value)});
+    ++stats.pushed_nodes;
+    return true;
 }
 
-void main_loop(int num_threads, SharedData& shared_data, ThreadData& data, KnapsackInstance const& instance) {
-    PriorityQueue::value_type retval;
-    while (termination_detection::try_do(num_threads, shared_data.termination_detection_data,
-                                         [&]() { return try_pop(data.pq_handle, retval); })) {
-        process_node(retval, shared_data, data, instance);
-    }
-}
-
-void benchmark_thread(thread_coordination::Context ctx, PriorityQueue& pq, SharedData& shared_data,
-                      KnapsackInstance const& instance) {
-    ThreadData data{pq.get_handle(ctx.get_id())};
+ThreadStats benchmark_thread(ctx_type ctx, pq_type& pq, SharedData& data) {
+    ThreadStats stats;
+    auto handle = pq.get_handle();
     if (ctx.get_id() == 0) {
-        auto ub = upper_bound(instance, instance.capacity, 0);
-        auto lb = lower_bound(instance, instance.capacity, 0);
-        /* std::cout << "upper bound: " << ub << std::endl; */
-        /* std::cout << "lower bound: " << lb << std::endl; */
-        shared_data.best_value.store(lb, std::memory_order_relaxed);
-        /* std::cout << "pushed " << ub << ' ' << 0 << ' ' << instance.capacity << ' ' << 0 << std::endl; */
-        push(data.pq_handle, {ub, to_payload(0, instance.capacity, 0)});
-        ++data.pushed_nodes;
-        std::clog << "Solving knapsack instance..." << std::flush;
+        auto ub = upper_bound(data.instance, data.instance.capacity(), 0);
+        auto lb = lower_bound(data.instance, data.instance.capacity(), 0);
+        data.solution.store(lb, std::memory_order_relaxed);
+        handle.push({ub, to_payload(0, data.instance.capacity(), 0)});
+        ++stats.pushed_nodes;
+        stats.work_time = ctx.execute_synchronized([&]() {
+            while (termination_detection::try_do(ctx.get_num_threads(), data.termination_detection_data,
+                                                 [&]() { return process_node(handle, stats, data); })) {
+            }
+        });
+    } else {
+        stats.work_time = ctx.execute_synchronized([&]() {
+            while (termination_detection::try_do(ctx.get_num_threads(), data.termination_detection_data,
+                                                 [&]() { return process_node(handle, stats, data); })) {
+            }
+        });
     }
-    auto work_time = ctx.execute_synchronized([&]() { main_loop(ctx.get_num_threads(), shared_data, data, instance); });
-    shared_data.update_work_time(work_time);
-    shared_data.update_counters(data);
+    return stats;
 }
 
-void print_settings(Settings const& settings) {
-    std::clog << "Threads: " << settings.num_threads << '\n'
-              << "Instance: " << settings.knapsack_file.string() << '\n'
-              << "Seed: " << settings.seed;
-    std::clog << "\n\n";
+void write_stats(std::vector<ThreadStats> const& stats, std::ostream& out) {
+    out << "thread,start_time,end_time,pushed,processed,ignored\n";
+    for (std::size_t i = 0; i < stats.size(); ++i) {
+        auto const& s = stats[i];
+        // clang-format off
+        out << i << ','
+            << s.work_time.start.time_since_epoch().count() << ','
+            << s.work_time.end.time_since_epoch().count() << ','
+            << s.pushed_nodes << ','
+            << s.processed_nodes << ','
+            << s.ignored_nodes
+            << '\n';
+        // clang-format on
+    }
 }
 
-void print_shared_data(Settings const& settings, SharedData const& shared_data, KnapsackInstance const& instance,
-                       bool valid) {
-    auto time = std::chrono::duration<double>(shared_data.end_time.load() - shared_data.start_time.load()).count();
-    std::clog << "Time (s): " << std::setprecision(3) << time << '\n';
-    std::clog << "Value: " << shared_data.best_value.load() << '\n';
-    std::clog << "Processed nodes: " << shared_data.processed_nodes.load() << '\n';
-    std::clog << "Ignored nodes: " << shared_data.ignored_nodes.load() << '\n';
-    std::clog << "Total nodes: " << shared_data.processed_nodes.load() + shared_data.ignored_nodes.load() << '\n';
-
-    std::cout << "instance,items,threads,seed,work_time,processed_nodes,ignored_nodes,value,valid\n";
-    std::cout << settings.knapsack_file.string() << ',' << instance.items.size() << ',' << settings.num_threads << ','
-              << settings.seed << ',' << time << ',' << shared_data.processed_nodes.load() << ','
-              << shared_data.ignored_nodes << ',' << shared_data.best_value.load() << ',' << valid << '\n';
-}
-
-bool run_benchmark(Settings const& settings, PriorityQueueConfig const& pq_config) {
-    std::clog << "Reading instance..." << std::flush;
-    KnapsackInstance instance;
+bool run_benchmark(Settings const& settings) {
+    SharedData shared_data;
     try {
-        instance.from_file(settings.knapsack_file);
+        shared_data.instance = KnapsackInstance(settings.knapsack_file);
     } catch (std::runtime_error const& e) {
-        std::clog << "failed: " << e.what() << std::endl;
+        std::clog << "Error reading problem file: " << e.what() << std::endl;
         return false;
     }
 
-    if (instance.items.size() + 1 >= (1 << bits_for_index) || instance.capacity >= (1 << bits_for_free_capacity) ||
+    if (shared_data.instance.size() + 1 >= (1 << bits_for_index) ||
+        shared_data.instance.capacity() >= (1 << bits_for_free_capacity) ||
         settings.solution >= (1 << bits_for_value)) {
-        std::clog << "failed: Instance cannot be represented\n";
+        std::clog << "Error: Instance cannot be represented\n";
         return false;
     }
     std::clog << "done\n";
-
-    auto pq = create_pq<PriorityQueue>(settings.num_threads, 1UL << 20, pq_config);
-    SharedData shared_data;
-    thread_coordination::TaskHandle task_handle{settings.num_threads, benchmark_thread, std::ref(pq),
-                                                std::ref(shared_data), instance};
+    auto pq = pq_type(settings.num_threads, 0, settings.pq_settings);
+    std::clog << "Priority queue: ";
+    pq.describe(std::clog) << '\n';
+    std::vector<ThreadStats> all_stats(static_cast<std::size_t>(settings.num_threads));
+    thread_coordination::affinity::NUMA numa_affinity{CORES_PER_NUMA_NODE, NUM_NUMA_NODES};
+    std::clog << "Solving..." << std::flush;
+    auto t_start = std::chrono::steady_clock::now();
+    thread_coordination::TaskHandle task_handle{
+        numa_affinity, settings.num_threads,
+        [&](auto ctx) { all_stats[static_cast<std::size_t>(ctx.get_id())] = benchmark_thread(ctx, pq, shared_data); }};
     task_handle.wait();
-
-    std::clog << "done" << std::endl;
-
-    bool success = true;
-    std::clog << "Verifying..." << std::flush;
-    bool valid = true;
-    if (shared_data.processed_nodes.load() + shared_data.ignored_nodes.load() != shared_data.pushed_nodes.load()) {
-        std::clog << "failed: Not all nodes were popped" << std::endl;
-        success = false;
-        valid = false;
-    } else {
-        if (shared_data.best_value.load() == settings.solution) {
-            std::clog << "done" << std::endl;
-        } else {
-            std::clog << "failed: Wrong solution" << std::endl;
-            success = false;
-            valid = false;
-        }
+    auto t_end = std::chrono::steady_clock::now();
+    std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << "ms)"
+              << std::endl;
+    ThreadStats first = all_stats.front();
+    auto accum_stats = std::accumulate(all_stats.begin() + 1, all_stats.end(), first, [](auto accum, auto const& e) {
+        accum.work_time.start = std::min(accum.work_time.start, e.work_time.start);
+        accum.work_time.end = std::max(accum.work_time.end, e.work_time.end);
+        accum.pushed_nodes += e.pushed_nodes;
+        accum.processed_nodes += e.processed_nodes;
+        accum.ignored_nodes += e.ignored_nodes;
+        return accum;
+    });
+    if (accum_stats.processed_nodes + accum_stats.ignored_nodes != accum_stats.pushed_nodes) {
+        std::clog << "Error: Not all nodes were popped" << std::endl;
+        return false;
     }
-    std::clog << '\n';
-    print_shared_data(settings, shared_data, instance, valid);
-    return success;
-}
-
-void print_header() {
-    std::clog << "Built on " << __DATE__ << ' ' << __TIME__ << " with:\n";
-#ifdef NDEBUG
-    std::clog << "  Release build\n";
-#else
-    std::clog << "  Debug build\n";
-#endif
-#ifdef __clang__
-    std::clog << "  Clang " << __clang_version__ << '\n';
-#elif defined(__GNUC__)
-    std::clog << "  GCC " << __VERSION__ << '\n';
-#else
-    std::clog << "  Unknown compiler\n";
-#endif
-    std::clog << "  Priority queue: " << pq_name << '\n';
+    if (shared_data.solution.load() != settings.solution) {
+        std::clog << "Error: Wrong solution (got " << shared_data.solution.load() << ", expected " << settings.solution
+                  << ")" << std::endl;
+        return false;
+    }
+    write_stats(all_stats, std::cout);
+    return true;
 }
 
 int main(int argc, char* argv[]) {
-    print_header();
+    write_build_info(std::clog);
+    Settings settings{};
+    cxxopts::Options cmd(argv[0]);
+    // clang-format off
+    cmd.add_options()
+      ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
+      ("file", "The input graph", cxxopts::value<std::filesystem::path>(settings.knapsack_file), "PATH")
+      ("solution", "The reference solution", cxxopts::value<long long>(settings.solution), "NUMBER")
+      ("h,help", "Print this help");
+    // clang-format on
+    pq_type::add_options(cmd, settings.pq_settings);
+    cmd.parse_positional({"file", "solution"});
+
+    try {
+        auto args = cmd.parse(argc, argv);
+        if (args.count("help") > 0) {
+            std::cerr << cmd.help() << std::endl;
+            return EXIT_SUCCESS;
+        }
+    } catch (cxxopts::OptionParseException const& e) {
+        std::cerr << "Error parsing arguments: " << e.what() << '\n';
+        std::cerr << cmd.help() << std::endl;
+        return EXIT_FAILURE;
+    }
+
     std::clog << "\nCommand line:";
     for (int i = 0; i < argc; ++i) {
         std::clog << ' ' << argv[i];
     }
-    std::clog << '\n' << '\n';
+    std::clog << '\n';
+    write_settings(settings, std::clog);
 
-    Settings settings{};
-    cxxopts::Options options(argv[0]);
-    // clang-format off
-    options.add_options()
-      ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
-      ("file", "The input graph", cxxopts::value<std::filesystem::path>(settings.knapsack_file), "PATH")
-      ("solution", "The reference solution", cxxopts::value<unsigned long>(settings.solution), "NUMBER")
-      ("h,help", "Print this help");
-    // clang-format on
-    add_pq_options(options);
-    options.parse_positional({"file", "solution"});
-
-    PriorityQueueConfig pq_config;
-    {
-        cxxopts::ParseResult result;
-        try {
-            result = options.parse(argc, argv);
-        } catch (cxxopts::OptionParseException const& e) {
-            std::cerr << "Error parsing arguments: " << e.what() << '\n';
-            std::cerr << options.help() << std::endl;
-            return 1;
-        }
-        if (result.count("help") > 0) {
-            std::cerr << options.help() << std::endl;
-            return 0;
-        }
-        pq_config = get_pq_options(result);
-    }
     if (settings.knapsack_file.empty()) {
         std::cerr << "Error: No instance file specified" << std::endl;
-        std::cerr << options.help() << std::endl;
-        return 1;
+        std::cerr << cmd.help() << std::endl;
+        return EXIT_FAILURE;
     }
 
-    print_settings(settings);
-
-    bool success = run_benchmark(settings, pq_config);
-
-    return success ? 0 : 1;
+    bool success = run_benchmark(settings);
+    return success ? EXIT_SUCCESS : EXIT_FAILURE;
 }

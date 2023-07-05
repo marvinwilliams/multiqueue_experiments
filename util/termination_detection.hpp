@@ -35,7 +35,7 @@ inline bool wait_to_terminate(int num_threads, Data& data) {
 }  // namespace detail
 
 template <typename F>
-bool try_do(int num_threads, Data& data, F&& f) {
+bool try_do(int num_threads, Data& data, F f) {
     if (f()) {
         return true;
     }

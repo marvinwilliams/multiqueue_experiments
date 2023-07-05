@@ -7,16 +7,21 @@
 #include <numeric>
 #include <vector>
 
-struct KnapsackInstance {
+class KnapsackInstance {
+   public:
     struct Item {
-        unsigned long weight;
-        unsigned long value;
+        long long weight;
+        long long value;
     };
-    std::vector<Item> items;
-    unsigned long capacity;
-    std::vector<Item> prefix_sum;
 
-    void from_file(std::filesystem::path const& file) {
+   private:
+    std::vector<Item> items_;
+    long long capacity_{};
+    std::vector<Item> prefix_sum_;
+
+   public:
+    KnapsackInstance() = default;
+    KnapsackInstance(std::filesystem::path const& file) {
         std::ifstream in{file};
         if (!in) {
             throw std::runtime_error{"Could not open file"};
@@ -26,9 +31,9 @@ struct KnapsackInstance {
         if (!in || in.eof()) {
             throw std::runtime_error{"Could not get number of items"};
         }
-        items.clear();
-        items.reserve(n);
-        in >> capacity;
+        items_.clear();
+        items_.reserve(n);
+        in >> capacity_;
         if (!in || (n > 0 && in.eof())) {
             throw std::runtime_error{"Could not get capacity"};
         }
@@ -46,17 +51,30 @@ struct KnapsackInstance {
             if (!in) {
                 throw std::runtime_error{"Could not read item weight"};
             }
-            items.push_back(item);
+            items_.push_back(item);
         }
-        std::sort(items.begin(), items.end(), [](auto const& lhs, auto const& rhs) {
+        std::sort(items_.begin(), items_.end(), [](auto const& lhs, auto const& rhs) {
             return (static_cast<double>(lhs.value) / static_cast<double>(lhs.weight)) >
                 (static_cast<double>(rhs.value) / static_cast<double>(rhs.weight));
         });
-        prefix_sum.reserve(items.size() + 1);
-        prefix_sum = {Item{0, 0}};
-        std::inclusive_scan(items.begin(), items.end(), std::back_inserter(prefix_sum),
+        prefix_sum_.reserve(items_.size() + 1);
+        prefix_sum_ = {Item{0, 0}};
+        std::inclusive_scan(items_.begin(), items_.end(), std::back_inserter(prefix_sum_),
                             [](auto const& lhs, auto const& rhs) {
                                 return Item{lhs.weight + rhs.weight, lhs.value + rhs.value};
                             });
+    }
+
+    [[nodiscard]] std::size_t size() const noexcept {
+        return items_.size();
+    }
+    [[nodiscard]] long long capacity() const noexcept {
+        return capacity_;
+    }
+    [[nodiscard]] std::vector<Item> const& items() const noexcept {
+        return items_;
+    }
+    [[nodiscard]] std::vector<Item> const& prefix_sum() const noexcept {
+        return prefix_sum_;
     }
 };
