@@ -52,46 +52,47 @@ using handle_type = CountingHandle<pq_type>;
 #endif
 using ctx_type = thread_coordination::Context;
 
-enum class WorkMode { Mixed, Push, Pop, Increment };
-enum class KeyDistribution { Uniform, Ascending, Descending };
+enum class BenchmarkMode {
+    AlternatingUniform,
+    AlternatingIncrement,
+    AlternatingSame,
+    PushUniform,
+    PushIncreasing,
+    PushDecreasing,
+    Pop
+};
 
-[[nodiscard]] auto work_mode_name(WorkMode work_mode) {
-    switch (work_mode) {
-        case WorkMode::Mixed:
-            return "mixed";
-        case WorkMode::Push:
-            return "push";
-        case WorkMode::Pop:
+[[nodiscard]] auto work_mode_name(BenchmarkMode mode) {
+    switch (mode) {
+        case BenchmarkMode::AlternatingUniform:
+            return "alternating (uniform)";
+        case BenchmarkMode::AlternatingIncrement:
+            return "alternating (increment)";
+        case BenchmarkMode::AlternatingSame:
+            return "alternating (same)";
+        case BenchmarkMode::PushUniform:
+            return "push (uniform)";
+        case BenchmarkMode::PushIncreasing:
+            return "push (increasing)";
+        case BenchmarkMode::PushDecreasing:
+            return "push (decreasing)";
+        case BenchmarkMode::Pop:
             return "pop";
-        case WorkMode::Increment:
-            return "increment";
-    }
-    return "unknown";
-}
-
-[[nodiscard]] auto key_distribution_name(KeyDistribution key_distribution) {
-    switch (key_distribution) {
-        case KeyDistribution::Uniform:
-            return "uniform";
-        case KeyDistribution::Ascending:
-            return "ascending";
-        case KeyDistribution::Descending:
-            return "descending";
     }
     return "unknown";
 }
 
 struct Settings {
     int num_threads = 4;
-    std::size_t prefill_per_thread = 1 << 20;
-    std::size_t elements_per_thread = 1 << 24;
-    WorkMode work_mode = WorkMode::Mixed;
-    KeyDistribution key_distribution = KeyDistribution::Uniform;
+    long long prefill_per_thread = 1 << 20;
+    long long elements_per_thread = 1 << 24;
+    BenchmarkMode benchmark_mode = BenchmarkMode::AlternatingIncrement;
     pq_type::config_type pq_settings{};
 #ifdef USE_UINT8
     key_type max_key = std::numeric_limits<key_type>::max();
 #else
     key_type max_key = 1 << 30;
+    key_type max_increment = 100;
 #endif
     int seed = 1;
 #ifdef QUALITY
@@ -126,8 +127,7 @@ void write_settings(Settings const& settings, std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n'
         << "Prefill per thread: " << settings.prefill_per_thread << '\n'
         << "Elements per thread: " << settings.elements_per_thread << '\n'
-        << "Operation mode: " << work_mode_name(settings.work_mode) << '\n'
-        << "Key distribution: " << key_distribution_name(settings.key_distribution) << '\n'
+        << "Benchmark mode: " << work_mode_name(settings.benchmark_mode) << '\n'
         << "Max key: " << static_cast<unsigned long>(settings.max_key) << '\n'
         << "Seed: " << settings.seed << '\n';
 #ifdef USE_PAPI
@@ -176,83 +176,49 @@ int start_papi(std::vector<std::string> const& events) {
 }
 #endif
 
-void prepare(Settings const& settings, ctx_type const& ctx, handle_type& handle, std::vector<key_type>& keys) {
+void generate_keys(Settings const& settings, ctx_type const& ctx, std::vector<key_type>& keys) {
     auto id = ctx.get_id();
     std::seed_seq seed{settings.seed, id};
     std::default_random_engine rng(seed);
 
-    auto first_key = keys.begin() + id * static_cast<std::ptrdiff_t>(settings.elements_per_thread);
-    auto last_key = first_key + static_cast<std::ptrdiff_t>(settings.elements_per_thread);
+    auto prefill_begin = keys.begin() + id * static_cast<std::ptrdiff_t>(settings.prefill_per_thread);
+    auto prefill_end = prefill_begin + static_cast<std::ptrdiff_t>(settings.prefill_per_thread);
     auto key_dist = std::uniform_int_distribution<key_type>(0, settings.max_key);
-    ctx.execute_synchronized(
-        [&](auto first, auto last) {
-            switch (settings.key_distribution) {
-                case KeyDistribution::Uniform: {
-                    std::generate(first, last, [&key_dist, &rng]() { return key_dist(rng); });
-                    break;
-                }
-                case KeyDistribution::Ascending: {
-                    auto i = static_cast<std::size_t>(std::distance(keys.begin(), first));
-                    for (; first != last; ++first, ++i) {
-                        *first = static_cast<key_type>((i * settings.max_key) / keys.size() + 1);
-                    }
-                    break;
-                }
-                case KeyDistribution::Descending: {
-                    auto i = static_cast<std::size_t>(std::distance(first, keys.end()) - 1);
-                    for (; first != last; ++first, --i) {
-                        *first = static_cast<key_type>((i * settings.max_key) / keys.size() + 1);
-                    }
-                    break;
-                }
-            }
-        },
-        first_key, last_key);
+    std::generate(prefill_begin, prefill_end, [&key_dist, &rng]() { return key_dist(rng); });
+    auto keys_begin = keys.begin() + ctx.get_num_threads() * static_cast<std::ptrdiff_t>(settings.prefill_per_thread) +
+        id * static_cast<std::ptrdiff_t>(settings.elements_per_thread);
+    auto keys_end = keys_begin + static_cast<std::ptrdiff_t>(settings.elements_per_thread);
+    switch (settings.benchmark_mode) {
+        case BenchmarkMode::PushUniform:
+        case BenchmarkMode::AlternatingUniform: {
+            std::generate(keys_begin, keys_end, [&key_dist, &rng]() { return key_dist(rng); });
+            break;
+        }
+        case BenchmarkMode::AlternatingIncrement: {
+            auto inc_dist = std::uniform_int_distribution<key_type>(0, settings.max_increment);
+            std::generate(keys_begin, keys_end, [&inc_dist, &rng]() { return inc_dist(rng); });
+            break;
+        }
+        case BenchmarkMode::PushIncreasing: {
+            std::iota(keys_begin, keys_end, std::distance(keys.begin(), keys_begin));
+            break;
+        }
+        case BenchmarkMode::PushDecreasing: {
+            std::iota(std::reverse_iterator(keys_end), std::reverse_iterator(keys_begin),
+                      std::distance(keys_end, keys.end()));
+            break;
+        }
+        default:
+            break;
+    }
+    ctx.synchronize();
+}
 
-    std::vector<key_type> prefill_keys(settings.prefill_per_thread);
-    std::generate(std::begin(prefill_keys), std::end(prefill_keys), [&key_dist, &rng]() { return key_dist(rng); });
+void prefill(ctx_type const& ctx, handle_type& handle, std::size_t prefill, std::vector<key_type> const& keys) {
     ctx.execute_synchronized([&]() {
-        for (auto const& key : prefill_keys) {
-            handle.push(key);
-        }
-    });
-}
-
-auto execute_mixed(ctx_type const& ctx, handle_type& handle, std::vector<key_type> const& keys) {
-    return ctx.execute_synchronized_blockwise(keys.begin(), keys.end(), [&](auto first, auto last) {
-        for (; first != last; ++first) {
-            handle.push(*first);
-            while (!handle.try_pop()) {
-            }
-        }
-    });
-}
-
-auto execute_push(ctx_type const& ctx, handle_type& handle, std::vector<key_type> const& keys) {
-    return ctx.execute_synchronized_blockwise(keys.begin(), keys.end(), [&](auto first, auto last) {
-        for (; first != last; ++first) {
-            handle.push(*first);
-        }
-    });
-}
-
-auto execute_pop(ctx_type const& ctx, handle_type& handle, std::vector<key_type> const& keys) {
-    return ctx.execute_synchronized_blockwise(keys.begin(), keys.end(), [&](auto first, auto last) {
-        for (; first != last; ++first) {
-            while (!handle.try_pop()) {
-            }
-        }
-    });
-}
-
-auto execute_increment(ctx_type const& ctx, handle_type& handle, std::vector<key_type> const& keys) {
-    return ctx.execute_synchronized_blockwise(keys.begin(), keys.end(), [&](auto first, auto last) {
-        for (; first != last; ++first) {
-            auto retval = handle.try_pop();
-            while (!retval) {
-                retval = handle.try_pop();
-            }
-            handle.push(retval->first + *first);
+        auto offset = static_cast<std::size_t>(ctx.get_id()) * prefill;
+        for (std::size_t i = 0; i < prefill; ++i) {
+            handle.push(keys[offset + i]);
         }
     });
 }
@@ -333,22 +299,95 @@ BenchmarkResult execute_benchmark(Settings const& settings, ctx_type const& ctx,
         }
     }
 #endif
+#ifdef QUALITY
+    auto push = [&handle](auto key, std::size_t index) {
+        handle.push((key), index);
+        auto tick = get_tick();
+        push_log[(index)] = {tick, (key)};
+    };
 
-    auto benchmark = [&settings]() {
-        switch (settings.work_mode) {
-            case WorkMode::Mixed:
-                return &execute_mixed;
-            case WorkMode::Push:
-                return &execute_push;
-            case WorkMode::Pop:
-                return &execute_pop;
-            case WorkMode::Increment:
-                return &execute_increment;
+    auto pop = [&handle](std::size_t index) {
+        auto tick = get_tick();
+        auto retval = handle.try_pop();
+        while (!retval) {
+            tick = get_tick();
+            retval = handle.try_pop();
         }
-        __builtin_unreachable();
-    }();
+        pop_log[(index)] = {tick, retval->second};
+        return retval->first;
+    };
+#else
+    auto push = [&handle](auto key, std::size_t) {
+        handle.push((key), (key));
+        ++counters_.push;
+    };
 
-    result.work_time = benchmark(ctx, handle, keys);
+    auto pop = [&handle](std::size_t) {
+        auto retval = handle.try_pop();
+        while (!retval) {
+            ++counters_.failed_pop;
+            retval = handle.try_pop();
+        }
+        ++counters_.pop;
+        return retval->first;
+    };
+#endif
+    switch (settings.benchmark_mode) {
+        case BenchmarkMode::AlternatingUniform: {
+            ctx.execute_synchronized_blockwise(
+                ctx.get_num_threads() * settings.elements_per_thread, [&](auto first, auto last) {
+                    auto offset = static_cast<std::size_t>(ctx.get_num_threads() * settings.prefill_per_thread);
+                    for (; first != last; ++first) {
+                        push(keys[offset + first], offset + first);
+                        pop(first);
+                    }
+                });
+            break;
+        }
+        case BenchmarkMode::AlternatingIncrement: {
+            ctx.execute_synchronized_blockwise(
+                ctx.get_num_threads() * settings.elements_per_thread, [&](auto first, auto last) {
+                    auto offset = static_cast<std::size_t>(ctx.get_num_threads() * settings.prefill_per_thread);
+                    for (; first != last; ++first) {
+                        auto key = pop(first);
+                        push(key + keys[offset + first], offset + first);
+                    }
+                });
+            break;
+        }
+        case BenchmarkMode::AlternatingSame: {
+            ctx.execute_synchronized_blockwise(
+                ctx.get_num_threads() * settings.elements_per_thread, [&](auto first, auto last) {
+                    auto offset = static_cast<std::size_t>(ctx.get_num_threads() * settings.prefill_per_thread);
+                    for (; first != last; ++first) {
+                        auto key = pop(first);
+                        push(key, offset + first);
+                    }
+                });
+            break;
+        }
+        case BenchmarkMode::PushUniform:
+        case BenchmarkMode::PushIncreasing:
+        case BenchmarkMode::PushDecreasing: {
+            ctx.execute_synchronized_blockwise(
+                ctx.get_num_threads() * settings.elements_per_thread, [&](auto first, auto last) {
+                    auto offset = static_cast<std::size_t>(ctx.get_num_threads() * settings.prefill_per_thread);
+                    for (; first != last; ++first) {
+                        push(keys[offset + first], offset + first);
+                    }
+                });
+            break;
+        }
+        case BenchmarkMode::Pop: {
+            ctx.execute_synchronized_blockwise(ctx.get_num_threads() * settings.elements_per_thread,
+                                               [&](auto first, auto last) {
+                                                   for (; first != last; ++first) {
+                                                       pop(first);
+                                                   }
+                                               });
+            break;
+        }
+    }
 
 #ifdef USE_PAPI
     if (papi_started) {
@@ -371,11 +410,11 @@ BenchmarkResult execute_benchmark(Settings const& settings, ctx_type const& ctx,
 
 std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
     auto pq =
-        pq_type(settings.num_threads, settings.prefill_per_thread * static_cast<std::size_t>(settings.num_threads),
+        pq_type(settings.num_threads, static_cast<std::size_t>(settings.prefill_per_thread * settings.num_threads),
                 settings.pq_settings);
     std::clog << "Priority queue: ";
     pq.describe(std::clog) << '\n';
-    auto keys = std::vector<key_type>(static_cast<std::size_t>(settings.num_threads) * settings.elements_per_thread);
+    auto keys = std::vector<key_type>(static_cast<std::size_t>(settings.num_threads * settings.elements_per_thread));
     std::vector<BenchmarkResult> results(static_cast<std::size_t>(settings.num_threads));
     thread_coordination::affinity::NUMA numa_affinity{CORES_PER_NUMA_NODE, NUM_NUMA_NODES};
     thread_coordination::TaskHandle task_handle(numa_affinity, settings.num_threads, [&](auto ctx) {
@@ -386,11 +425,18 @@ std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
 #else
         auto handle = handle_type(pq);
 #endif
+        ctx.synchronize();
         if (ctx.get_id() == 0) {
-            std::clog << "Preparing..." << std::flush;
+            std::clog << "Generating keys..." << std::flush;
             auto t_start = std::chrono::steady_clock::now();
-            prepare(settings, ctx, handle, keys);
+            generate_keys(settings, ctx, keys);
             auto t_end = std::chrono::steady_clock::now();
+            std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count()
+                      << "ms)" << std::endl;
+            std::clog << "Prefilling..." << std::flush;
+            t_start = std::chrono::steady_clock::now();
+            prefill(settings, ctx, handle, keys);
+            t_end = std::chrono::steady_clock::now();
             std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count()
                       << "ms)" << std::endl;
             std::clog << "Running benchmark..." << std::flush;
@@ -400,7 +446,8 @@ std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
             std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count()
                       << "ms)" << std::endl;
         } else {
-            prepare(settings, ctx, handle, keys);
+            generate_keys(settings, ctx, keys);
+            prefill(settings, ctx, handle, keys);
             results[static_cast<std::size_t>(ctx.get_id())] = execute_benchmark(settings, ctx, handle, keys);
         }
     });
@@ -408,16 +455,16 @@ std::vector<BenchmarkResult> run_benchmark(Settings const& settings) {
     return results;
 }
 
-WorkMode parse_work_mode(char c) {
+BenchmarkMode parse_work_mode(char c) {
     switch (c) {
         case 'm':
-            return WorkMode::Mixed;
+            return BenchmarkMode::Mixed;
         case 'u':
-            return WorkMode::Push;
+            return BenchmarkMode::Push;
         case 'o':
-            return WorkMode::Pop;
+            return BenchmarkMode::Pop;
         case 'i':
-            return WorkMode::Increment;
+            return BenchmarkMode::Increment;
         default:
             throw std::invalid_argument("Invalid work mode");
     }

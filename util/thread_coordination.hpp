@@ -48,7 +48,7 @@ struct SharedData {
     int num_threads;
     utils::Barrier barrier;
     std::mutex write_mutex;
-    alignas(64) std::atomic<std::ptrdiff_t> index{0};
+    alignas(64) std::atomic_llong counter{0};
 
     explicit SharedData(int n) : num_threads{n}, barrier{n} {
     }
@@ -99,23 +99,22 @@ class Context {
         return {t_start, t_end};
     }
 
-    template <typename It, typename Work, typename... Args>
-    time_result_type execute_synchronized_blockwise(It begin, It end, Work work, Args&&... args) const {
-        static constexpr auto block_size = static_cast<std::ptrdiff_t>(1) << 12;
+    template <typename Work, typename... Args>
+    time_result_type execute_synchronized_blockwise(long long n, Work work, Args&&... args) const {
+        static constexpr auto block_size = static_cast<long long>(1) << 12;
 
         shared_data_.barrier.wait();
         auto t_start = clock_type::now();
-        auto n = static_cast<std::ptrdiff_t>(std::distance(begin, end));
         while (true) {
-            auto start_index = shared_data_.index.fetch_add(block_size, std::memory_order_relaxed);
-            if (start_index >= n) {
+            auto begin = shared_data_.counter.fetch_add(block_size, std::memory_order_relaxed);
+            if (begin >= n) {
                 break;
             }
-            auto end_index = std::min(n, start_index + block_size);
-            work(begin + start_index, begin + end_index, args...);  // no perfect forwarding here
+            auto end = std::min(n, begin + block_size);
+            work(begin, end, args...);  // no perfect forwarding here
         }
         auto t_end = clock_type::now();
-        shared_data_.barrier.wait([this] { shared_data_.index.store(0, std::memory_order_relaxed); });
+        shared_data_.barrier.wait([this] { shared_data_.counter.store(0, std::memory_order_relaxed); });
         return {t_start, t_end};
     }
 };
