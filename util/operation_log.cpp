@@ -12,131 +12,85 @@
 #include <numeric>
 #include <optional>
 #include <stdexcept>
+#include <unordered_set>
 #include <vector>
 
 // Note that a push might be after the pop because the tick is recorded
 // after the push is performed.
-bool operation_log::verify_logs(std::vector<operation_log::OperationLog> const& logs) {
-    for (auto const& l : logs) {
-        if (!std::is_sorted(l.pushes.begin(), l.pushes.end())) {
-            std::cerr << "Error: Inconsistent push order\n";
+bool operation_log::verify_logs(OperationLog const& logs) {
+    auto popped = std::unordered_set<std::size_t>{};
+    long long num_late_pushes = 0;
+    for (auto op : logs.pops) {
+        if (op.index >= logs.pushes.size()) {
+            std::cerr << "Popped element has invalid index: " << op.index << '\n';
             return false;
         }
-        if (!std::is_sorted(l.pops.begin(), l.pops.end())) {
-            std::cerr << "Error: inconsistent pop order\n";
+        if (op.tick < logs.pushes[op.index].tick) {
+            ++num_late_pushes;
+        }
+        if (!popped.insert(op.index).second) {
+            std::cerr << "Popped the same element twice\n";
             return false;
         }
     }
-    auto popped = std::vector<std::vector<bool>>();
-    for (auto const& l : logs) {
-        popped.emplace_back(l.pushes.size(), false);
-    }
-    for (auto const& l : logs) {
-        for (auto op : l.pops) {
-            auto thread_id = extract_thread_id(op.data);
-            auto elem_id = extract_elem_id(op.data);
-            if (thread_id < 0 || thread_id >= static_cast<int>(logs.size())) {
-                std::cerr << "Error: Popped element from invalid thread: " << thread_id << '\n';
-                return false;
-            }
-            auto const& thread_pushes = logs[static_cast<std::size_t>(thread_id)].pushes;
-            if (elem_id >= thread_pushes.size()) {
-                std::cerr << "Popped element has invalid element id: " << elem_id << '\n';
-                return false;
-            }
-            if (popped[static_cast<std::size_t>(thread_id)][elem_id]) {
-                std::cerr << "Popped the same element twice\n";
-                return false;
-            }
-            popped[static_cast<std::size_t>(thread_id)][elem_id] = true;
-        }
-    }
-    auto num_failed_pops =
-        std::accumulate(logs.begin(), logs.end(), 0LL, [](auto sum, auto const& l) { return sum + l.failed_pops; });
-    if (num_failed_pops > 0) {
-        std::cerr << "Warning: " << num_failed_pops << " failed pops\n";
+    if (num_late_pushes > 0) {
+        std::clog << "Warning: " << num_late_pushes << " elements inserted after their deletion\n";
     }
     return true;
 }
 
-void operation_log::write_logs(std::vector<OperationLog> const& logs, std::ostream& out) {
-    out << logs.size() << '\n';
-    for (auto const& l : logs) {
-        out << l.pushes.size() << ' ' << l.pops.size() << '\n';
+void operation_log::write_logs(OperationLog const& logs, std::ostream& out) {
+    out << logs.pushes.size() << ' ' << logs.pops.size() << '\n';
+    for (auto const& push : logs.pushes) {
+        out << "i," << push.tick << ',' << push.key << '\n';
     }
-    for (std::size_t i = 0; i < logs.size(); ++i) {
-        for (auto const& push : logs[i].pushes) {
-            out << push.tick << " i " << i << ' ' << push.key << '\n';
-        }
-    }
-    for (std::size_t i = 0; i < logs.size(); ++i) {
-        for (auto const& pops : logs[i].pops) {
-            out << pops.tick << " d " << i << ' ' << extract_thread_id(pops.data) << ' ' << extract_elem_id(pops.data)
-                << '\n';
-        }
+    for (auto const& pops : logs.pops) {
+        out << "d," << pops.tick << ',' << pops.index << '\n';
     }
 }
 
 struct Element {
     unsigned long key;
-    unsigned long data;
+    std::size_t index;
     friend bool operator==(Element const& lhs, Element const& rhs) {
-        return lhs.data == rhs.data;
+        return lhs.index == rhs.index;
     }
     friend bool operator!=(Element const& lhs, Element const& rhs) {
         return !(lhs == rhs);
     }
 };
 
-std::vector<operation_log::Metrics> operation_log::replay_logs(std::vector<OperationLog> const& logs) {
+std::vector<operation_log::Metrics> operation_log::replay_logs(OperationLog logs) {
     struct ExtractKey {
         static auto const& get(Element const& e) {
             return e.key;
         }
     };
-
-    auto num_pops = std::accumulate(logs.begin(), logs.end(), 0UL,
-                                    [](std::size_t sum, auto const& l) { return sum + l.pops.size(); });
+    std::vector<std::pair<Push, std::size_t>> sorted_pushes(logs.pushes.size());
+    for (std::size_t i = 0; i < logs.pushes.size(); ++i) {
+        sorted_pushes[i] = {logs.pushes[i], i};
+    }
+    std::sort(sorted_pushes.begin(), sorted_pushes.end(),
+              [](auto const& lhs, auto const& rhs) { return lhs.first < rhs.first; });
+    std::sort(logs.pops.begin(), logs.pops.end());
 
     ReplayTree<unsigned long, Element, ExtractKey> replay_tree{};
-    std::vector<std::size_t> push_indices(logs.size(), 0);
-    std::vector<std::size_t> pop_indices(logs.size(), 0);
-    auto next_pop = [&logs, &pop_indices]() {
-        auto min_tick = std::numeric_limits<std::size_t>::max();
-        auto min_thread = std::numeric_limits<std::size_t>::max();
-        for (std::size_t i = 0; i < logs.size(); ++i) {
-            if (pop_indices[i] < logs[i].pops.size() && logs[i].pops[pop_indices[i]].tick < min_tick) {
-                min_tick = logs[i].pops[pop_indices[i]].tick;
-                min_thread = i;
-            }
-        }
-        return std::make_pair(min_tick, min_thread);
-    };
-    std::vector<Metrics> metrics(num_pops);
-    for (std::size_t i = 0; i < num_pops; ++i) {
-        auto [tick, thread] = next_pop();
-        assert(thread != std::numeric_limits<std::size_t>::max());
-        auto const& pop = logs[thread].pops[pop_indices[thread]];
-        auto push_thread = static_cast<std::size_t>(extract_thread_id(pop.data));
-        auto elem_id = extract_elem_id(pop.data);
-        auto key = logs[push_thread].pushes[elem_id].key;
+    auto push_it = sorted_pushes.begin();
+    std::vector<Metrics> metrics;
+    metrics.reserve(logs.pops.size());
+    for (auto const& p : logs.pops) {
+        auto key = logs.pushes[p.index].key;
         // Inserting everything before next deletion
-        for (std::size_t j = 0; j < logs.size(); ++j) {
-            auto val_start = start_value(static_cast<int>(j));
-            auto const& p = logs[j].pushes;
-            for (; push_indices[j] < logs[j].pushes.size() && p[push_indices[j]].tick <= tick; ++push_indices[j]) {
-                replay_tree.insert({p[push_indices[j]].key, val_start + push_indices[j]});
-            }
-            if (j == push_thread) {
-                for (; push_indices[j] <= elem_id; ++push_indices[j]) {
-                    replay_tree.insert({p[push_indices[j]].key, val_start + push_indices[j]});
-                }
-            }
+        auto until = std::max(logs.pushes[p.index].tick, p.tick);
+        for (; push_it != sorted_pushes.end() && push_it->first.tick <= until; ++push_it) {
+            replay_tree.insert({push_it->first.key, push_it->second});
         }
-        auto [success, rank, delay] = replay_tree.erase_val({key, pop.data});
-        assert(success);
-        metrics[i] = {rank, delay};
-        ++pop_indices[thread];
+        auto [success, rank, delay] = replay_tree.erase_val({key, p.index});
+        if (!success) {
+            std::cerr << "Failed to delete element " << p.index << " with key " << key << '\n';
+            std::abort();
+        }
+        metrics.push_back({rank, delay});
     }
     return metrics;
 }
