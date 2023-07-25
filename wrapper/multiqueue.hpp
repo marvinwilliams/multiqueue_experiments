@@ -266,13 +266,13 @@ class MultiQueue : public detail::multiqueue_type<Key, Value, Compare, Traits> {
     }
 
     std::ostream &describe(std::ostream &out) {
-        out << "MultiQueue [comparisons: " << (Traits::strict_comparison ? "strict" : "non-strict")
+        out << "MultiQueue (comparisons: " << (Traits::strict_comparison ? "strict" : "non-strict")
             << ", pop tries: " << Traits::num_pop_tries
             << ", scan on failed pop: " << (Traits::scan_on_failed_pop ? "true" : "false")
             << ", queue selection: " << policy_traits::name << ", pop pqs: " << policy_traits::num_queues
             << ", inner pq: ";
         pq_traits::describe(out);
-        out << "] (pqs: " << this->num_pqs();
+        out << ", pqs: " << this->num_pqs();
         if constexpr (policy_traits::has_stickiness) {
             out << ", stickiness: " << this->get_queue_selection_config().stickiness;
         }
