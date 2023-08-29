@@ -14,6 +14,7 @@ extern "C" {
 #include <cstddef>
 #include <iostream>
 #include <memory>
+#include <mutex>
 
 __thread unsigned long* seeds;
 
@@ -40,6 +41,8 @@ Spraylist<unsigned long, unsigned long, Min>::Spraylist(int num_threads, std::si
 
 template <bool Min>
 auto Spraylist<unsigned long, unsigned long, Min>::get_handle() -> Handle {
+    static std::mutex m;
+    auto l = std::scoped_lock(m);
     ssalloc_init(num_threads_);
     seeds = seed_rand();
     auto thread_data = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
