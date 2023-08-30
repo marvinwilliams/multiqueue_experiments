@@ -5,7 +5,6 @@
 #include "cxxopts.hpp"
 
 #ifdef QUALITY
-#undef USE_UINT8
 #include "operation_log.hpp"
 #else
 #ifdef WITH_PAPI
@@ -53,7 +52,7 @@ static constexpr auto max_key = std::numeric_limits<key_type>::max();
 #else
 using key_type = unsigned long;
 using value_type = unsigned long;
-static constexpr auto max_key = static_cast<key_type>(1) << 30;
+static constexpr auto max_key = static_cast<key_type>(1) << 63;
 #endif
 
 using pq_type = PriorityQueue<key_type, value_type, true>;
@@ -125,39 +124,6 @@ struct Settings {
 #ifdef USE_PAPI
     std::vector<std::string> papi_events;
 #endif
-
-    static bool validate(Settings const& settings) {
-        if (settings.num_threads <= 0) {
-            std::cerr << "Error: Number of threads must be greater than 0\n";
-            return false;
-        }
-        if (settings.min_prefill <= 0 || settings.min_random <= 0) {
-            std::cerr << "Error: Keys must be greater than 0\n";
-            return false;
-        }
-        if (settings.max_prefill < settings.min_prefill || settings.max_random < settings.min_random ||
-            settings.max_increment < settings.min_increment) {
-            std::cerr << "Error: Max must be greater than min\n";
-            return false;
-        }
-        if (settings.chunk_size <= 0) {
-            std::cerr << "Error: Chunk size must be greater than 0\n";
-            return false;
-        }
-        if (settings.prefill_per_thread < 0 || settings.operations_per_thread < 0) {
-            std::cerr << "Error: Prefill and operations must be nonnegative\n";
-            return false;
-        }
-#ifdef USE_PAPI
-        for (auto const& name : settings.papi_events) {
-            if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
-                std::cerr << "Error: PAPI event " << name << " not available\n";
-                return false;
-            }
-        }
-#endif
-        return true;
-    }
 
     static void write(Settings const& settings, std::ostream& out) {
         out << "Threads: " << settings.num_threads << '\n'
@@ -336,6 +302,54 @@ long long max_num_elements(Settings const& settings) {
         (settings.prefill_per_thread + (settings.mode == Mode::Push ? settings.operations_per_thread : 0));
 }
 
+bool validate(Settings const& settings) {
+    if (settings.num_threads <= 0) {
+        std::cerr << "Error: Number of threads must be greater than 0\n";
+        return false;
+    }
+    if (settings.min_prefill <= 0 || settings.min_random <= 0) {
+        std::cerr << "Error: Keys must be greater than 0\n";
+        return false;
+    }
+    if (settings.max_prefill < settings.min_prefill || settings.max_random < settings.min_random ||
+        settings.max_increment < settings.min_increment) {
+        std::cerr << "Error: Max must be greater than min\n";
+        return false;
+    }
+    if (settings.chunk_size <= 0) {
+        std::cerr << "Error: Chunk size must be greater than 0\n";
+        return false;
+    }
+    if (settings.prefill_per_thread < 0 || settings.operations_per_thread < 0) {
+        std::cerr << "Error: Prefill and operations must be nonnegative\n";
+        return false;
+    }
+    if (num_pops(settings) > num_pushes(settings)) {
+        std::cerr << "Error: Number of pushes must not be less than number of pops\n";
+        return false;
+    }
+#ifdef QUALITY
+    if (num_pops(settings) == 0) {
+        std::cerr << "Error: Number of pops must be greater than 0 to measure quality\n";
+        return false;
+    }
+    assert(num_pushes(settings) > 0);
+    if (static_cast<value_type>(num_pushes(settings) - 1) > std::numeric_limits<value_type>::max()) {
+        std::cerr << "Error: Number of pushes must be representable in `value_type`\n";
+        return false;
+    }
+#endif
+#ifdef USE_PAPI
+    for (auto const& name : settings.papi_events) {
+        if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
+            std::cerr << "Error: PAPI event " << name << " not available\n";
+            return false;
+        }
+    }
+#endif
+    return true;
+}
+
 #ifdef USE_PAPI
 int start_papi(std::vector<std::string> const& events) {
     int event_set = PAPI_NULL;
@@ -404,38 +418,39 @@ void generate_keys(Settings const& settings, std::vector<key_type>& keys, int id
 
 #ifdef QUALITY
 void push(key_type key, std::size_t index, ThreadData& data) {
-    data.handle.push({key, index});
+    data.handle.push({key, static_cast<value_type>(index)});
     auto tick = operation_log::get_tick();
     data.op_log.pushes.push_back({tick, key, index});
     ++data.stats.num_pushes;
 }
 
 key_type pop(ThreadData& data) {
-    auto tick = operation_log::get_tick();
-    auto retval = data.handle.try_pop();
-    while (!retval) {
+    do {
+        auto tick = operation_log::get_tick();
+        auto retval = data.handle.try_pop();
+        if (retval) {
+            data.op_log.pops.push_back({tick, static_cast<std::size_t>(retval->second)});
+            ++data.stats.num_pops;
+            return retval->first;
+        }
         ++data.stats.num_failed_pops;
-        tick = operation_log::get_tick();
-        retval = data.handle.try_pop();
-    }
-    data.op_log.pops.push_back({tick, static_cast<std::size_t>(retval->second)});
-    ++data.stats.num_pops;
-    return retval->first;
+    } while (true);
 }
 #else
-void push(key_type key, std::size_t /*unused*/, ThreadData& data) {
-    data.handle.push({key, static_cast<value_type>(key)});
+void push(key_type key, std::size_t index, ThreadData& data) {
+    data.handle.push({key, static_cast<value_type>(index)});
     ++data.stats.num_pushes;
 };
 
 auto pop(ThreadData& data) {
-    auto retval = data.handle.try_pop();
-    while (!retval) {
+    do {
+        auto retval = data.handle.try_pop();
+        if (retval) {
+            ++data.stats.num_pops;
+            return retval->first;
+        }
         ++data.stats.num_failed_pops;
-        retval = data.handle.try_pop();
-    }
-    ++data.stats.num_pops;
-    return retval->first;
+    } while (true);
 };
 #endif
 
@@ -805,7 +820,7 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    if (!Settings::validate(settings)) {
+    if (!validate(settings)) {
         return EXIT_FAILURE;
     }
 
