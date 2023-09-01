@@ -120,6 +120,7 @@ struct Settings {
 #ifdef QUALITY
     std::filesystem::path log_file;
     std::filesystem::path stats_file;
+    bool per_element = false;
 #endif
 #ifdef USE_PAPI
     std::vector<std::string> papi_events;
@@ -701,7 +702,11 @@ bool run_benchmark(Settings const& settings, pq_type& pq) {
     auto metrics = operation_log::replay_logs(std::move(merged_logs));
     t_end = std::chrono::steady_clock::now();
     std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << "ms)\n";
-    operation_log::write_metrics(metrics, std::cout);
+    if (settings.per_element) {
+        operation_log::write_metrics(metrics, std::cout);
+    } else {
+        operation_log::write_metrics_average(metrics, std::cout);
+    }
 #else
     write_all_stats(stats, std::cout);
 #endif
@@ -771,6 +776,7 @@ int main(int argc, char* argv[]) {
 #ifdef QUALITY
         ("stats-file", "File to write the stats to", cxxopts::value<std::filesystem::path>(settings.stats_file), "PATH")
         ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
+        ("per-element", "Output metrics per element", cxxopts::value<bool>(settings.per_element), "NUMBER")
 #endif
 #ifdef USE_PAPI
         ("r,pc", "Performance counters", cxxopts::value<std::vector<std::string>>(settings.papi_events))

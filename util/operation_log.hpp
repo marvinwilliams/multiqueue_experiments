@@ -48,5 +48,6 @@ bool verify_logs(OperationLog const& logs);
 void write_logs(OperationLog const& log, std::ostream& out);
 std::vector<Metrics> replay_logs(OperationLog logs);
 void write_metrics(std::vector<Metrics> const& metrics, std::ostream& out);
+void write_metrics_average(std::vector<Metrics> const& metrics, std::ostream& out);
 
 }  // namespace operation_log

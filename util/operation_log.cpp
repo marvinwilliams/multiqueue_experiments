@@ -115,7 +115,21 @@ std::vector<operation_log::Metrics> operation_log::replay_logs(OperationLog logs
 }
 
 void operation_log::write_metrics(std::vector<Metrics> const& metrics, std::ostream& out) {
+    assert(!metrics.empty());
     for (auto const& m : metrics) {
         out << m.rank_error << ' ' << m.delay << '\n';
     }
+}
+
+void operation_log::write_metrics_average(std::vector<Metrics> const& metrics, std::ostream& out) {
+    assert(!metrics.empty());
+    auto summed_metrics = std::reduce(metrics.begin(), metrics.end(), Metrics{}, [](Metrics a, Metrics const& b) {
+        a.rank_error += b.rank_error;
+        a.delay += b.delay;
+        return a;
+    });
+    out << "rank_error,delay\n";
+    out << std::fixed << std::setprecision(2)
+        << static_cast<double>(summed_metrics.rank_error) / static_cast<double>(metrics.size()) << ','
+        << static_cast<double>(summed_metrics.delay) / static_cast<double>(metrics.size()) << '\n';
 }
