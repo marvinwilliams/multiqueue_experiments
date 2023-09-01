@@ -10,8 +10,10 @@ target_compile_options(
 target_compile_definitions(benchmark_base
                            INTERFACE L1_CACHE_LINESIZE=${L1_CACHE_LINESIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGESIZE=${PAGESIZE})
-target_compile_definitions(benchmark_base INTERFACE CORES_PER_NUMA_NODE=${CORES_PER_NUMA_NODE})
-target_compile_definitions(benchmark_base INTERFACE NUM_NUMA_NODES=${NUM_NUMA_NODES})
+target_compile_definitions(benchmark_base
+                           INTERFACE CORES_PER_NUMA_NODE=${CORES_PER_NUMA_NODE})
+target_compile_definitions(benchmark_base
+                           INTERFACE NUM_NUMA_NODES=${NUM_NUMA_NODES})
 target_compile_features(benchmark_base INTERFACE cxx_std_17)
 
 if(MULTIQUEUE_EXP_PERFORMANCE_COUNTERS)
@@ -44,12 +46,33 @@ if(MULTIQUEUE_EXP_TSAN)
   target_link_options(benchmark_base INTERFACE -fsanitize=thread)
 endif()
 
-function(add_tuning_variant buffer_size degree policy)
-  set(name mq_bs_${buffer_size}_d_${degree}_p_${policy})
+function(add_pop_pq_variant num_pop_pqs)
+  set(name mq_pop_pqs_${num_pop_pqs})
   add_library(${name} INTERFACE)
   target_compile_definitions(
     ${name}
-    INTERFACE MQ_QUEUE_SELECTION_POLICY=${policy}
+    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
+              MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
+              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0
+              MQ_HEAP_ARITY=2
+              MQ_NUM_POP_PQS=${num_pop_pqs})
+  target_link_libraries(${name} INTERFACE mq)
+  list(APPEND MQ_TUNING_VARIANTS ${name})
+  set(MQ_TUNING_VARIANTS
+      ${MQ_TUNING_VARIANTS}
+      PARENT_SCOPE)
+endfunction()
+
+foreach(num_pop_pqs 1 2 4 8)
+  add_pop_pq_variant(${num_pop_pqs})
+endforeach()
+
+function(add_tuning_variant buffer_size degree)
+  set(name mq_tuning_bs_${buffer_size}_d_${degree})
+  add_library(${name} INTERFACE)
+  target_compile_definitions(
+    ${name}
+    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
               MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
               MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
               MQ_HEAP_ARITY=${degree})
@@ -60,32 +83,26 @@ function(add_tuning_variant buffer_size degree policy)
       PARENT_SCOPE)
 endfunction()
 
-foreach(
-  buffer_size
-  0
-  4
-  8
-  16
-  64
-  128
-  512)
-  foreach(degree 2 4 8 16 64)
-    add_tuning_variant(${buffer_size} ${degree} 0)
-    add_tuning_variant(${buffer_size} ${degree} 1)
-    add_tuning_variant(${buffer_size} ${degree} 2)
-    add_tuning_variant(${buffer_size} ${degree} 3)
-  endforeach()
-endforeach()
-
-function(add_different_num_pop_pqs num_pop_pqs)
-  set(name mq_pop_pqs_${num_pop_pqs})
+function(add_tuning_pq_variant buffer_size)
+  set(name mq_tuning_std_bs_${buffer_size})
   add_library(${name} INTERFACE)
   target_compile_definitions(
     ${name}
     INTERFACE MQ_QUEUE_SELECTION_POLICY=0
-              MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
-              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0
-              MQ_NUM_POP_PQS=${num_pop_pqs})
+              MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
+              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
+              MQ_USE_STD_PQ)
+  target_link_libraries(${name} INTERFACE mq)
+  list(APPEND MQ_TUNING_VARIANTS ${name})
+
+  set(name mq_tuning_btree_bs_${buffer_size})
+  add_library(${name} INTERFACE)
+  target_compile_definitions(
+    ${name}
+    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
+              MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
+              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
+              MQ_USE_BTREE)
   target_link_libraries(${name} INTERFACE mq)
   list(APPEND MQ_TUNING_VARIANTS ${name})
   set(MQ_TUNING_VARIANTS
@@ -93,30 +110,17 @@ function(add_different_num_pop_pqs num_pop_pqs)
       PARENT_SCOPE)
 endfunction()
 
-foreach(num_pop_pqs 1 2 4 8)
-  add_different_num_pop_pqs(${num_pop_pqs})
+foreach(buffer_size 0 4 8 16 64 128 512)
+  foreach(degree 2 4 8 16 64)
+    add_tuning_variant(${buffer_size} ${degree})
+  endforeach()
+  add_tuning_pq_variant(${buffer_size})
 endforeach()
 
-add_library(mq_std_pq INTERFACE)
-target_compile_definitions(
-  mq_std_pq
-  INTERFACE MQ_QUEUE_SELECTION_POLICY=0 MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
-            MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0 MQ_USE_STD_PQ)
-target_link_libraries(mq_std_pq INTERFACE mq)
-list(APPEND MQ_TUNING_VARIANTS mq_std_pq)
-
-add_library(mq_btree INTERFACE)
-target_compile_definitions(
-  mq_btree
-  INTERFACE MQ_QUEUE_SELECTION_POLICY=0 MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
-            MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0 MQ_USE_BTREE)
-target_link_libraries(mq_btree INTERFACE mq)
-list(APPEND MQ_TUNING_VARIANTS mq_btree)
-
-add_library(mq_default INTERFACE)
-target_compile_definitions(mq_default INTERFACE MQ_QUEUE_SELECTION_POLICY=0)
-target_link_libraries(mq_default INTERFACE mq)
-list(APPEND MQ_VARIANTS mq_default)
+add_library(mq_rand INTERFACE)
+target_compile_definitions(mq_rand INTERFACE MQ_QUEUE_SELECTION_POLICY=0)
+target_link_libraries(mq_rand INTERFACE mq)
+list(APPEND MQ_VARIANTS mq_rand)
 
 add_library(mq_stick INTERFACE)
 target_compile_definitions(mq_stick INTERFACE MQ_QUEUE_SELECTION_POLICY=1)
@@ -156,7 +160,6 @@ endforeach()
 
 foreach(
   target
-  ${MQ_TUNING_VARIANTS}
   ${MQ_VARIANTS}
   klsm4
   klsm256
