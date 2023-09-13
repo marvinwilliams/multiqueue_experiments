@@ -117,6 +117,7 @@ struct Settings {
     key_type max_random = max_key;
     long long chunk_size = 1 << 12;
     int seed = 1;
+    std::chrono::milliseconds timeout{0};
 #ifdef QUALITY
     std::filesystem::path log_file;
     std::filesystem::path stats_file;
@@ -148,6 +149,9 @@ struct Settings {
             out << "Chunk size: " << settings.chunk_size << '\n';
         }
         out << "Seed: " << settings.seed << '\n';
+        if (settings.timeout.count() > 0) {
+            out << "Timeout (ms): " << settings.timeout.count() << "ms\n";
+        }
 #ifdef USE_PAPI
         if (!settings.papi_events.empty()) {
             out << "PAPI events: ";
@@ -575,9 +579,11 @@ template <typename Integer = std::size_t>
 class ChunkExecutor {
     std::atomic<Integer> counter_;
     Integer chunk_size_;
+    std::chrono::milliseconds timeout_;
 
    public:
-    explicit ChunkExecutor(Integer chunk_size) : chunk_size_{chunk_size} {
+    explicit ChunkExecutor(Integer chunk_size, std::chrono::milliseconds t = std::chrono::milliseconds{0})
+        : chunk_size_{chunk_size}, timeout_{t} {
     }
 
     template <typename Work, typename... Args>
@@ -589,6 +595,12 @@ class ChunkExecutor {
         auto t_start = std::chrono::high_resolution_clock::now();
         for (Integer from = counter_.fetch_add(chunk_size_, std::memory_order_relaxed); from < max;
              from = counter_.fetch_add(chunk_size_, std::memory_order_relaxed)) {
+            if (timeout_.count() > 0) {
+                auto t_now = std::chrono::high_resolution_clock::now();
+                if (t_now - t_start > timeout_) {
+                    break;
+                }
+            }
             auto to = std::min(from + chunk_size_, max);
             for (auto i = from; i < to; ++i) {
                 work(i, args...);  // no perfect forwarding here
@@ -602,7 +614,11 @@ class ChunkExecutor {
 
 template <typename Integer = std::size_t>
 class SplitExecutor {
+    std::chrono::milliseconds timeout_;
+
    public:
+    explicit SplitExecutor(std::chrono::milliseconds t = std::chrono::milliseconds{0}) : timeout_{t} {
+    }
     template <typename Work, typename... Args>
     auto operator()(task::Control const& tc, Integer max, Work work, Args&&... args) {
         auto from = (static_cast<Integer>(tc.id()) * max) / static_cast<Integer>(tc.num_threads());
@@ -610,6 +626,12 @@ class SplitExecutor {
         tc.synchronize();
         auto t_start = std::chrono::high_resolution_clock::now();
         for (; from != to; ++from) {
+            if (timeout_.count() > 0) {
+                auto t_now = std::chrono::high_resolution_clock::now();
+                if (t_now - t_start > timeout_) {
+                    break;
+                }
+            }
             work(from, args...);  // no perfect forwarding here
         }
         auto t_end = std::chrono::high_resolution_clock::now();
@@ -664,12 +686,12 @@ bool run_benchmark(Settings const& settings, pq_type& pq) {
 
     switch (settings.execution_mode) {
         case ExecutionMode::Chunk: {
-            ChunkExecutor executor{static_cast<std::size_t>(settings.chunk_size)};
+            ChunkExecutor executor{static_cast<std::size_t>(settings.chunk_size), settings.timeout};
             run_with_executor(executor);
             break;
         }
         case ExecutionMode::Split: {
-            SplitExecutor executor;
+            SplitExecutor executor{settings.timeout};
             run_with_executor(executor);
             break;
         }
@@ -756,6 +778,7 @@ int main(int argc, char* argv[]) {
     write_build_info(std::clog);
     Settings settings;
     cxxopts::Options cmd(argv[0]);
+    int timeout_ms = 0;
     cmd.add_options()
         // clang-format off
         ("h,help", "Print this help", cxxopts::value<bool>())
@@ -773,6 +796,7 @@ int main(int argc, char* argv[]) {
         ("max-random", "Max random key", cxxopts::value<key_type>(settings.max_random), "NUMBER")
         ("chunk-size", "Chunk size", cxxopts::value<long long>(settings.chunk_size), "NUMBER")
         ("s,seed", "Initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
+        ("timeout", "Timeout in milliseconds", cxxopts::value<int>(timeout_ms), "NUMBER")
 #ifdef QUALITY
         ("stats-file", "File to write the stats to", cxxopts::value<std::filesystem::path>(settings.stats_file), "PATH")
         ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
@@ -799,6 +823,7 @@ int main(int argc, char* argv[]) {
         if (args.count("execution") > 0) {
             settings.execution_mode = parse_execution_mode(args["execution"].as<char>());
         }
+        settings.timeout = std::chrono::milliseconds(timeout_ms);
     } catch (std::exception const& e) {
         std::cerr << "Error parsing command line: " << e.what() << std::endl;
         std::cerr << cmd.help() << std::endl;
