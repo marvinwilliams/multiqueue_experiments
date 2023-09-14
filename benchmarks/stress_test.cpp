@@ -122,9 +122,8 @@ struct Settings {
     std::filesystem::path log_file;
     std::filesystem::path stats_file;
     bool per_element = false;
-#else
-    bool per_thread = false;
 #endif
+    bool per_thread = false;
 #ifdef USE_PAPI
     std::vector<std::string> papi_events;
 #endif
@@ -820,9 +819,8 @@ int main(int argc, char* argv[]) {
         ("stats-file", "File to write the stats to", cxxopts::value<std::filesystem::path>(settings.stats_file), "PATH")
         ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
         ("per-element", "Output metrics per element", cxxopts::value<bool>(settings.per_element), "NUMBER")
-#else
-        ("per-thread", "Output metrics per thread", cxxopts::value<bool>(settings.per_thread), "NUMBER")
 #endif
+        ("per-thread", "Output metrics per thread", cxxopts::value<bool>(settings.per_thread), "NUMBER")
 #ifdef USE_PAPI
         ("r,pc", "Performance counters", cxxopts::value<std::vector<std::string>>(settings.papi_events))
 #endif
