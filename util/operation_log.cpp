@@ -19,7 +19,7 @@ operation_log::OperationLog operation_log::merge_logs(std::vector<OperationLog> 
     auto merged = OperationLog{};
     merged.pushes.resize(
         std::accumulate(logs.begin(), logs.end(), std::size_t{0},
-                        [](std::size_t acc, OperationLog const& log) { return acc + log.pushes.size(); }));
+                        [](std::size_t sum, OperationLog const& log) { return sum + log.pushes.size(); }));
     for (auto const& log : logs) {
         for (auto const& push : log.pushes) {
             merged.pushes[push.index] = push;
@@ -27,7 +27,7 @@ operation_log::OperationLog operation_log::merge_logs(std::vector<OperationLog> 
     }
     merged.pops.reserve(
         std::accumulate(logs.begin(), logs.end(), std::size_t{0},
-                        [](std::size_t acc, OperationLog const& log) { return acc + log.pops.size(); }));
+                        [](std::size_t sum, OperationLog const& log) { return sum + log.pops.size(); }));
     for (auto const& log : logs) {
         merged.pops.insert(merged.pops.end(), log.pops.begin(), log.pops.end());
     }

@@ -128,6 +128,101 @@ struct Settings {
     std::vector<std::string> papi_events;
 #endif
 
+    static int pushes_per_iteration(Mode mode) {
+        switch (mode) {
+            case Mode::Alternate:
+            case Mode::Increment:
+            case Mode::Push:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    static int pops_per_iteration(Mode mode) {
+        switch (mode) {
+            case Mode::Alternate:
+            case Mode::Increment:
+            case Mode::Pop:
+                return 1;
+            default:
+                return 0;
+        }
+    }
+
+    static long long num_operations_per_iteration(Mode mode) {
+        return pushes_per_iteration(mode) + pops_per_iteration(mode);
+    }
+
+    static long long num_iterations(Settings const& settings) {
+        return settings.num_threads * settings.operations_per_thread / num_operations_per_iteration(settings.mode);
+    }
+
+    static long long num_pushes(Settings const& settings) {
+        return pushes_per_iteration(settings.mode) * num_iterations(settings);
+    }
+
+    static long long num_pops(Settings const& settings) {
+        return pops_per_iteration(settings.mode) * num_iterations(settings);
+    }
+
+    static long long max_num_elements(Settings const& settings) {
+        return settings.num_threads *
+            (settings.prefill_per_thread + (settings.mode == Mode::Push ? settings.operations_per_thread : 0));
+    }
+
+    static bool validate(Settings const& settings) {
+        if (settings.num_threads <= 0) {
+            std::cerr << "Error: Number of threads must be greater than 0\n";
+            return false;
+        }
+        if (settings.min_prefill <= 0 || settings.min_random <= 0) {
+            std::cerr << "Error: Keys must be greater than 0\n";
+            return false;
+        }
+        if (settings.max_prefill < settings.min_prefill || settings.max_random < settings.min_random ||
+            settings.max_increment < settings.min_increment) {
+            std::cerr << "Error: Max must be greater than min\n";
+            return false;
+        }
+        if (settings.chunk_size <= 0) {
+            std::cerr << "Error: Chunk size must be greater than 0\n";
+            return false;
+        }
+        if (settings.prefill_per_thread < 0 || settings.operations_per_thread < 0) {
+            std::cerr << "Error: Prefill and operations must be nonnegative\n";
+            return false;
+        }
+        if (num_pops(settings) > settings.num_threads * settings.prefill_per_thread + num_pushes(settings)) {
+            std::cerr << "Error: Number of pops must not be greater than number of pushes\n";
+            return false;
+        }
+        if (settings.timeout.count() > 0 && settings.execution_mode != ExecutionMode::Chunk) {
+            std::cerr << "Error: Timeout only supported in chunk mode\n";
+            return false;
+        }
+#ifdef QUALITY
+        if (num_pops(settings) == 0) {
+            std::cerr << "Error: Number of pops must be greater than 0 to measure quality\n";
+            return false;
+        }
+        if (static_cast<value_type>(settings.num_threads * settings.prefill_per_thread + num_pushes(settings) - 1) >
+            std::numeric_limits<value_type>::max()) {
+            std::cerr << "Error: Number of pushes must be representable in `value_type`\n";
+            return false;
+        }
+#endif
+#ifdef USE_PAPI
+        for (auto const& name : settings.papi_events) {
+            if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
+                std::cerr << "Error: PAPI event " << name << " not available\n";
+                return false;
+            }
+        }
+#endif
+        return true;
+    }
+
     static void write(Settings const& settings, std::ostream& out) {
         out << "Threads: " << settings.num_threads << '\n'
             << "Prefill per thread: " << settings.prefill_per_thread << '\n'
@@ -266,97 +361,6 @@ struct ThreadData {
     Stats stats{};
 };
 
-int pushes_per_iteration(Mode mode) {
-    switch (mode) {
-        case Mode::Alternate:
-        case Mode::Increment:
-        case Mode::Push:
-            return 1;
-        default:
-            return 0;
-    }
-}
-
-int pops_per_iteration(Mode mode) {
-    switch (mode) {
-        case Mode::Alternate:
-        case Mode::Increment:
-        case Mode::Pop:
-            return 1;
-        default:
-            return 0;
-    }
-}
-
-long long num_operations_per_iteration(Mode mode) {
-    return pushes_per_iteration(mode) + pops_per_iteration(mode);
-}
-
-long long num_iterations(Settings const& settings) {
-    return settings.num_threads * settings.operations_per_thread / num_operations_per_iteration(settings.mode);
-}
-
-long long num_pushes(Settings const& settings) {
-    return pushes_per_iteration(settings.mode) * num_iterations(settings);
-}
-
-long long num_pops(Settings const& settings) {
-    return pops_per_iteration(settings.mode) * num_iterations(settings);
-}
-
-long long max_num_elements(Settings const& settings) {
-    return settings.num_threads *
-        (settings.prefill_per_thread + (settings.mode == Mode::Push ? settings.operations_per_thread : 0));
-}
-
-bool validate(Settings const& settings) {
-    if (settings.num_threads <= 0) {
-        std::cerr << "Error: Number of threads must be greater than 0\n";
-        return false;
-    }
-    if (settings.min_prefill <= 0 || settings.min_random <= 0) {
-        std::cerr << "Error: Keys must be greater than 0\n";
-        return false;
-    }
-    if (settings.max_prefill < settings.min_prefill || settings.max_random < settings.min_random ||
-        settings.max_increment < settings.min_increment) {
-        std::cerr << "Error: Max must be greater than min\n";
-        return false;
-    }
-    if (settings.chunk_size <= 0) {
-        std::cerr << "Error: Chunk size must be greater than 0\n";
-        return false;
-    }
-    if (settings.prefill_per_thread < 0 || settings.operations_per_thread < 0) {
-        std::cerr << "Error: Prefill and operations must be nonnegative\n";
-        return false;
-    }
-    if (num_pops(settings) > settings.num_threads * settings.prefill_per_thread + num_pushes(settings)) {
-        std::cerr << "Error: Number of pops must not be greater than number of pushes\n";
-        return false;
-    }
-#ifdef QUALITY
-    if (num_pops(settings) == 0) {
-        std::cerr << "Error: Number of pops must be greater than 0 to measure quality\n";
-        return false;
-    }
-    if (static_cast<value_type>(settings.num_threads * settings.prefill_per_thread + num_pushes(settings) - 1) >
-        std::numeric_limits<value_type>::max()) {
-        std::cerr << "Error: Number of pushes must be representable in `value_type`\n";
-        return false;
-    }
-#endif
-#ifdef USE_PAPI
-    for (auto const& name : settings.papi_events) {
-        if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
-            std::cerr << "Error: PAPI event " << name << " not available\n";
-            return false;
-        }
-    }
-#endif
-    return true;
-}
-
 #ifdef USE_PAPI
 int start_papi(std::vector<std::string> const& events) {
     int event_set = PAPI_NULL;
@@ -391,7 +395,7 @@ void generate_workload(Settings const& settings, Workload& workload, int id) {
     std::generate(workload.prefill.begin() + prefill_thread_offset,
                   workload.prefill.begin() + prefill_thread_offset + settings.prefill_per_thread,
                   [&prefill_dist, &rng]() { return prefill_dist(rng); });
-    auto pushes_per_thread = num_pushes(settings) / settings.num_threads;
+    auto pushes_per_thread = Settings::num_pushes(settings) / settings.num_threads;
     auto push_data_thread_offset = id * pushes_per_thread;
     auto push_data_begin = workload.push_data.begin() + push_data_thread_offset;
     auto push_data_end = push_data_begin + pushes_per_thread;
@@ -428,14 +432,14 @@ void generate_workload(Settings const& settings, Workload& workload, int id) {
 }
 
 #ifdef QUALITY
-void push(key_type key, std::size_t index, ThreadData& data) {
-    data.handle.push({key, static_cast<value_type>(index)});
+void push(key_type key, value_type value, ThreadData& data) {
+    data.handle.push({key, value});
     auto tick = operation_log::get_tick();
-    data.op_log.pushes.push_back({tick, key, index});
+    data.op_log.pushes.push_back({tick, key, static_cast<std::size_t>(value)});
 }
 
 key_type pop(ThreadData& data) {
-    do {
+    while (true) {
         auto tick = operation_log::get_tick();
         auto retval = data.handle.try_pop();
         if (retval) {
@@ -443,11 +447,11 @@ key_type pop(ThreadData& data) {
             return retval->first;
         }
         ++data.stats.num_failed_pops;
-    } while (true);
+    }
 }
 #else
-void push(key_type key, std::size_t index, ThreadData& data) {
-    data.handle.push({key, static_cast<value_type>(index)});
+void push(key_type key, value_type value, ThreadData& data) {
+    data.handle.push({key, value});
 };
 
 auto pop(ThreadData& data) {
@@ -462,20 +466,20 @@ auto pop(ThreadData& data) {
 #endif
 
 void prefill(Settings const& settings, std::vector<key_type> const& keys, ThreadData& data) {
-    auto offset = static_cast<std::size_t>(data.tc.id() * settings.prefill_per_thread);
-    for (std::size_t i = 0; i < static_cast<std::size_t>(settings.prefill_per_thread); ++i) {
-        push(keys[offset + i], offset + i, data);
+    auto offset = static_cast<value_type>(data.tc.id() * settings.prefill_per_thread);
+    for (auto i = 0LL; i < settings.prefill_per_thread; ++i) {
+        push(keys[offset + static_cast<std::size_t>(i)], offset + static_cast<value_type>(i), data);
     }
 }
 
 template <typename Executor>
 void execute_benchmark(Settings const& settings, std::vector<long> const& push_data, ThreadData& data,
                        Executor& executor) {
-    auto offset = static_cast<std::size_t>(settings.num_threads * settings.prefill_per_thread);
+    auto offset = static_cast<value_type>(settings.num_threads * settings.prefill_per_thread);
     switch (settings.mode) {
         case Mode::Alternate: {
             auto work = [&, offset](std::size_t index) {
-                push(static_cast<key_type>(push_data[offset + index]), offset + index, data);
+                push(static_cast<key_type>(push_data[index]), offset + index, data);
                 pop(data);
             };
             execute(settings, executor, work, data);
@@ -484,14 +488,14 @@ void execute_benchmark(Settings const& settings, std::vector<long> const& push_d
         case Mode::Increment: {
             auto work = [&, offset](std::size_t index) {
                 auto key = pop(data);
-                push(static_cast<key_type>(static_cast<long>(key) + push_data[offset + index]), offset + index, data);
+                push(static_cast<key_type>(static_cast<long>(key) + push_data[index]), offset + index, data);
             };
             execute(settings, executor, work, data);
             break;
         }
         case Mode::Push: {
             auto work = [&, offset](std::size_t index) {
-                push(static_cast<key_type>(push_data[offset + index]), offset + index, data);
+                push(static_cast<key_type>(push_data[index]), offset + index, data);
             };
             execute(settings, executor, work, data);
             break;
@@ -523,7 +527,7 @@ void execute(Settings const& settings, Executor& executor, Work work, ThreadData
         }
     }
 #endif
-    auto result = executor(data.tc, static_cast<std::size_t>(num_iterations(settings)), work);
+    auto result = executor(data.tc, static_cast<std::size_t>(Settings::num_iterations(settings)), work);
 
 #ifdef USE_PAPI
     if (papi_started) {
@@ -535,8 +539,8 @@ void execute(Settings const& settings, Executor& executor, Work work, ThreadData
 #endif
     data.stats.start_time = result.start_time;
     data.stats.end_time = result.end_time;
-    data.stats.num_pushes = result.work_count * pushes_per_iteration(settings.mode);
-    data.stats.num_pops = result.work_count * pops_per_iteration(settings.mode);
+    data.stats.num_pushes = result.work_count * Settings::pushes_per_iteration(settings.mode);
+    data.stats.num_pops = result.work_count * Settings::pops_per_iteration(settings.mode);
 #ifdef MQ_COUNT_STATS
     data.stats.mq_stats = data.handle.get_counters();
 #endif
@@ -546,8 +550,8 @@ template <typename Executor>
 void run_thread(Settings const& settings, Workload& workload, ThreadData& data, Executor& executor) {
 #ifdef QUALITY
     data.op_log.pushes.reserve(
-        static_cast<std::size_t>(settings.num_threads * settings.prefill_per_thread + num_pushes(settings)));
-    data.op_log.pops.reserve(static_cast<std::size_t>(num_pops(settings)));
+        static_cast<std::size_t>(settings.num_threads * settings.prefill_per_thread + Settings::num_pushes(settings)));
+    data.op_log.pops.reserve(static_cast<std::size_t>(Settings::num_pops(settings)));
 #endif
     std::chrono::steady_clock::time_point t_start;
     std::chrono::steady_clock::time_point t_end;
@@ -627,14 +631,7 @@ class ChunkExecutor {
 
 template <typename Integer = std::size_t>
 class SplitExecutor {
-    Integer chunk_size_;
-    std::chrono::milliseconds timeout_;
-
    public:
-    explicit SplitExecutor(Integer chunk_size, std::chrono::milliseconds t = std::chrono::milliseconds{0})
-        : chunk_size_{chunk_size}, timeout_{t} {
-    }
-
     template <typename Work, typename... Args>
     ExecutionResult operator()(task::Control const& tc, Integer max, Work work, Args&&... args) {
         auto from = (static_cast<Integer>(tc.id()) * max) / static_cast<Integer>(tc.num_threads());
@@ -642,23 +639,11 @@ class SplitExecutor {
         ExecutionResult result{};
         tc.synchronize();
         result.start_time = std::chrono::high_resolution_clock::now();
-        Integer count = 0;
-        for (; from != to; ++from) {
-            work(from, args...);  // no perfect forwarding here
-            ++count;
-            if (count == chunk_size_) {
-                result.work_count += static_cast<long long>(count);
-                count = 0;
-                if (timeout_.count() > 0) {
-                    auto t_now = std::chrono::high_resolution_clock::now();
-                    if (t_now - result.start_time > timeout_) {
-                        break;
-                    }
-                }
-            }
+        for (auto i = from; i != to; ++i) {
+            work(i, args...);  // no perfect forwarding here
         }
+        result.work_count += static_cast<long long>(to - from);
         result.end_time = std::chrono::high_resolution_clock::now();
-        result.work_count += static_cast<long long>(count);
         tc.synchronize();
         return result;
     }
@@ -687,7 +672,7 @@ bool run_benchmark(Settings const& settings, pq_type& pq) {
 
     Workload workload;
     workload.prefill.resize(static_cast<std::size_t>(settings.num_threads * settings.prefill_per_thread));
-    workload.push_data.resize(static_cast<std::size_t>(num_pushes(settings)));
+    workload.push_data.resize(static_cast<std::size_t>(Settings::num_pushes(settings)));
     auto stats = std::vector<Stats>(static_cast<std::size_t>(settings.num_threads));
 
     auto run_with_executor = [&](auto& executor) {
@@ -710,7 +695,7 @@ bool run_benchmark(Settings const& settings, pq_type& pq) {
             break;
         }
         case ExecutionMode::Split: {
-            SplitExecutor executor{static_cast<std::size_t>(settings.chunk_size), settings.timeout};
+            SplitExecutor executor{};
             run_with_executor(executor);
             break;
         }
@@ -870,11 +855,11 @@ int main(int argc, char* argv[]) {
     }
 #endif
 
-    if (!validate(settings)) {
+    if (!Settings::validate(settings)) {
         return EXIT_FAILURE;
     }
 
-    auto pq = pq_type(settings.num_threads, static_cast<std::size_t>(max_num_elements(settings)), settings.pq_settings);
+    auto pq = pq_type(settings.num_threads, static_cast<std::size_t>(Settings::max_num_elements(settings)), settings.pq_settings);
     std::clog << "Priority queue: ";
     pq.describe(std::clog) << '\n';
 
