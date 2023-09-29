@@ -168,7 +168,7 @@ struct Settings {
 
     static long long max_num_elements(Settings const& settings) {
         return settings.num_threads *
-            (settings.prefill_per_thread + (settings.mode == Mode::Push ? settings.operations_per_thread : 0));
+            (settings.prefill_per_thread + (settings.mode == Mode::Push ? settings.operations_per_thread : 1));
     }
 
     static bool validate(Settings const& settings) {
@@ -859,7 +859,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    auto pq = pq_type(settings.num_threads, static_cast<std::size_t>(Settings::max_num_elements(settings)), settings.pq_settings);
+    auto pq = pq_type(settings.num_threads, static_cast<std::size_t>(2 * Settings::max_num_elements(settings)), settings.pq_settings);
     std::clog << "Priority queue: ";
     pq.describe(std::clog) << '\n';
 
