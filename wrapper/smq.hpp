@@ -2,6 +2,8 @@
 
 #include "StealingMultiQueue.hpp"
 
+#include "wrapper/priority.hpp"
+
 #include "cxxopts.hpp"
 
 #include <algorithm>
@@ -16,13 +18,25 @@
 
 namespace wrapper {
 
-template <typename Key, typename Value, typename Compare = std::less<Key>, std::size_t StealProb = 8, std::size_t StealBatchSize = 8>
+template <typename Key, typename T, Priority P = Priority::Min>
 class StealingMQ {
    public:
     using key_type = Key;
-    using value_type = Value;
+    using mapped_type = T;
+    using value_type = std::pair<key_type, mapped_type>;
     struct config_type {};
-    using key_comp = Compare;
+    using key_comp = std::conditional_t<P == Priority::Min, std::greater<Key>, std::less<Key>>;
+
+#ifdef SMQ_STEAL_PROB
+    static constexpr std::size_t StealProb = SMQ_STEAL_PROB;
+#else
+    static constexpr std::size_t StealProb = 8;
+#endif
+#ifdef SMQ_STEAL_BATCH_SIZE
+    static constexpr std::size_t StealBatchSize = SMQ_STEAL_BATCH_SIZE;
+#else
+    static constexpr std::size_t StealBatchSize = 64;
+#endif
 
    private:
     class value_compare {
@@ -40,19 +54,21 @@ class StealingMQ {
 
    public:
     class Handle {
-        pq_type& pq_;
+        friend StealingMQ;
+
+        pq_type* pq_;
         int id_;
 
-       public:
-        Handle(pq_type& pq, int id) : pq_{pq}, id_{id} {
+        Handle(pq_type* pq, int id) : pq_{pq}, id_{id} {
         }
 
+       public:
         void push(value_type const& value) {
-            pq_.push(id_, &value, (&value) + 1);
+            pq_->push(id_, &value, (&value) + 1);
         }
 
         std::optional<value_type> try_pop() {
-            return pq_.pop(id_);
+            return pq_->pop(id_);
         }
     };
 
@@ -71,7 +87,7 @@ class StealingMQ {
 
     Handle get_handle() {
         static std::atomic_int id{0};
-        return Handle{*pq_.get(), id.fetch_add(1)};
+        return Handle{pq_.get(), id.fetch_add(1)};
     }
 
     std::ostream& describe(std::ostream& out) {

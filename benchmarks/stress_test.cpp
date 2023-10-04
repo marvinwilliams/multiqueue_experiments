@@ -1,6 +1,7 @@
 #include "build_info.hpp"
-#include "priority_queue_selection.hpp"
 #include "task.hpp"
+#include "wrapper/priority.hpp"
+#include "wrapper/selector.hpp"
 
 #include "cxxopts.hpp"
 
@@ -55,7 +56,7 @@ using value_type = unsigned long;
 static constexpr auto max_key = static_cast<key_type>(1) << 63;
 #endif
 
-using pq_type = PriorityQueue<key_type, value_type, true>;
+using pq_type = PriorityQueue<key_type, value_type, Priority::Min>;
 using handle_type = pq_type::handle_type;
 
 enum class Mode { Increment, Alternate, Push, Pop };
@@ -547,7 +548,7 @@ void execute(Settings const& settings, Executor& executor, Work work, ThreadData
 }
 
 template <typename Executor>
-void run_thread(Settings const& settings, Workload& workload, ThreadData& data, Executor& executor) {
+Stats run_thread(Settings const& settings, Workload& workload, ThreadData& data, Executor& executor) {
 #ifdef QUALITY
     data.op_log.pushes.reserve(
         static_cast<std::size_t>(settings.num_threads * settings.prefill_per_thread + Settings::num_pushes(settings)));
@@ -582,6 +583,7 @@ void run_thread(Settings const& settings, Workload& workload, ThreadData& data, 
         t_end = std::chrono::steady_clock::now();
         std::clog << "done (" << std::chrono::duration<double>(t_end - t_start).count() << "s)" << std::endl;
     });
+    return data.stats;
 }
 
 struct ExecutionResult {
@@ -679,8 +681,7 @@ bool run_benchmark(Settings const& settings, pq_type& pq) {
         affinity::NUMA numa_affinity{cores_per_numa_node, num_numa_nodes};
         task::Runner runner(numa_affinity, settings.num_threads, [&](auto tc) {
             auto data = ThreadData{tc, pq.get_handle()};
-            run_thread(settings, workload, data, executor);
-            stats[static_cast<std::size_t>(tc.id())] = std::move(data.stats);
+            stats[static_cast<std::size_t>(tc.id())] = run_thread(settings, workload, data, executor);
 #ifdef QUALITY
             op_logs[static_cast<std::size_t>(tc.id())] = std::move(data.op_log);
 #endif
@@ -859,7 +860,8 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    auto pq = pq_type(settings.num_threads, static_cast<std::size_t>(2 * Settings::max_num_elements(settings)), settings.pq_settings);
+    auto pq = pq_type(settings.num_threads, static_cast<std::size_t>(2 * Settings::max_num_elements(settings)),
+                      settings.pq_settings);
     std::clog << "Priority queue: ";
     pq.describe(std::clog) << '\n';
 

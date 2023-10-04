@@ -2,6 +2,8 @@
 
 // Adapted from klsm
 
+#include "wrapper/priority.hpp"
+
 #include "cxxopts.hpp"
 
 #include <ios>
@@ -16,57 +18,83 @@ using capq_type = struct fpasl_catree_set;
 namespace wrapper {
 
 namespace detail {
-struct CAPQ_deleter {
-    void operator()(capq_type*);
-};
-}  // namespace detail
-
 // GC has MAX_THREADS = 128
 // (unsigned long) -1 is signaling empty
 
-template <typename Key = unsigned long, typename T = unsigned long, bool Min = true>
-class CAPQ {
-    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
-                  "Only unsigned long as Key and T are supported");
-};
-
-template <bool Min>
-class CAPQ<unsigned long, unsigned long, Min> {
+class CAPQBase {
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
     struct config_type {};
-    struct Handle {
-        capq_type* pq_;
-
-        void push(value_type const& value);
-        std::optional<value_type> try_pop();
-    };
-
-    using handle_type = Handle;
-
-    static constexpr key_type min_valid_key = std::numeric_limits<key_type>::min();
-    static constexpr key_type max_valid_key = std::numeric_limits<key_type>::max() - 1;
 
    private:
-    static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
+    struct Deleter {
+        void operator()(capq_type*);
+    };
+    alignas(64) std::unique_ptr<capq_type, Deleter> pq_;
 
-    alignas(64) std::unique_ptr<capq_type, detail::CAPQ_deleter> pq_;
+   protected:
+    static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
+    void push(value_type const& value);
+    std::optional<value_type> try_pop();
 
    public:
     static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
     }
 
-    CAPQ(int num_threads, std::size_t initial_capacity, config_type const& config);
+    CAPQBase(int num_threads, std::size_t initial_capacity, config_type const& config);
 
-    Handle get_handle() {
-        return Handle{pq_.get()};
-    }
-
-    std::ostream& describe(std::ostream& out) {
+    static std::ostream& describe(std::ostream& out) {
         out << "CA-PQ";
         return out;
+    }
+};
+
+}  // namespace detail
+
+template <typename Key = unsigned long, typename T = unsigned long, Priority = Priority::Min>
+class CAPQ {
+    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
+                  "Only unsigned long as Key and T are supported");
+};
+
+template <Priority P>
+class CAPQ<unsigned long, unsigned long, P> : public detail::CAPQBase {
+   public:
+    using detail::CAPQBase::CAPQBase;
+
+    class Handle {
+        friend CAPQ;
+        CAPQ* pq_;
+
+        explicit Handle(CAPQ* pq) : pq_{pq} {
+        }
+
+       public:
+        void push(value_type const& value) {
+            if constexpr (P == Priority::Max) {
+                pq_->push({sentinel - value.first - 1, value.second});
+            } else {
+                pq_->push(value);
+            }
+        }
+
+        std::optional<value_type> try_pop() {
+            auto ret = pq_->try_pop();
+            if constexpr (P == Priority::Max) {
+                if (ret) {
+                    ret->first = sentinel - ret->first - 1;
+                }
+            }
+            return ret;
+        };
+    };
+
+    using handle_type = Handle;
+
+    Handle get_handle() {
+        return Handle{this};
     }
 };
 

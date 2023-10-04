@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wrapper/priority.hpp"
+
 #include "cxxopts.hpp"
 
 #include <tbb/concurrent_queue.h>
@@ -10,12 +12,13 @@
 
 namespace wrapper {
 
-// Min is ignored since this is a FIFO
-template <typename KeyType, typename Value>
+// Priority is ignored since this is a FIFO
+template <typename Key, typename T, Priority P = Priority::Min>
 class TBBQueue {
    public:
-    using key_type = KeyType;
-    using value_type = Value;
+    using key_type = Key;
+    using mapped_type = T;
+    using value_type = std::pair<key_type, mapped_type>;
     struct config_type {};
 
    private:

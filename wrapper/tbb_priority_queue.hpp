@@ -1,5 +1,7 @@
 #pragma once
 
+#include "wrapper/priority.hpp"
+
 #include "cxxopts.hpp"
 
 #include <tbb/concurrent_priority_queue.h>
@@ -10,15 +12,16 @@
 
 namespace wrapper {
 
-template <typename KeyType, typename Value, typename Compare = std::less<KeyType>>
+template <typename Key, typename T, Priority P = Priority::Min>
 class TBBPriorityQueue {
    public:
-    using key_type = KeyType;
-    using value_type = Value;
-    using key_compare = Compare;
+    using key_type = Key;
+    using mapped_type = T;
+    using value_type = std::pair<key_type, mapped_type>;
+    using key_compare = std::conditional_t<P == Priority::Min, std::greater<key_type>, std::less<key_type>>;
     struct config_type {};
     class value_compare {
-        friend class TBBPriorityQueue<KeyType, Value, Compare>;
+        friend class TBBPriorityQueue<Key, T, P>;
         [[no_unique_address]] key_compare comp;
 
         explicit value_compare(key_compare const& c) : comp{c} {

@@ -20,65 +20,52 @@ __thread unsigned long* seeds;
 
 namespace wrapper {
 
-template <bool Min>
-void Spraylist<unsigned long, unsigned long, Min>::sl_intset_deleter::operator()(sl_intset_t* p) {
-    sl_set_delete(p);
+struct detail::SpraylistBase::PQWrapper : ::sl_intset_t {};
+
+void detail::SpraylistBase::Deleter::operator()(PQWrapper* p) {
+    ::sl_set_delete(p);
 }
 
-template <bool Min>
-void Spraylist<unsigned long, unsigned long, Min>::thread_data_deleter::operator()(thread_data_t* p) {
-    delete p;
+struct detail::SpraylistBase::ThreadDataWrapper : ::thread_data_t {};
+
+void detail::SpraylistBase::ThreadDataDeleter::operator()(ThreadDataWrapper* p) {
+    delete static_cast<thread_data_t*>(p);
 }
 
-template <bool Min>
-Spraylist<unsigned long, unsigned long, Min>::Spraylist(int num_threads, std::size_t initial_capacity,
+detail::SpraylistBase::SpraylistBase(int num_threads, std::size_t initial_capacity,
                                                         config_type const& /*options*/)
     : num_threads_(num_threads) {
-    ssalloc_init(num_threads_);
+    ::ssalloc_init(num_threads_);
     *levelmax = floor_log_2(initial_capacity);
-    pq_.reset(sl_set_new());
+    pq_.reset(static_cast<PQWrapper*>(sl_set_new()));
 }
 
-template <bool Min>
-auto Spraylist<unsigned long, unsigned long, Min>::get_handle() -> Handle {
+auto detail::SpraylistBase::new_thread_data() const -> std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter> {
     static std::mutex m;
     auto l = std::scoped_lock(m);
-    ssalloc_init(num_threads_);
-    seeds = seed_rand();
-    auto thread_data = std::unique_ptr<thread_data_t, thread_data_deleter>(new thread_data_t);
-    thread_data->seed = rand();
-    thread_data->seed2 = rand();
+    ::ssalloc_init(num_threads_);
+    seeds = ::seed_rand();
+    auto thread_data = std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter>(static_cast<ThreadDataWrapper*>(new thread_data_t));
+    thread_data->seed = ::rand();
+    thread_data->seed2 = ::rand();
     thread_data->nb_threads = num_threads_;
-    return Handle{std::move(thread_data), pq_.get()};
+    return thread_data;
 }
 
-template <>
-void Spraylist<unsigned long, unsigned long, true>::Handle::push(value_type const& value) {
-    sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
+void detail::SpraylistBase::push(value_type const& value) {
+    ::sl_add_val(pq_.get(), value.first, value.second, TRANSACTIONAL);
 }
 
-template <>
-void Spraylist<unsigned long, unsigned long, false>::Handle::push(value_type const& value) {
-    sl_add_val(pq_, max_valid_key - value.first, value.second, TRANSACTIONAL);
-}
-
-template <bool Min>
-auto Spraylist<unsigned long, unsigned long, Min>::Handle::try_pop() -> std::optional<value_type> {
+auto detail::SpraylistBase::try_pop(ThreadDataWrapper* data) -> std::optional<value_type> {
     value_type retval;
     int ret;
     do {
-        ret = spray_delete_min_key(pq_, &retval.first, &retval.second, data_.get());
-    } while (ret == 0 && retval.first != sentinel_);
-    if (retval.first == sentinel_) {
+        ret = ::spray_delete_min_key(pq_.get(), &retval.first, &retval.second, data);
+    } while (ret == 0 && retval.first != sentinel);
+    if (retval.first == sentinel) {
         return std::nullopt;
-    }
-    if (!Min) {
-        retval.first = max_valid_key - retval.first;
     }
     return retval;
 }
-
-template class Spraylist<unsigned long, unsigned long, true>;
-template class Spraylist<unsigned long, unsigned long, false>;
 
 }  // namespace wrapper

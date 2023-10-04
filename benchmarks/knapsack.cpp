@@ -1,8 +1,9 @@
 #include "build_info.hpp"
 #include "knapsack_instance.hpp"
-#include "priority_queue_selection.hpp"
+#include "task.hpp"
 #include "termination_detection.hpp"
-#include "thread_coordination.hpp"
+#include "wrapper/priority.hpp"
+#include "wrapper/selector.hpp"
 
 #include "cxxopts.hpp"
 
@@ -25,10 +26,20 @@
 #include <utility>
 #include <vector>
 
-using pq_type = PriorityQueue<unsigned long, unsigned long, false>;
+#ifdef CORES_PER_NUMA_NODE
+static constexpr auto cores_per_numa_node = CORES_PER_NUMA_NODE;
+#else
+static constexpr auto cores_per_numa_node = 4;
+#endif
+#ifdef NUM_NUMA_NODES
+static constexpr auto num_numa_nodes = NUM_NUMA_NODES;
+#else
+static constexpr auto num_numa_nodes = 16;
+#endif
+using pq_type = PriorityQueue<unsigned long, unsigned long, Priority::Max>;
 using handle_type = pq_type::handle_type;
 
-using ctx_type = thread_coordination::Context;
+using ctx_type = task::Control;
 
 static_assert(sizeof(unsigned long) >= sizeof(std::uint64_t), "64bit unsigned long required");
 using payload_type = unsigned long;
@@ -67,7 +78,7 @@ void write_settings(Settings const& settings, std::ostream& out) {
 }
 
 struct ThreadStats {
-    thread_coordination::time_result_type work_time{};
+    std::pair<std::chrono::high_resolution_clock::time_point, std::chrono::high_resolution_clock::time_point> work_time;
     long long pushed_nodes{0};
     long long ignored_nodes{0};
     long long processed_nodes{0};
@@ -155,41 +166,28 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
 ThreadStats benchmark_thread(ctx_type ctx, pq_type& pq, SharedData& data) {
     ThreadStats stats;
     auto handle = pq.get_handle();
-    if (ctx.get_id() == 0) {
+    if (ctx.id() == 0) {
         auto ub = upper_bound(data.instance, data.instance.capacity(), 0);
         auto lb = lower_bound(data.instance, data.instance.capacity(), 0);
         data.solution.store(lb, std::memory_order_relaxed);
         handle.push({ub, to_payload(0, data.instance.capacity(), 0)});
         ++stats.pushed_nodes;
-        stats.work_time = ctx.execute_synchronized([&]() {
-            while (termination_detection::try_do(ctx.get_num_threads(), data.termination_detection_data,
-                                                 [&]() { return process_node(handle, stats, data); })) {
-            }
-        });
-    } else {
-        stats.work_time = ctx.execute_synchronized([&]() {
-            while (termination_detection::try_do(ctx.get_num_threads(), data.termination_detection_data,
-                                                 [&]() { return process_node(handle, stats, data); })) {
-            }
-        });
     }
+    ctx.synchronize();
+    auto start_time = std::chrono::high_resolution_clock::now();
+    while (termination_detection::try_do(ctx.num_threads(), data.termination_detection_data,
+                                         [&]() { return process_node(handle, stats, data); })) {
+    }
+    auto end_time = std::chrono::high_resolution_clock::now();
+    ctx.synchronize();
+    stats.work_time = {start_time, end_time};
     return stats;
 }
 
-void write_stats(std::vector<ThreadStats> const& stats, std::ostream& out) {
-    out << "thread,start_time,end_time,pushed,processed,ignored\n";
-    for (std::size_t i = 0; i < stats.size(); ++i) {
-        auto const& s = stats[i];
-        // clang-format off
-        out << i << ','
-            << s.work_time.start.time_since_epoch().count() << ','
-            << s.work_time.end.time_since_epoch().count() << ','
-            << s.pushed_nodes << ','
-            << s.processed_nodes << ','
-            << s.ignored_nodes
-            << '\n';
-        // clang-format on
-    }
+void write_stats(ThreadStats const& stats, std::ostream& out) {
+    out << "time,pushed,processed,ignored\n";
+    out << (stats.work_time.second - stats.work_time.first).count() << ',' << stats.pushed_nodes << ','
+        << stats.processed_nodes << ',' << stats.ignored_nodes << '\n';
 }
 
 bool run_benchmark(Settings const& settings) {
@@ -212,20 +210,20 @@ bool run_benchmark(Settings const& settings) {
     std::clog << "Priority queue: ";
     pq.describe(std::clog) << '\n';
     std::vector<ThreadStats> all_stats(static_cast<std::size_t>(settings.num_threads));
-    thread_coordination::affinity::NUMA numa_affinity{CORES_PER_NUMA_NODE, NUM_NUMA_NODES};
+    affinity::NUMA numa_affinity{cores_per_numa_node, num_numa_nodes};
     std::clog << "Solving..." << std::flush;
     auto t_start = std::chrono::steady_clock::now();
-    thread_coordination::TaskHandle task_handle{
-        numa_affinity, settings.num_threads,
-        [&](auto ctx) { all_stats[static_cast<std::size_t>(ctx.get_id())] = benchmark_thread(ctx, pq, shared_data); }};
-    task_handle.wait();
+    task::Runner runner{numa_affinity, settings.num_threads, [&](auto ctx) {
+                            all_stats[static_cast<std::size_t>(ctx.id())] = benchmark_thread(ctx, pq, shared_data);
+                        }};
+    runner.wait();
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << "ms)"
               << std::endl;
     ThreadStats first = all_stats.front();
     auto accum_stats = std::accumulate(all_stats.begin() + 1, all_stats.end(), first, [](auto accum, auto const& e) {
-        accum.work_time.start = std::min(accum.work_time.start, e.work_time.start);
-        accum.work_time.end = std::max(accum.work_time.end, e.work_time.end);
+        accum.work_time.first = std::min(accum.work_time.first, e.work_time.first);
+        accum.work_time.second = std::max(accum.work_time.second, e.work_time.second);
         accum.pushed_nodes += e.pushed_nodes;
         accum.processed_nodes += e.processed_nodes;
         accum.ignored_nodes += e.ignored_nodes;
@@ -240,7 +238,7 @@ bool run_benchmark(Settings const& settings) {
                   << ")" << std::endl;
         return false;
     }
-    write_stats(all_stats, std::cout);
+    write_stats(accum_stats, std::cout);
     return true;
 }
 
