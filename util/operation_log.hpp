@@ -13,7 +13,7 @@
 namespace operation_log {
 
 struct Push {
-    std::uint64_t tick;
+    long long tick;
     unsigned long key;
     std::size_t index;
     friend bool operator<(Push const& a, Push const& b) noexcept {
@@ -22,8 +22,8 @@ struct Push {
 };
 
 struct Pop {
-    std::uint64_t tick;
-    std::size_t index;
+    long long tick;
+    std::size_t ref_index;
     friend bool operator<(Pop const& a, Pop const& b) noexcept {
         return a.tick < b.tick;
     }
@@ -34,20 +34,13 @@ struct OperationLog {
     std::vector<Pop> pops;
 };
 
-inline std::uint64_t get_tick() noexcept {
-    return static_cast<std::uint64_t>(std::chrono::high_resolution_clock::now().time_since_epoch().count());
-}
-
 struct Metrics {
     std::size_t rank_error;
     std::size_t delay;
 };
 
-OperationLog merge_logs(std::vector<OperationLog> const& logs);
 bool verify_logs(OperationLog const& logs);
 void write_logs(OperationLog const& log, std::ostream& out);
-std::vector<Metrics> replay_logs(OperationLog logs);
-void write_metrics(std::vector<Metrics> const& metrics, std::ostream& out);
-void write_metrics_average(std::vector<Metrics> const& metrics, std::ostream& out);
+std::vector<Metrics> replay_logs(OperationLog const& logs);
 
 }  // namespace operation_log

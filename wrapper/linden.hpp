@@ -75,14 +75,17 @@ class Linden<unsigned long, unsigned long, P> : public detail::LindenBase {
             if constexpr (P == Priority::Max) {
                 pq_->push({sentinel - value.first - 1, value.second});
             } else {
-                pq_->push(value);
+                pq_->push({value.first + 1, value.second});
             }
         }
+
         std::optional<value_type> try_pop() {
             auto ret = pq_->try_pop();
-            if constexpr (P == Priority::Max) {
-                if (ret) {
+            if (ret) {
+                if constexpr (P == Priority::Max) {
                     ret->first = sentinel - ret->first - 1;
+                } else {
+                    --ret->first;
                 }
             }
             return ret;

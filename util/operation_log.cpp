@@ -15,44 +15,24 @@
 #include <unordered_set>
 #include <vector>
 
-operation_log::OperationLog operation_log::merge_logs(std::vector<OperationLog> const& logs) {
-    auto merged = OperationLog{};
-    merged.pushes.resize(
-        std::accumulate(logs.begin(), logs.end(), std::size_t{0},
-                        [](std::size_t sum, OperationLog const& log) { return sum + log.pushes.size(); }));
-    for (auto const& log : logs) {
-        for (auto const& push : log.pushes) {
-            merged.pushes[push.index] = push;
-        }
-    }
-    merged.pops.reserve(
-        std::accumulate(logs.begin(), logs.end(), std::size_t{0},
-                        [](std::size_t sum, OperationLog const& log) { return sum + log.pops.size(); }));
-    for (auto const& log : logs) {
-        merged.pops.insert(merged.pops.end(), log.pops.begin(), log.pops.end());
-    }
-    std::sort(merged.pops.begin(), merged.pops.end());
-    return merged;
-}
-
 // A push might be after the pop because the tick is recorded
 // after/before the push/pop is performed.
 bool operation_log::verify_logs(OperationLog const& logs) {
     auto popped = std::unordered_set<std::size_t>{};
     long long num_late_pushes = 0;
     for (auto op : logs.pops) {
-        if (op.index >= logs.pushes.size()) {
-            std::cerr << "Error: Popped element has invalid index: " << op.index << '\n';
+        if (op.ref_index >= logs.pushes.size()) {
+            std::cerr << "Error: Popped element has invalid index: " << op.ref_index << '\n';
             return false;
         }
-        if (op.index != logs.pushes[op.index].index) {
+        if (op.ref_index != logs.pushes[op.ref_index].index) {
             std::cerr << "Error: Pushes have wrong indices\n";
             return false;
         }
-        if (op.tick < logs.pushes[op.index].tick) {
+        if (op.tick < logs.pushes[op.ref_index].tick) {
             ++num_late_pushes;
         }
-        if (!popped.insert(op.index).second) {
+        if (!popped.insert(op.ref_index).second) {
             std::cerr << "Error: Popped the same element twice\n";
             return false;
         }
@@ -65,11 +45,24 @@ bool operation_log::verify_logs(OperationLog const& logs) {
 
 void operation_log::write_logs(OperationLog const& logs, std::ostream& out) {
     out << logs.pushes.size() << ' ' << logs.pops.size() << '\n';
-    for (auto const& push : logs.pushes) {
-        out << "i," << push.tick << ',' << push.key << ',' << push.index << '\n';
+    auto pop_it = logs.pops.begin();
+    auto push_it = logs.pushes.begin();
+    while (pop_it != logs.pops.end() && push_it != logs.pushes.end()) {
+        if (pop_it->tick < push_it->tick) {
+            out << "d," << pop_it->tick << ',' << pop_it->ref_index << '\n';
+            ++pop_it;
+        } else {
+            out << "i," << push_it->tick << ',' << push_it->key << ',' << push_it->index << '\n';
+            ++push_it;
+        }
     }
-    for (auto const& pops : logs.pops) {
-        out << "d," << pops.tick << ',' << pops.index << '\n';
+    while (pop_it != logs.pops.end()) {
+        out << "d," << pop_it->tick << ',' << pop_it->ref_index << '\n';
+        ++pop_it;
+    }
+    while (push_it != logs.pushes.end()) {
+        out << "i," << push_it->tick << ',' << push_it->key << ',' << push_it->index << '\n';
+        ++push_it;
     }
 }
 
@@ -90,18 +83,20 @@ struct ExtractKey {
     }
 };
 
-std::vector<operation_log::Metrics> operation_log::replay_logs(OperationLog logs) {
-    auto sorted_pushes = logs.pushes;
-    std::sort(sorted_pushes.begin(), sorted_pushes.end());
+std::vector<operation_log::Metrics> operation_log::replay_logs(OperationLog const& logs) {
+    auto push_lookup = std::vector<std::size_t>(logs.pushes.size());
+    for (std::size_t i = 0; i < logs.pushes.size(); ++i) {
+        push_lookup[logs.pushes[i].index] = i;
+    }
     ReplayTree<unsigned long, HeapElement, ExtractKey> replay_tree{};
-    auto push_it = sorted_pushes.begin();
     std::vector<Metrics> metrics;
     metrics.reserve(logs.pops.size());
+    auto push_it = logs.pushes.begin();
     for (auto const& pop : logs.pops) {
-        auto const& push = logs.pushes[pop.index];
+        auto const& push = logs.pushes[push_lookup[pop.ref_index]];
         // Inserting everything before next deletion
         auto until = std::max(push.tick, pop.tick);
-        for (; push_it != sorted_pushes.end() && push_it->tick <= until; ++push_it) {
+        for (; push_it != logs.pushes.end() && push_it->tick <= until; ++push_it) {
             replay_tree.insert({push_it->key, push_it->index});
         }
         auto [success, rank, delay] = replay_tree.erase_val({push.key, push.index});
@@ -112,24 +107,4 @@ std::vector<operation_log::Metrics> operation_log::replay_logs(OperationLog logs
         metrics.push_back({rank, delay});
     }
     return metrics;
-}
-
-void operation_log::write_metrics(std::vector<Metrics> const& metrics, std::ostream& out) {
-    assert(!metrics.empty());
-    for (auto const& m : metrics) {
-        out << m.rank_error << ' ' << m.delay << '\n';
-    }
-}
-
-void operation_log::write_metrics_average(std::vector<Metrics> const& metrics, std::ostream& out) {
-    assert(!metrics.empty());
-    auto summed_metrics = std::reduce(metrics.begin(), metrics.end(), Metrics{}, [](Metrics a, Metrics const& b) {
-        a.rank_error += b.rank_error;
-        a.delay += b.delay;
-        return a;
-    });
-    out << "rank_error,delay\n";
-    out << std::fixed << std::setprecision(2)
-        << static_cast<double>(summed_metrics.rank_error) / static_cast<double>(metrics.size()) << ','
-        << static_cast<double>(summed_metrics.delay) / static_cast<double>(metrics.size()) << '\n';
 }

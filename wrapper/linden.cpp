@@ -30,7 +30,7 @@ detail::LindenBase::LindenBase(int /* num_threads */, std::size_t /*unused*/, co
 }
 
 void detail::LindenBase::push(value_type const& value) {
-    ::insert(pq_.get(), value.first + 1, value.second);
+    ::insert(pq_.get(), value.first, value.second);
 }
 
 auto detail::LindenBase::try_pop() -> std::optional<value_type> {
@@ -39,7 +39,6 @@ auto detail::LindenBase::try_pop() -> std::optional<value_type> {
     if (retval.first == sentinel) {
         return std::nullopt;
     }
-    --retval.first;
     return retval;
 }
 
