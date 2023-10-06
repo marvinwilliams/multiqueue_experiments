@@ -39,8 +39,7 @@ struct Metrics {
     std::size_t delay;
 };
 
-bool verify_logs(OperationLog const& logs);
-void write_logs(OperationLog const& log, std::ostream& out);
-std::vector<Metrics> replay_logs(OperationLog const& logs);
+void write(OperationLog const& log, std::ostream& out);
+std::vector<Metrics> replay(OperationLog const& logs);
 
 }  // namespace operation_log

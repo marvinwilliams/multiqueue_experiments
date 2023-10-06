@@ -149,7 +149,7 @@ set(COMPETITORS
     tbb_pq)
 
 add_library(throughput INTERFACE)
-target_sources(throughput INTERFACE stress_test.cpp
+target_sources(throughput INTERFACE synthetic.cpp
                                     "${CMAKE_SOURCE_DIR}/util/threading.cpp")
 target_link_libraries(throughput INTERFACE benchmark_base Threads::Threads)
 
@@ -194,7 +194,7 @@ endforeach()
 
 add_library(quality INTERFACE)
 target_sources(
-  quality INTERFACE stress_test.cpp "${CMAKE_SOURCE_DIR}/util/threading.cpp"
+  quality INTERFACE synthetic.cpp "${CMAKE_SOURCE_DIR}/util/threading.cpp"
                     "${CMAKE_SOURCE_DIR}/util/operation_log.cpp")
 target_compile_definitions(
   quality INTERFACE -DQUALITY $<$<CONFIG:Debug>:-DREPLAY_TREE_DEBUG>)
