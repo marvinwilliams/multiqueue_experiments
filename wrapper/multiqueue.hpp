@@ -141,10 +141,12 @@ struct MultiQueueBuilder {
     };
 
 #ifdef MQ_USE_STD_PQ
-    using pq_type = std::priority_queue<value_type, std::vector<value_type>, ValueCompare>;
+    using pq_type = std::multiqueue::BufferedPQ<std::priority_queue<value_type, std::vector<value_type>, ValueCompare>,
+                                                insertion_buffersize, deletion_buffersize>;
 
     static std::ostream &describe_pq(std::ostream &os) {
-        return os << "std::priority_queue";
+        return os << "buffered std::priority_queue, buffer size (i/d): " << insertion_buffersize << '/'
+                  << deletion_buffersize << ")";
     }
 
 #elif defined MQ_USE_BTREE
@@ -206,15 +208,15 @@ struct MultiQueueBuilder {
     }
 
 #else
-    using pq_type = multiqueue::Heap<value_type, ValueCompare, heap_arity>;
+    using pq_type = multiqueue::BufferedPQ<multiqueue::Heap<value_type, ValueCompare, heap_arity>, insertion_buffersize,
+                                           deletion_buffersize>;
 
     static std::ostream &describe_pq(std::ostream &os) {
-        return os << "d-ary heap (d: " << heap_arity << ")";
+        return os << "buffered d-ary heap (d: " << heap_arity << ')' << ", buffer size (i/d): " << insertion_buffersize
+                  << '/' << deletion_buffersize << ")";
     }
 #endif
-    using multiqueue_type =
-        multiqueue::MultiQueue<key_type, value_type, compare_type, Traits, ExtractKey,
-                               multiqueue::BufferedPQ<pq_type, insertion_buffersize, deletion_buffersize>>;
+    using multiqueue_type = multiqueue::MultiQueue<key_type, value_type, compare_type, Traits, ExtractKey, pq_type>;
 };
 
 }  // namespace wrapper::detail

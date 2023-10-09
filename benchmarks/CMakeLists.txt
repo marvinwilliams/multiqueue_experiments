@@ -90,32 +90,36 @@ function(add_tuning_pq_variant buffer_size)
     ${name}
     INTERFACE MQ_QUEUE_SELECTION_POLICY=0
               MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
-              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
-              MQ_USE_STD_PQ)
+              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size} MQ_USE_STD_PQ)
   target_link_libraries(${name} INTERFACE mq)
   list(APPEND MQ_TUNING_VARIANTS ${name})
-
-  set(name mq_tuning_btree_bs_${buffer_size})
-  add_library(${name} INTERFACE)
-  target_compile_definitions(
-    ${name}
-    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
-              MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
-              MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
-              MQ_USE_BTREE)
-  target_link_libraries(${name} INTERFACE mq)
-  list(APPEND MQ_TUNING_VARIANTS ${name})
-  set(MQ_TUNING_VARIANTS
-      ${MQ_TUNING_VARIANTS}
-      PARENT_SCOPE)
 endfunction()
 
-foreach(buffer_size 0 2 4 8 16 32 64 128 256 512 1024)
+foreach(
+  buffer_size
+  0
+  2
+  4
+  8
+  16
+  32
+  64
+  128
+  256
+  512
+  1024)
   foreach(degree 2 4 8 16 32 64)
     add_tuning_variant(${buffer_size} ${degree})
   endforeach()
   add_tuning_pq_variant(${buffer_size})
 endforeach()
+
+add_library(mq_tuning_btree INTERFACE)
+target_compile_definitions(
+  mq_tuning_btree
+  INTERFACE MQ_QUEUE_SELECTION_POLICY=0 MQ_USE_BTREE)
+target_link_libraries(mq_tuning_btree INTERFACE mq)
+list(APPEND MQ_TUNING_VARIANTS mq_tuning_btree)
 
 add_library(mq_rand INTERFACE)
 target_compile_definitions(mq_rand INTERFACE MQ_QUEUE_SELECTION_POLICY=0)
