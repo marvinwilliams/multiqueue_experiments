@@ -1,3 +1,4 @@
+#include "build_info.hpp"
 #include "graph.hpp"
 
 #include "cxxopts.hpp"
@@ -18,7 +19,7 @@
 using clock_type = std::chrono::steady_clock;
 
 struct Node {
-    unsigned long long distance;
+    long long distance;
     std::size_t id;
 
     friend bool operator>(Node const& lhs, Node const& rhs) noexcept {
@@ -40,11 +41,11 @@ using PriorityQueue = std::priority_queue<Node, std::vector<Node>, std::greater<
 #endif
 
 struct Data {
-    std::vector<unsigned long long> shortest_distances;
+    std::vector<long long> shortest_distances;
     long long processed_nodes{0};
     long long ignored_nodes{0};
 
-    Data(std::size_t num_nodes) : shortest_distances(num_nodes, std::numeric_limits<unsigned long long>::max()) {
+    Data(std::size_t num_nodes) : shortest_distances(num_nodes, std::numeric_limits<long long>::max()) {
     }
 };
 
@@ -57,10 +58,10 @@ void dijkstra(PriorityQueue& pq, Data& data, Graph const& graph) noexcept {
 #endif
         pq.pop();
         // Ignore stale nodes
-        /* if (node.distance > data.shortest_distances[node.id]) { */
-        /*     ++data.ignored_nodes; */
-        /*     continue; */
-        /* } */
+        if (node.distance > data.shortest_distances[node.id]) {
+            ++data.ignored_nodes;
+            continue;
+        }
         ++data.processed_nodes;
         for (std::size_t i = graph.nodes[node.id]; i < graph.nodes[node.id + 1]; ++i) {
             auto d = node.distance + graph.edges[i].weight;
@@ -72,24 +73,8 @@ void dijkstra(PriorityQueue& pq, Data& data, Graph const& graph) noexcept {
     }
 }
 
-void print_header() {
-    std::clog << "Built on " << __DATE__ << ' ' << __TIME__ << " with:\n";
-#ifdef NDEBUG
-    std::clog << "  Release build\n";
-#else
-    std::clog << "  Debug build\n";
-#endif
-#ifdef __clang__
-    std::clog << "  Clang " << __clang_version__ << '\n';
-#elif defined(__GNUC__)
-    std::clog << "  GCC " << __VERSION__ << '\n';
-#else
-    std::clog << "  Unknown compiler\n";
-#endif
-}
-
 int main(int argc, char* argv[]) {
-    print_header();
+    write_build_info(std::clog);
     std::clog << "\nCommand line:";
 
     for (int i = 0; i < argc; ++i) {
@@ -123,42 +108,42 @@ int main(int argc, char* argv[]) {
             return 0;
         }
     }
-    std::clog << "Reading graph..." << std::flush;
-    Graph graph(0, 0);
+    std::ofstream distance_out;
+    if (!distance_file.empty()) {
+        distance_out = std::ofstream(distance_file);
+        if (!distance_out) {
+            std::cerr << "Error: Could not open file " << distance_file << " for writing" << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
+    std::clog << "Reading graph..." << std::endl;
+    Graph graph;
     try {
-        graph.from_file(graph_file);
+        graph = Graph(graph_file);
     } catch (std::runtime_error const& e) {
         std::cerr << "\nError reading graph: " << e.what() << std::endl;
         return 1;
     }
-    std::clog << "done\n";
 
     PriorityQueue pq;
     Data data(graph.num_nodes());
     data.shortest_distances[0] = 0;
     pq.push({0, 0});
 
-    std::clog << "Computing shortest paths..." << std::flush;
+    std::clog << "Computing shortest paths..." << std::endl;
     auto t_start = std::chrono::steady_clock::now();
     dijkstra(pq, data, graph);
     auto t_end = std::chrono::steady_clock::now();
-    std::clog << "done\n";
     auto time = std::chrono::duration<double>(t_end - t_start).count();
 
-    if (!distance_file.empty()) {
-        std::clog << "\nWriting output..." << std::flush;
-        std::ofstream out{distance_file};
-        if (!out) {
-            std::clog << "failed: Failed to open file: " << distance_file.string() << '\n';
-        } else {
-            for (std::size_t i = 0; i < graph.num_nodes(); ++i) {
-                out << i << ' ' << data.shortest_distances[i] << '\n';
-            }
-            std::clog << "done\n";
+    if (distance_out.is_open()) {
+        std::clog << "Writing distances..." << std::endl;
+        for (std::size_t i = 0; i < graph.num_nodes(); ++i) {
+            distance_out << i << ' ' << data.shortest_distances[i] << '\n';
         }
+        distance_out.close();
     }
-
-    std::clog << '\n';
+    std::clog << "Finished\n" << std::endl;
 
     std::clog << "Time (s): " << std::setprecision(3) << time << '\n';
     std::clog << "Processed nodes: " << data.processed_nodes << '\n';

@@ -39,8 +39,6 @@ static constexpr auto num_numa_nodes = 16;
 using pq_type = PriorityQueue<unsigned long, unsigned long, Priority::Max>;
 using handle_type = pq_type::handle_type;
 
-using ctx_type = task::Control;
-
 static_assert(sizeof(unsigned long) >= sizeof(std::uint64_t), "64bit unsigned long required");
 using payload_type = unsigned long;
 
@@ -96,33 +94,6 @@ struct SharedData {
     }
 };
 
-long long lower_bound(KnapsackInstance const& instance, long long capacity, std::size_t index) noexcept {
-    long long value{0};
-    while (index < instance.size() && instance.items()[index].weight <= capacity) {
-        capacity -= instance.items()[index].weight;
-        value += instance.items()[index].value;
-        ++index;
-    }
-    return value;
-}
-
-long long upper_bound(KnapsackInstance const& instance, long long capacity, std::size_t index) noexcept {
-    assert(index <= instance.size());
-    long long value_offset = instance.prefix_sum()[index].value;
-    long long target_capacity = instance.prefix_sum()[index].weight + capacity;
-    while (index != instance.prefix_sum().size()) {
-        if (instance.prefix_sum()[index].weight > target_capacity) {
-            double fraction = static_cast<double>(target_capacity - instance.prefix_sum()[index - 1].weight) /
-                static_cast<double>(instance.items()[index - 1].weight);
-            return (instance.prefix_sum()[index - 1].value - value_offset) +
-                static_cast<long long>(static_cast<double>(instance.items()[index - 1].value) * fraction);
-        }
-        ++index;
-    }
-    // All items fit
-    return instance.prefix_sum()[index - 1].value - value_offset;
-}
-
 bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
     auto node = handle.try_pop();
     if (!node) {
@@ -154,7 +125,7 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
         handle.push({ub, payload});
         ++stats.pushed_nodes;
     }
-    auto upper_bound_without_next = value + upper_bound(data.instance, free_capacity, index + 1);
+    auto upper_bound_without_next = value + data.instance.upper_bound(free_capacity, index + 1);
     if (upper_bound_without_next <= solution) {
         return true;
     }
@@ -163,23 +134,23 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
     return true;
 }
 
-ThreadStats benchmark_thread(ctx_type ctx, pq_type& pq, SharedData& data) {
+ThreadStats benchmark_thread(task::Control tc, pq_type& pq, SharedData& data) {
     ThreadStats stats;
     auto handle = pq.get_handle();
-    if (ctx.id() == 0) {
-        auto ub = upper_bound(data.instance, data.instance.capacity(), 0);
-        auto lb = lower_bound(data.instance, data.instance.capacity(), 0);
+    if (tc.id() == 0) {
+        auto ub = data.instance.upper_bound(data.instance.capacity(), 0);
+        auto lb = data.instance.lower_bound(data.instance.capacity(), 0);
         data.solution.store(lb, std::memory_order_relaxed);
         handle.push({ub, to_payload(0, data.instance.capacity(), 0)});
         ++stats.pushed_nodes;
     }
-    ctx.synchronize();
+    tc.synchronize();
     auto start_time = std::chrono::high_resolution_clock::now();
-    while (termination_detection::try_do(ctx.num_threads(), data.termination_detection_data,
+    while (termination_detection::try_do(tc.num_threads(), data.termination_detection_data,
                                          [&]() { return process_node(handle, stats, data); })) {
     }
     auto end_time = std::chrono::high_resolution_clock::now();
-    ctx.synchronize();
+    tc.synchronize();
     stats.work_time = {start_time, end_time};
     return stats;
 }
@@ -205,23 +176,18 @@ bool run_benchmark(Settings const& settings) {
         std::clog << "Error: Instance cannot be represented\n";
         return false;
     }
-    std::clog << "done\n";
-    auto pq = pq_type(settings.num_threads, 0, settings.pq_settings);
+    auto pq = pq_type(settings.num_threads, 1 << 20, settings.pq_settings);
     std::clog << "Priority queue: ";
-    pq.describe(std::clog) << '\n';
+    pq.describe(std::clog) << '\n' << '\n';
     std::vector<ThreadStats> all_stats(static_cast<std::size_t>(settings.num_threads));
     affinity::NUMA numa_affinity{cores_per_numa_node, num_numa_nodes};
-    std::clog << "Solving..." << std::flush;
-    auto t_start = std::chrono::steady_clock::now();
-    task::Runner runner{numa_affinity, settings.num_threads, [&](auto ctx) {
-                            all_stats[static_cast<std::size_t>(ctx.id())] = benchmark_thread(ctx, pq, shared_data);
+    std::clog << "Solving...\n";
+    task::Runner runner{numa_affinity, settings.num_threads, [&](auto tc) {
+                            all_stats[static_cast<std::size_t>(tc.id())] = benchmark_thread(tc, pq, shared_data);
                         }};
     runner.wait();
-    auto t_end = std::chrono::steady_clock::now();
-    std::clog << "done (" << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << "ms)"
-              << std::endl;
-    ThreadStats first = all_stats.front();
-    auto accum_stats = std::accumulate(all_stats.begin() + 1, all_stats.end(), first, [](auto accum, auto const& e) {
+    std::clog << "Finished\n" << std::endl;
+    auto accum_stats = std::accumulate(all_stats.begin() + 1, all_stats.end(), all_stats.front(), [](auto accum, auto const& e) {
         accum.work_time.first = std::min(accum.work_time.first, e.work_time.first);
         accum.work_time.second = std::max(accum.work_time.second, e.work_time.second);
         accum.pushed_nodes += e.pushed_nodes;
@@ -229,6 +195,10 @@ bool run_benchmark(Settings const& settings) {
         accum.ignored_nodes += e.ignored_nodes;
         return accum;
     });
+    std::clog << "Time (s): " << std::setprecision(3) << std::chrono::duration<double>(accum_stats.work_time.second - accum_stats.work_time.first).count() << '\n';
+    std::clog << "Pushed nodes: " << accum_stats.pushed_nodes << '\n';
+    std::clog << "Processed nodes: " << accum_stats.processed_nodes << '\n';
+    std::clog << "Ignored nodes: " << accum_stats.ignored_nodes << '\n';
     if (accum_stats.processed_nodes + accum_stats.ignored_nodes != accum_stats.pushed_nodes) {
         std::clog << "Error: Not all nodes were popped" << std::endl;
         return false;
@@ -244,6 +214,12 @@ bool run_benchmark(Settings const& settings) {
 
 int main(int argc, char* argv[]) {
     write_build_info(std::clog);
+    std::clog << "\nCommand line:";
+    for (int i = 0; i < argc; ++i) {
+        std::clog << ' ' << argv[i];
+    }
+    std::clog << '\n' << '\n';
+
     Settings settings{};
     cxxopts::Options cmd(argv[0]);
     // clang-format off
@@ -268,11 +244,6 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    std::clog << "\nCommand line:";
-    for (int i = 0; i < argc; ++i) {
-        std::clog << ' ' << argv[i];
-    }
-    std::clog << '\n';
     write_settings(settings, std::clog);
 
     if (settings.knapsack_file.empty()) {

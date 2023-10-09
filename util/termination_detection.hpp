@@ -36,19 +36,18 @@ inline bool wait_to_terminate(int num_threads, Data& data) {
 
 template <typename F>
 bool try_do(int num_threads, Data& data, F f) {
-    if (f()) {
-        return true;
+    for (int i = 0; i < 100; ++i) {
+        if (f()) {
+            return true;
+        }
     }
     auto num_no_work = data.no_work_count.fetch_add(1, std::memory_order_relaxed) + 1;
-    do {
-        if (f()) {
-            break;
-        }
+    while (!f()) {
         if (num_no_work >= num_threads && detail::wait_to_terminate(num_threads, data)) {
             return false;
         }
         num_no_work = data.no_work_count.load(std::memory_order_relaxed);
-    } while (true);
+    }
     data.no_work_count.fetch_sub(1, std::memory_order_relaxed);
     return true;
 }

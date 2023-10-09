@@ -1,6 +1,7 @@
 #pragma once
 
 #include <algorithm>
+#include <cassert>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -76,5 +77,32 @@ class KnapsackInstance {
     }
     [[nodiscard]] std::vector<Item> const& prefix_sum() const noexcept {
         return prefix_sum_;
+    }
+
+    [[nodiscard]] long long lower_bound(long long capacity, std::size_t index) const noexcept {
+        long long value{0};
+        while (index < items_.size() && items_[index].weight <= capacity) {
+            capacity -= items_[index].weight;
+            value += items_[index].value;
+            ++index;
+        }
+        return value;
+    }
+
+    [[nodiscard]] long long upper_bound(long long capacity, std::size_t index) const noexcept {
+        assert(index <= items_.size());
+        long long value_offset = prefix_sum_[index].value;
+        long long target_capacity = prefix_sum_[index].weight + capacity;
+        while (index != prefix_sum_.size()) {
+            if (prefix_sum_[index].weight > target_capacity) {
+                double fraction = static_cast<double>(target_capacity - prefix_sum_[index - 1].weight) /
+                    static_cast<double>(items_[index - 1].weight);
+                return (prefix_sum_[index - 1].value - value_offset) +
+                    static_cast<long long>(static_cast<double>(items_[index - 1].value) * fraction);
+            }
+            ++index;
+        }
+        // All items fit
+        return prefix_sum_[index - 1].value - value_offset;
     }
 };

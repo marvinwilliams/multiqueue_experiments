@@ -12,7 +12,7 @@
 #include <vector>
 
 struct Graph {
-    using weight_type = unsigned long long;
+    using weight_type = long long;
     struct Edge {
         std::size_t target;
         weight_type weight;
@@ -20,18 +20,8 @@ struct Graph {
     std::vector<std::size_t> nodes;
     std::vector<Edge> edges;
 
-    Graph(std::size_t num_nodes, std::size_t num_edges) : nodes(num_nodes + 1), edges(num_edges) {
-    }
-
-    [[nodiscard]] std::size_t num_nodes() const noexcept {
-        return nodes.size() - 1;
-    }
-
-    [[nodiscard]] std::size_t num_edges() const noexcept {
-        return edges.size();
-    }
-
-    void from_file(std::filesystem::path const& graph_file) {
+    Graph() = default;
+    Graph(std::filesystem::path const& graph_file) {
         int fd = open(graph_file.c_str(), O_RDONLY);
         if (fd == -1) {
             throw std::runtime_error{"Could not open file"};
@@ -89,8 +79,8 @@ struct Graph {
             while (*it++ != '\n') {
             }
         }
-        *this = Graph(num_nodes, num_edges);
         std::vector<std::pair<std::size_t, Graph::Edge>> edge_list;
+        nodes.resize(num_nodes + 1);
         edge_list.reserve(num_edges);
         for (std::size_t i = 0; i != num_edges; ++i) {
             std::pair<std::size_t, Graph::Edge> edge;
@@ -105,7 +95,11 @@ struct Graph {
             if (res.ec != std::errc{}) {
                 throw std::runtime_error("Failed to parse edge source");
             }
-            ++nodes[edge.first];
+            --edge.first;
+            if (edge.first >= num_nodes) {
+                throw std::runtime_error("Invalid edge source");
+            }
+            ++nodes[edge.first + 1];
             it = res.ptr;
             while (std::isspace(*it) != 0) {
                 ++it;
@@ -115,6 +109,9 @@ struct Graph {
                 throw std::runtime_error("Failed to parse edge target");
             }
             --edge.second.target;
+            if (edge.second.target >= num_nodes) {
+                throw std::runtime_error("Invalid edge target");
+            }
             it = res.ptr;
             while (std::isspace(*it) != 0) {
                 ++it;
@@ -128,8 +125,17 @@ struct Graph {
         }
         munmap(addr, static_cast<std::size_t>(sb.st_size));
         std::exclusive_scan(nodes.begin() + 1, nodes.end(), nodes.begin() + 1, 0);
+        edges.resize(edge_list.size());
         for (auto& edge : edge_list) {
-            edges[nodes[edge.first]++] = edge.second;
+            edges[nodes[edge.first + 1]++] = edge.second;
         }
+    }
+
+    [[nodiscard]] std::size_t num_nodes() const noexcept {
+        return nodes.empty() ? 0 : nodes.size() - 1;
+    }
+
+    [[nodiscard]] std::size_t num_edges() const noexcept {
+        return edges.size();
     }
 };

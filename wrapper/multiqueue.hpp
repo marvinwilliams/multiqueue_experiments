@@ -145,7 +145,7 @@ struct MultiQueueBuilder {
 
     static std::ostream &describe_pq(std::ostream &os) {
         return os << "buffered std::priority_queue, buffer size (i/d): " << insertion_buffersize << '/'
-                  << deletion_buffersize << ")";
+                  << deletion_buffersize;
     }
 
 #elif defined MQ_USE_BTREE
