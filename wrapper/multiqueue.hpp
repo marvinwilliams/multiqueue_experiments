@@ -151,8 +151,9 @@ struct MultiQueueBuilder {
 #elif defined MQ_USE_BTREE
     class BTreePQWrapper {
        public:
-        using key_type = key_type;
-        using value_type = value_type;
+        using key_type = Key;
+        using mapped_type = T;
+        using value_type = std::pair<key_type, mapped_type>;
         using size_type = std::size_t;
         using reference = value_type &;
         using const_reference = value_type const &;
