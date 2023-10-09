@@ -2,13 +2,13 @@
 
 #include "multiqueue/multiqueue.hpp"
 
-namespace wrapper::detail {
+namespace wrapper::detail::queue_selection {
 #ifdef MQ_NUM_POP_PQS
 static constexpr unsigned int num_pop_pqs = MQ_NUM_POP_PQS;
 #else
 static constexpr unsigned int num_pop_pqs = 2;
 #endif
-}  // namespace wrapper::detail
+}  // namespace wrapper::detail::queue_selection
 
 #ifndef MQ_QUEUE_SELECTION_POLICY
 #define MQ_QUEUE_SELECTION_POLICY 1
@@ -18,49 +18,48 @@ static constexpr unsigned int num_pop_pqs = 2;
 
 #include "multiqueue/queue_selection/random.hpp"
 
-namespace wrapper::detail {
+namespace wrapper::detail::queue_selection {
 
-using queue_selection_policy_type = multiqueue::queue_selection::Random<num_pop_pqs>;
-static constexpr auto queue_selection_policy_name = "random";
+using type = multiqueue::queue_selection::Random<num_pop_pqs>;
+static constexpr auto name = "random";
 static constexpr bool has_stickiness = false;
 
-}  // namespace wrapper::detail
+}  // namespace wrapper::detail::queue_selection
 
 #elif MQ_QUEUE_SELECTION_POLICY == 1
 
 #include "multiqueue/queue_selection/stick_random.hpp"
 
-namespace wrapper::detail {
+namespace wrapper::detail::queue_selection {
 
-using queue_selection_policy_type = multiqueue::queue_selection::StickRandom<num_pop_pqs>;
-static constexpr auto queue_selection_policy_name = "stick random";
+using type = multiqueue::queue_selection::StickRandom<num_pop_pqs>;
+static constexpr auto name = "stick random";
 static constexpr bool has_stickiness = true;
-
-}  // namespace wrapper::detail
+}  // namespace wrapper::detail::queue_selection
 
 #elif MQ_QUEUE_SELECTION_POLICY == 2
 
 #include "multiqueue/queue_selection/swap_assignment.hpp"
 
-namespace wrapper::detail {
+namespace wrapper::detail::queue_selection {
 
-using queue_selection_policy_type = multiqueue::queue_selection::SwapAssignment<num_pop_pqs>;
-static constexpr auto queue_selection_policy_name = "swap assignment";
+using type = multiqueue::queue_selection::SwapAssignment<num_pop_pqs>;
+static constexpr auto name = "swap assignment";
 static constexpr bool has_stickiness = true;
 
-}  // namespace wrapper::detail
+}  // namespace wrapper::detail::queue_selection
 
 #elif MQ_QUEUE_SELECTION_POLICY == 3
 
 #include "multiqueue/queue_selection/global_permutation.hpp"
 
-namespace wrapper::detail {
+namespace wrapper::detail::queue_selection {
 
-using queue_selection_policy_type = multiqueue::queue_selection::GlobalPermutation<num_pop_pqs>;
-static constexpr auto queue_selection_policy_name = "global permutation";
+using type = multiqueue::queue_selection::GlobalPermutation<num_pop_pqs>;
+static constexpr auto name = "global permutation";
 static constexpr bool has_stickiness = true;
 
-}  // namespace wrapper::detail
+}  // namespace wrapper::detail::queue_selection
 
 #else
 #error "Invalid MQ_QUEUE_SELECTION_POLICY"
@@ -96,7 +95,7 @@ static constexpr unsigned int heap_arity = 8;
 #endif
 
 struct Traits {
-    using queue_selection_policy_type = queue_selection_policy_type;
+    using queue_selection_policy_type = queue_selection::type;
 #ifdef MQ_COMPARE_STRICT
     static constexpr bool strict_comparison = true;
 #else
@@ -235,7 +234,7 @@ class MultiQueue : public detail::MultiQueueBuilder<Key, Value, P>::multiqueue_t
     static void add_options(cxxopts::Options &options, config_type &config) {
         options.add_options()("c,factor", "The number of queues per thread",
                               cxxopts::value<int>(config.factor)->default_value("2"), "NUMBER");
-        if constexpr (detail::has_stickiness) {
+        if constexpr (detail::queue_selection::has_stickiness) {
             options.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(config.stickiness),
                                   "NUMBER");
         }
@@ -249,12 +248,14 @@ class MultiQueue : public detail::MultiQueueBuilder<Key, Value, P>::multiqueue_t
         out << "MultiQueue (comparisons: " << (detail::Traits::strict_comparison ? "strict" : "non-strict")
             << ", pop tries: " << detail::Traits::num_pop_tries
             << ", scan on failed pop: " << (detail::Traits::scan_on_failed_pop ? "true" : "false")
-            << ", queue selection: " << detail::queue_selection_policy_name << ", pq type: ";
-        detail::MultiQueueBuilder<Key, Value, P>::describe_pq(out);
-        out << ", pqs: " << this->num_pqs();
-        if constexpr (detail::has_stickiness) {
+            << ", queue selection: " << detail::queue_selection::name
+            << ", pop pqs: " << detail::queue_selection::num_pop_pqs;
+        if constexpr (detail::queue_selection::has_stickiness) {
             out << ", stickiness: " << this->get_queue_selection_config().stickiness;
         }
+        out << ", pq type: ";
+        detail::MultiQueueBuilder<Key, Value, P>::describe_pq(out);
+        out << ", pqs: " << this->num_pqs();
         out << ')';
         return out;
     }
