@@ -34,8 +34,6 @@ using pq_type = std::priority_queue<Node>;
 
 struct Data {
     long long best_value{0};
-    long long pushed_nodes{0};
-    long long ignored_nodes{0};
     long long processed_nodes{0};
 };
 
@@ -47,19 +45,11 @@ void knapsack(pq_type& pq, Data& data, KnapsackInstance const& instance) noexcep
         auto node = pq.top();
 #endif
         pq.pop();
-        if (node.upper_bound <= data.best_value) {
-            // The upper bound of this node is worse than the currently best value
-            /* std::cout << "Ignored " << node.upper_bound << '\n'; */
-            ++data.ignored_nodes;
-            continue;
-        }
-        /* std::cout << "Popped " << node.upper_bound << ' ' << node.index << ' ' << node.free_capacity << ' ' */
-        /*           << node.value << '\n'; */
         ++data.processed_nodes;
-        if (node.index == instance.size()) {
-            if (node.value > data.best_value) {
-                data.best_value = node.value;
-            }
+        if (node.value > data.best_value) {
+            data.best_value = node.value;
+        }
+        if (node.upper_bound <= data.best_value || node.index == instance.size()) {
             continue;
         }
 
@@ -122,7 +112,6 @@ int main(int argc, char* argv[]) {
     auto lb = instance.lower_bound(instance.capacity(), 0);
     data.best_value = lb;
     pq.push({ub, 0, instance.capacity(), 0});
-    /* std::cout << "Pushed " << ub << ' ' << 0 << ' ' << instance.capacity << ' ' << 0 << '\n'; */
     std::clog << "Solving knapsack instance...\n";
     auto t_start = std::chrono::steady_clock::now();
     knapsack(pq, data, instance);
@@ -132,9 +121,8 @@ int main(int argc, char* argv[]) {
     std::clog << "Time (s): " << std::setprecision(3) << std::chrono::duration<double>(t_end - t_start).count() << '\n';
     std::clog << "Value: " << data.best_value << '\n';
     std::clog << "Processed nodes: " << data.processed_nodes << '\n';
-    std::clog << "Ignored nodes: " << data.ignored_nodes << '\n';
 
-    std::cout << "instance,nodes,time,processed_nodes,ignored_nodes,solution\n";
+    std::cout << "instance,nodes,time,processed_nodes,solution\n";
     std::cout << instance_file.string() << ',' << instance.size() << ',' << (t_end - t_start).count() << ','
-              << data.processed_nodes << ',' << data.ignored_nodes << ',' << data.best_value << std::endl;
+              << data.processed_nodes << ',' << data.best_value << std::endl;
 }

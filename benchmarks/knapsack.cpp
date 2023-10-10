@@ -76,7 +76,6 @@ void write_settings(Settings const& settings, std::ostream& out) {
 struct ThreadStats {
     std::pair<std::chrono::high_resolution_clock::time_point, std::chrono::high_resolution_clock::time_point> work_time;
     long long pushed_nodes{0};
-    long long ignored_nodes{0};
     long long processed_nodes{0};
 };
 
@@ -85,9 +84,8 @@ struct SharedData {
     std::atomic_llong solution{0};
     termination_detection::Data termination_detection_data{};
 
-    void update_solution(long long current_solution, long long new_solution) noexcept {
-        while (new_solution > current_solution &&
-               !solution.compare_exchange_weak(current_solution, new_solution, std::memory_order_relaxed)) {
+    void update_solution(long long current, long long update) noexcept {
+        while (update > current && !solution.compare_exchange_weak(current, update, std::memory_order_relaxed)) {
         }
     }
 };
@@ -97,14 +95,13 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
     if (!node) {
         return false;
     }
+    ++stats.processed_nodes;
     auto solution = data.solution.load(std::memory_order_relaxed);
     auto ub = static_cast<long long>(node->first);
     if (ub <= solution) {
         // The upper bound of this node is worse than the current solution
-        ++stats.ignored_nodes;
         return true;
     }
-    ++stats.processed_nodes;
     auto e = node->second;
     std::size_t index = e & ((1UL << bits_for_index) - 1);
     e >>= bits_for_index;
@@ -112,8 +109,8 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
     assert(free_capacity <= data.instance.capacity());
     e >>= bits_for_free_capacity;
     auto value = static_cast<long long>(e & ((1UL << bits_for_value) - 1));
+    data.update_solution(solution, value);
     if (index == data.instance.size()) {
-        data.update_solution(solution, static_cast<long long>(value));
         return true;
     }
     if (data.instance.items()[index].weight <= free_capacity) {
@@ -154,9 +151,9 @@ ThreadStats benchmark_thread(task::Control tc, pq_type& pq, SharedData& data) {
 }
 
 void write_stats(ThreadStats const& stats, long long solution, std::ostream& out) {
-    out << "solution,time,pushed,processed,ignored\n";
-    out << solution << ',' << (stats.work_time.second - stats.work_time.first).count() << ',' << stats.pushed_nodes
-        << ',' << stats.processed_nodes << ',' << stats.ignored_nodes << '\n';
+    out << "time,processed_nodes,solution\n";
+    out << (stats.work_time.second - stats.work_time.first).count() << ',' << stats.processed_nodes << ',' << solution
+        << '\n';
 }
 
 bool run_benchmark(Settings const& settings) {
@@ -190,7 +187,6 @@ bool run_benchmark(Settings const& settings) {
             accum.work_time.second = std::max(accum.work_time.second, e.work_time.second);
             accum.pushed_nodes += e.pushed_nodes;
             accum.processed_nodes += e.processed_nodes;
-            accum.ignored_nodes += e.ignored_nodes;
             return accum;
         });
     std::clog << "Time (s): " << std::setprecision(3)
@@ -198,8 +194,7 @@ bool run_benchmark(Settings const& settings) {
               << '\n';
     std::clog << "Pushed nodes: " << accum_stats.pushed_nodes << '\n';
     std::clog << "Processed nodes: " << accum_stats.processed_nodes << '\n';
-    std::clog << "Ignored nodes: " << accum_stats.ignored_nodes << '\n';
-    if (accum_stats.processed_nodes + accum_stats.ignored_nodes != accum_stats.pushed_nodes) {
+    if (accum_stats.processed_nodes != accum_stats.pushed_nodes) {
         std::clog << "Error: Not all nodes were popped" << std::endl;
         return false;
     }
