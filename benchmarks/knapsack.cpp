@@ -64,15 +64,13 @@ struct Settings {
     int num_threads = 4;
     std::filesystem::path knapsack_file;
     int seed = 1;
-    long long solution = 0;
     pq_type::config_type pq_settings{};
 };
 
 void write_settings(Settings const& settings, std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n'
         << "Seed: " << settings.seed << '\n'
-        << "Problem file: " << settings.knapsack_file << '\n'
-        << "Reference solution: " << settings.solution << '\n';
+        << "Problem file: " << settings.knapsack_file << '\n';
 }
 
 struct ThreadStats {
@@ -155,10 +153,10 @@ ThreadStats benchmark_thread(task::Control tc, pq_type& pq, SharedData& data) {
     return stats;
 }
 
-void write_stats(ThreadStats const& stats, std::ostream& out) {
-    out << "time,pushed,processed,ignored\n";
-    out << (stats.work_time.second - stats.work_time.first).count() << ',' << stats.pushed_nodes << ','
-        << stats.processed_nodes << ',' << stats.ignored_nodes << '\n';
+void write_stats(ThreadStats const& stats, long long solution, std::ostream& out) {
+    out << "solution,time,pushed,processed,ignored\n";
+    out << solution << ',' << (stats.work_time.second - stats.work_time.first).count() << ',' << stats.pushed_nodes
+        << ',' << stats.processed_nodes << ',' << stats.ignored_nodes << '\n';
 }
 
 bool run_benchmark(Settings const& settings) {
@@ -171,8 +169,7 @@ bool run_benchmark(Settings const& settings) {
     }
 
     if (shared_data.instance.size() + 1 >= (1 << bits_for_index) ||
-        shared_data.instance.capacity() >= (1 << bits_for_free_capacity) ||
-        settings.solution >= (1 << bits_for_value)) {
+        shared_data.instance.capacity() >= (1 << bits_for_free_capacity)) {
         std::clog << "Error: Instance cannot be represented\n";
         return false;
     }
@@ -187,15 +184,18 @@ bool run_benchmark(Settings const& settings) {
                         }};
     runner.wait();
     std::clog << "Finished\n" << std::endl;
-    auto accum_stats = std::accumulate(all_stats.begin() + 1, all_stats.end(), all_stats.front(), [](auto accum, auto const& e) {
-        accum.work_time.first = std::min(accum.work_time.first, e.work_time.first);
-        accum.work_time.second = std::max(accum.work_time.second, e.work_time.second);
-        accum.pushed_nodes += e.pushed_nodes;
-        accum.processed_nodes += e.processed_nodes;
-        accum.ignored_nodes += e.ignored_nodes;
-        return accum;
-    });
-    std::clog << "Time (s): " << std::setprecision(3) << std::chrono::duration<double>(accum_stats.work_time.second - accum_stats.work_time.first).count() << '\n';
+    auto accum_stats =
+        std::accumulate(all_stats.begin() + 1, all_stats.end(), all_stats.front(), [](auto accum, auto const& e) {
+            accum.work_time.first = std::min(accum.work_time.first, e.work_time.first);
+            accum.work_time.second = std::max(accum.work_time.second, e.work_time.second);
+            accum.pushed_nodes += e.pushed_nodes;
+            accum.processed_nodes += e.processed_nodes;
+            accum.ignored_nodes += e.ignored_nodes;
+            return accum;
+        });
+    std::clog << "Time (s): " << std::setprecision(3)
+              << std::chrono::duration<double>(accum_stats.work_time.second - accum_stats.work_time.first).count()
+              << '\n';
     std::clog << "Pushed nodes: " << accum_stats.pushed_nodes << '\n';
     std::clog << "Processed nodes: " << accum_stats.processed_nodes << '\n';
     std::clog << "Ignored nodes: " << accum_stats.ignored_nodes << '\n';
@@ -203,12 +203,7 @@ bool run_benchmark(Settings const& settings) {
         std::clog << "Error: Not all nodes were popped" << std::endl;
         return false;
     }
-    if (shared_data.solution.load() != settings.solution) {
-        std::clog << "Error: Wrong solution (got " << shared_data.solution.load() << ", expected " << settings.solution
-                  << ")" << std::endl;
-        return false;
-    }
-    write_stats(accum_stats, std::cout);
+    write_stats(accum_stats, shared_data.solution.load(), std::cout);
     return true;
 }
 
@@ -226,11 +221,10 @@ int main(int argc, char* argv[]) {
     cmd.add_options()
       ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
       ("file", "The input graph", cxxopts::value<std::filesystem::path>(settings.knapsack_file), "PATH")
-      ("solution", "The reference solution", cxxopts::value<long long>(settings.solution), "NUMBER")
       ("h,help", "Print this help");
     // clang-format on
     pq_type::add_options(cmd, settings.pq_settings);
-    cmd.parse_positional({"file", "solution"});
+    cmd.parse_positional({"file"});
 
     try {
         auto args = cmd.parse(argc, argv);

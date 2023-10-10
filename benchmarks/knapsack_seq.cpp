@@ -134,7 +134,7 @@ int main(int argc, char* argv[]) {
     std::clog << "Processed nodes: " << data.processed_nodes << '\n';
     std::clog << "Ignored nodes: " << data.ignored_nodes << '\n';
 
-    std::cout << "instance,nodes,time,processed_nodes,ignored_nodes,value\n";
+    std::cout << "instance,nodes,time,processed_nodes,ignored_nodes,solution\n";
     std::cout << instance_file.string() << ',' << instance.size() << ',' << (t_end - t_start).count() << ','
               << data.processed_nodes << ',' << data.ignored_nodes << ',' << data.best_value << std::endl;
 }
