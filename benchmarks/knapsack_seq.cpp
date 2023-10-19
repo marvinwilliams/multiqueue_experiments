@@ -46,24 +46,27 @@ void knapsack(pq_type& pq, Data& data, KnapsackInstance const& instance) noexcep
 #endif
         pq.pop();
         ++data.processed_nodes;
-        if (node.value > data.best_value) {
-            data.best_value = node.value;
+        if (node.upper_bound <= data.best_value) {
+            return;
         }
-        if (node.upper_bound <= data.best_value || node.index == instance.size()) {
+        auto const& [lb, ub] = instance.compute_bounds_binary(node.free_capacity, node.index + 1);
+        if (node.value + lb > data.best_value) {
+            data.best_value = node.value + lb;
+        }
+        if (node.value + ub > data.best_value) {
+            pq.push({node.value + ub, node.index + 1, node.free_capacity, node.value});
+        }
+        if (node.upper_bound <= data.best_value) {
             continue;
         }
 
         // Check if there is enough capacity for the next item
-        if (instance.items()[node.index].weight <= node.free_capacity) {
-            auto new_value = node.value + instance.items()[node.index].value;
-            auto new_capacity = node.free_capacity - instance.items()[node.index].weight;
-            pq.push({node.upper_bound, node.index + 1, new_capacity, new_value});
+        if (node.index + 1 != instance.size() && instance.items()[node.index].weight <= node.free_capacity) {
+            node.value += instance.items()[node.index].value;
+            node.free_capacity -= instance.items()[node.index].weight;
+            ++node.index;
+            pq.push(node);
         }
-        auto upper_bound_without_next = node.value + instance.upper_bound(node.free_capacity, node.index + 1);
-        if (upper_bound_without_next <= data.best_value) {
-            continue;
-        }
-        pq.push({upper_bound_without_next, node.index + 1, node.free_capacity, node.value});
     }
 }
 
@@ -108,8 +111,7 @@ int main(int argc, char* argv[]) {
     pq_type pq;
     Data data;
 
-    auto ub = instance.upper_bound(instance.capacity(), 0);
-    auto lb = instance.lower_bound(instance.capacity(), 0);
+    auto const& [lb, ub] = instance.compute_bounds_binary(instance.capacity(), 0);
     data.best_value = lb;
     pq.push({ub, 0, instance.capacity(), 0});
     std::clog << "Solving knapsack instance...\n";

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cmath>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -59,7 +60,7 @@ class KnapsackInstance {
                 (static_cast<double>(rhs.value) / static_cast<double>(rhs.weight));
         });
         prefix_sum_.reserve(items_.size() + 1);
-        prefix_sum_ = {Item{0, 0}};
+        prefix_sum_.push_back(Item{0, 0});
         std::inclusive_scan(items_.begin(), items_.end(), std::back_inserter(prefix_sum_),
                             [](auto const& lhs, auto const& rhs) {
                                 return Item{lhs.weight + rhs.weight, lhs.value + rhs.value};
@@ -79,30 +80,37 @@ class KnapsackInstance {
         return prefix_sum_;
     }
 
-    [[nodiscard]] long long lower_bound(long long capacity, std::size_t index) const noexcept {
-        long long value{0};
-        while (index < items_.size() && items_[index].weight <= capacity) {
+    [[nodiscard]] std::pair<long long, long long> compute_bounds_linear(long long capacity,
+                                                                        std::size_t index) const noexcept {
+        assert(index <= items_.size());
+        long long value = 0;
+        while (index != items_.size() && capacity >= items_[index].weight) {
             capacity -= items_[index].weight;
             value += items_[index].value;
             ++index;
         }
-        return value;
+        if (index == items_.size()) {
+            return {value, value};
+        }
+        auto fraction_value = static_cast<long long>(
+            std::ceil(static_cast<double>(items_[index].value * capacity) / static_cast<double>(items_[index].weight)));
+        return {value, value + fraction_value};
     }
 
-    [[nodiscard]] long long upper_bound(long long capacity, std::size_t index) const noexcept {
-        assert(index <= items_.size());
-        long long value_offset = prefix_sum_[index].value;
-        long long target_capacity = prefix_sum_[index].weight + capacity;
-        while (index != prefix_sum_.size()) {
-            if (prefix_sum_[index].weight > target_capacity) {
-                double fraction = static_cast<double>(target_capacity - prefix_sum_[index - 1].weight) /
-                    static_cast<double>(items_[index - 1].weight);
-                return (prefix_sum_[index - 1].value - value_offset) +
-                    static_cast<long long>(static_cast<double>(items_[index - 1].value) * fraction);
-            }
-            ++index;
+    [[nodiscard]] std::pair<long long, long long> compute_bounds_binary(long long capacity,
+                                                                        std::size_t index) const noexcept {
+        assert(index < prefix_sum_.size());
+        auto it = std::upper_bound(std::next(prefix_sum_.begin(), static_cast<std::ptrdiff_t>(index) + 1),
+                                   prefix_sum_.end(), prefix_sum_[index].weight + capacity,
+                                   [](auto lhs, auto const& rhs) { return lhs < rhs.weight; });
+        long long lower_bound = std::prev(it)->value - prefix_sum_[index].value;
+        if (it == prefix_sum_.end()) {
+            return {lower_bound, lower_bound};
         }
-        // All items fit
-        return prefix_sum_[index - 1].value - value_offset;
+        auto residual_capacity = capacity - (std::prev(it)->weight - prefix_sum_[index].weight);
+        auto fraction_value =
+            static_cast<long long>(static_cast<double>((it->value - std::prev(it)->value) * residual_capacity) /
+                                   static_cast<double>(it->weight - std::prev(it)->weight));
+        return {lower_bound, lower_bound + fraction_value};
     }
 };
