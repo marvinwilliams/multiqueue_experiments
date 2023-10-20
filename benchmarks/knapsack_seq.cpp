@@ -114,10 +114,10 @@ int main(int argc, char* argv[]) {
     Data data;
     /* Node node{0, 0, 1, instance.capacity(), 0}; */
     Node node{0, 0, instance.capacity(), 0};
-    std::clog << "Solving knapsack instance...\n";
+    std::clog << "Working...\n";
+    auto t_start = std::chrono::steady_clock::now();
     /* auto const& [lb, ub] = instance.compute_bounds_hint(node.free_capacity, node.index, node.hint); */
     auto const& [lb, ub] = instance.compute_bounds_linear(node.free_capacity, node.index);
-    auto t_start = std::chrono::steady_clock::now();
     data.best_value = lb;
     if (lb < ub) {
         node.upper_bound = ub;
@@ -127,11 +127,11 @@ int main(int argc, char* argv[]) {
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "Finished\n" << std::endl;
 
-    std::clog << "Time (s): " << std::setprecision(3) << std::chrono::duration<double>(t_end - t_start).count() << '\n';
-    std::clog << "Value: " << data.best_value << '\n';
+    std::clog << "Time (s): " << std::fixed << std::setprecision(3) << std::chrono::duration<double>(t_end - t_start).count() << '\n';
     std::clog << "Processed nodes: " << data.processed_nodes << '\n';
+    std::clog << "Solution: " << data.best_value << '\n';
 
-    std::cout << "instance,nodes,time,processed_nodes,solution\n";
-    std::cout << instance_file.string() << ',' << instance.size() << ',' << (t_end - t_start).count() << ','
+    std::cout << "time,processed_nodes,solution\n";
+    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << ','
               << data.processed_nodes << ',' << data.best_value << std::endl;
 }
