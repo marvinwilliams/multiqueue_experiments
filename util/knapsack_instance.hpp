@@ -1,5 +1,7 @@
 #pragma once
 
+#include <iostream>
+
 #include <algorithm>
 #include <cassert>
 #include <cmath>
@@ -83,18 +85,34 @@ class KnapsackInstance {
     [[nodiscard]] std::pair<long long, long long> compute_bounds_linear(long long capacity,
                                                                         std::size_t index) const noexcept {
         assert(index <= items_.size());
-        long long value = 0;
+        long long lower_bound = 0;
         while (index != items_.size() && capacity >= items_[index].weight) {
             capacity -= items_[index].weight;
-            value += items_[index].value;
+            lower_bound += items_[index].value;
             ++index;
         }
-        if (index == items_.size()) {
-            return {value, value};
+        if (index == items_.size() || capacity == 0) {
+            return {lower_bound, lower_bound};
         }
-        auto fraction_value = static_cast<long long>(
-            std::ceil(static_cast<double>(items_[index].value * capacity) / static_cast<double>(items_[index].weight)));
-        return {value, value + fraction_value};
+        auto fractional_value = (items_[index].value * capacity) / items_[index].weight;
+        return {lower_bound, lower_bound + fractional_value};
+    }
+
+    [[nodiscard]] std::pair<long long, long long> compute_bounds_hint(long long capacity, std::size_t index,
+                                                                      std::size_t& hint) const noexcept {
+        assert(index <= items_.size());
+        capacity += prefix_sum_[index].weight;
+        while (hint != prefix_sum_.size() && capacity >= prefix_sum_[hint].weight) {
+            ++hint;
+        }
+        auto lower_bound = prefix_sum_[hint - 1].value - prefix_sum_[index].value;
+        if (hint == prefix_sum_.size() || prefix_sum_[hint - 1].weight == capacity) {
+            return {lower_bound, lower_bound};
+        }
+        auto residual_capacity = capacity - prefix_sum_[hint - 1].weight;
+        auto fractional_value = ((prefix_sum_[hint].value - prefix_sum_[hint - 1].value) * residual_capacity) /
+            (prefix_sum_[hint].weight - prefix_sum_[hint - 1].weight);
+        return {lower_bound, lower_bound + fractional_value};
     }
 
     [[nodiscard]] std::pair<long long, long long> compute_bounds_binary(long long capacity,
@@ -108,9 +126,8 @@ class KnapsackInstance {
             return {lower_bound, lower_bound};
         }
         auto residual_capacity = capacity - (std::prev(it)->weight - prefix_sum_[index].weight);
-        auto fraction_value =
-            static_cast<long long>(static_cast<double>((it->value - std::prev(it)->value) * residual_capacity) /
-                                   static_cast<double>(it->weight - std::prev(it)->weight));
-        return {lower_bound, lower_bound + fraction_value};
+        auto fractional_value =
+            ((it->value - std::prev(it)->value) * residual_capacity) / (it->weight - std::prev(it)->weight);
+        return {lower_bound, lower_bound + fractional_value};
     }
 };

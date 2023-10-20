@@ -18,6 +18,7 @@ using payload_type = unsigned long;
 struct Node {
     long long upper_bound;
     std::size_t index;
+    /* std::size_t hint; */
     long long free_capacity;
     long long value;
 
@@ -49,19 +50,20 @@ void knapsack(pq_type& pq, Data& data, KnapsackInstance const& instance) noexcep
         if (node.upper_bound <= data.best_value) {
             return;
         }
-        auto const& [lb, ub] = instance.compute_bounds_binary(node.free_capacity, node.index + 1);
+        if (node.index + 1 == instance.size()) {
+            continue;
+        }
+        /* auto hint = node.hint; */
+        /* auto const& [lb, ub] = instance.compute_bounds_hint(node.free_capacity, node.index + 1, hint); */
+        auto const& [lb, ub] = instance.compute_bounds_linear(node.free_capacity, node.index + 1);
         if (node.value + lb > data.best_value) {
             data.best_value = node.value + lb;
         }
         if (node.value + ub > data.best_value) {
+            /* pq.push({node.value + ub, node.index + 1, hint, node.free_capacity, node.value}); */
             pq.push({node.value + ub, node.index + 1, node.free_capacity, node.value});
         }
-        if (node.upper_bound <= data.best_value) {
-            continue;
-        }
-
-        // Check if there is enough capacity for the next item
-        if (node.index + 1 != instance.size() && instance.items()[node.index].weight <= node.free_capacity) {
+        if (node.free_capacity >= instance.items()[node.index].weight) {
             node.value += instance.items()[node.index].value;
             node.free_capacity -= instance.items()[node.index].weight;
             ++node.index;
@@ -110,13 +112,18 @@ int main(int argc, char* argv[]) {
 
     pq_type pq;
     Data data;
-
-    auto const& [lb, ub] = instance.compute_bounds_binary(instance.capacity(), 0);
-    data.best_value = lb;
-    pq.push({ub, 0, instance.capacity(), 0});
+    /* Node node{0, 0, 1, instance.capacity(), 0}; */
+    Node node{0, 0, instance.capacity(), 0};
     std::clog << "Solving knapsack instance...\n";
+    /* auto const& [lb, ub] = instance.compute_bounds_hint(node.free_capacity, node.index, node.hint); */
+    auto const& [lb, ub] = instance.compute_bounds_linear(node.free_capacity, node.index);
     auto t_start = std::chrono::steady_clock::now();
-    knapsack(pq, data, instance);
+    data.best_value = lb;
+    if (lb < ub) {
+        node.upper_bound = ub;
+        pq.push(node);
+        knapsack(pq, data, instance);
+    }
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "Finished\n" << std::endl;
 
