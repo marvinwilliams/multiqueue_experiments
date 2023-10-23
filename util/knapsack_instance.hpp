@@ -19,9 +19,8 @@ class KnapsackInstance {
     };
 
    private:
-    std::vector<Item> items_;
-    long long capacity_{};
     std::vector<Item> prefix_sum_;
+    long long capacity_{};
 
    public:
     KnapsackInstance() = default;
@@ -35,8 +34,8 @@ class KnapsackInstance {
         if (!in || in.eof()) {
             throw std::runtime_error{"Could not get number of items"};
         }
-        items_.clear();
-        items_.reserve(n);
+        prefix_sum_.clear();
+        prefix_sum_.reserve(n + 1);
         in >> capacity_;
         if (!in || (n > 0 && in.eof())) {
             throw std::runtime_error{"Could not get capacity"};
@@ -55,63 +54,49 @@ class KnapsackInstance {
             if (!in) {
                 throw std::runtime_error{"Could not read item weight"};
             }
-            items_.push_back(item);
+            prefix_sum_.push_back(item);
         }
-        std::sort(items_.begin(), items_.end(), [](auto const& lhs, auto const& rhs) {
+        std::sort(prefix_sum_.begin(), prefix_sum_.end(), [](auto const& lhs, auto const& rhs) {
             return (static_cast<double>(lhs.value) / static_cast<double>(lhs.weight)) >
                 (static_cast<double>(rhs.value) / static_cast<double>(rhs.weight));
         });
-        prefix_sum_.reserve(items_.size() + 1);
-        prefix_sum_.push_back(Item{0, 0});
-        std::inclusive_scan(items_.begin(), items_.end(), std::back_inserter(prefix_sum_),
+        std::inclusive_scan(prefix_sum_.begin(), prefix_sum_.end(), prefix_sum_.begin(),
                             [](auto const& lhs, auto const& rhs) {
                                 return Item{lhs.weight + rhs.weight, lhs.value + rhs.value};
                             });
+        prefix_sum_.insert(prefix_sum_.begin(), Item{0, 0});
     }
 
     [[nodiscard]] std::size_t size() const noexcept {
-        return items_.size();
+        return prefix_sum_.size() - 1;
     }
+
     [[nodiscard]] long long capacity() const noexcept {
         return capacity_;
     }
-    [[nodiscard]] std::vector<Item> const& items() const noexcept {
-        return items_;
+
+    [[nodiscard]] long long weight(std::size_t index) const noexcept {
+        return prefix_sum_[index + 1].weight - prefix_sum_[index].weight;
     }
-    [[nodiscard]] std::vector<Item> const& prefix_sum() const noexcept {
-        return prefix_sum_;
+
+    [[nodiscard]] long long value(std::size_t index) const noexcept {
+        return prefix_sum_[index + 1].value - prefix_sum_[index].value;
     }
 
     [[nodiscard]] std::pair<long long, long long> compute_bounds_linear(long long capacity,
                                                                         std::size_t index) const noexcept {
-        assert(index <= items_.size());
-        long long lower_bound = 0;
-        while (index != items_.size() && capacity >= items_[index].weight) {
-            capacity -= items_[index].weight;
-            lower_bound += items_[index].value;
+        assert(index < prefix_sum_.size());
+        auto value_offset = prefix_sum_[index].value;
+        capacity += prefix_sum_[index].weight;
+        while (index < size() && capacity >= prefix_sum_[index + 1].weight) {
             ++index;
         }
-        if (index == items_.size() || capacity == 0) {
+        auto lower_bound = prefix_sum_[index].value - value_offset;
+        if (index == size() || capacity == prefix_sum_[index].weight) {
             return {lower_bound, lower_bound};
         }
-        auto fractional_value = (items_[index].value * capacity) / items_[index].weight;
-        return {lower_bound, lower_bound + fractional_value};
-    }
-
-    [[nodiscard]] std::pair<long long, long long> compute_bounds_hint(long long capacity, std::size_t index,
-                                                                      std::size_t& hint) const noexcept {
-        assert(index <= items_.size());
-        capacity += prefix_sum_[index].weight;
-        while (hint != prefix_sum_.size() && capacity >= prefix_sum_[hint].weight) {
-            ++hint;
-        }
-        auto lower_bound = prefix_sum_[hint - 1].value - prefix_sum_[index].value;
-        if (hint == prefix_sum_.size() || prefix_sum_[hint - 1].weight == capacity) {
-            return {lower_bound, lower_bound};
-        }
-        auto residual_capacity = capacity - prefix_sum_[hint - 1].weight;
-        auto fractional_value = ((prefix_sum_[hint].value - prefix_sum_[hint - 1].value) * residual_capacity) /
-            (prefix_sum_[hint].weight - prefix_sum_[hint - 1].weight);
+        auto residual_capacity = capacity - prefix_sum_[index].weight;
+        auto fractional_value = (value(index) * residual_capacity) / weight(index);
         return {lower_bound, lower_bound + fractional_value};
     }
 
