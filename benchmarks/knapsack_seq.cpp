@@ -18,7 +18,6 @@ using payload_type = unsigned long;
 struct Node {
     long long upper_bound;
     std::size_t index;
-    /* std::size_t hint; */
     long long free_capacity;
     long long value;
 
@@ -36,6 +35,7 @@ using pq_type = std::priority_queue<Node>;
 struct Data {
     long long best_value{0};
     long long processed_nodes{0};
+    long long ignored_nodes{0};
 };
 
 void knapsack(pq_type& pq, Data& data, KnapsackInstance const& instance) noexcept {
@@ -48,26 +48,23 @@ void knapsack(pq_type& pq, Data& data, KnapsackInstance const& instance) noexcep
         pq.pop();
         ++data.processed_nodes;
         if (node.upper_bound <= data.best_value) {
+            ++data.ignored_nodes;
             return;
         }
-        if (node.index + 1 == instance.size()) {
-            continue;
-        }
-        /* auto hint = node.hint; */
-        /* auto const& [lb, ub] = instance.compute_bounds_hint(node.free_capacity, node.index + 1, hint); */
         auto const& [lb, ub] = instance.compute_bounds_linear(node.free_capacity, node.index + 1);
         if (node.value + lb > data.best_value) {
             data.best_value = node.value + lb;
         }
-        if (node.value + ub > data.best_value) {
-            /* pq.push({node.value + ub, node.index + 1, hint, node.free_capacity, node.value}); */
-            pq.push({node.value + ub, node.index + 1, node.free_capacity, node.value});
-        }
-        if (node.free_capacity >= instance.items()[node.index].weight) {
-            node.value += instance.items()[node.index].value;
-            node.free_capacity -= instance.items()[node.index].weight;
-            ++node.index;
-            pq.push(node);
+        if (node.index + 2 < instance.size()) {
+            if (node.value + ub > data.best_value) {
+                pq.push({node.value + ub, node.index + 1, node.free_capacity, node.value});
+            }
+            if (node.free_capacity >= instance.items()[node.index].weight) {
+                node.value += instance.items()[node.index].value;
+                node.free_capacity -= instance.items()[node.index].weight;
+                ++node.index;
+                pq.push(node);
+            }
         }
     }
 }
@@ -112,11 +109,9 @@ int main(int argc, char* argv[]) {
 
     pq_type pq;
     Data data;
-    /* Node node{0, 0, 1, instance.capacity(), 0}; */
     Node node{0, 0, instance.capacity(), 0};
     std::clog << "Working...\n";
     auto t_start = std::chrono::steady_clock::now();
-    /* auto const& [lb, ub] = instance.compute_bounds_hint(node.free_capacity, node.index, node.hint); */
     auto const& [lb, ub] = instance.compute_bounds_linear(node.free_capacity, node.index);
     data.best_value = lb;
     if (lb < ub) {
@@ -127,11 +122,13 @@ int main(int argc, char* argv[]) {
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "Finished\n" << std::endl;
 
-    std::clog << "Time (s): " << std::fixed << std::setprecision(3) << std::chrono::duration<double>(t_end - t_start).count() << '\n';
+    std::clog << "Time (s): " << std::fixed << std::setprecision(3)
+              << std::chrono::duration<double>(t_end - t_start).count() << '\n';
     std::clog << "Processed nodes: " << data.processed_nodes << '\n';
+    std::clog << "Ignored nodes: " << data.ignored_nodes << '\n';
     std::clog << "Solution: " << data.best_value << '\n';
 
-    std::cout << "time,processed_nodes,solution\n";
+    std::cout << "time,processed,ignored,solution\n";
     std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(t_end - t_start).count() << ','
-              << data.processed_nodes << ',' << data.best_value << std::endl;
+              << data.processed_nodes << ',' << data.ignored_nodes << ',' << data.best_value << std::endl;
 }
