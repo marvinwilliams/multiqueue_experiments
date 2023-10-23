@@ -118,10 +118,9 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
             handle.push({value + ub, to_payload(index + 1, free_capacity, value)});
             ++stats.pushed_nodes;
         }
-        if (free_capacity >= data.instance.items()[index].weight) {
-            auto new_value = value + data.instance.items()[index].value;
-            auto new_capacity = free_capacity - data.instance.items()[index].weight;
-            auto payload = to_payload(index + 1, new_capacity, new_value);
+        if (free_capacity >= data.instance.weight(index)) {
+            auto payload =
+                to_payload(index + 1, free_capacity - data.instance.weight(index), value + data.instance.value(index));
             handle.push({node->first, payload});
             ++stats.pushed_nodes;
         }
@@ -193,8 +192,8 @@ bool run_benchmark(Settings const& settings) {
     }
     std::cout << "time,processed,ignored,solution\n";
     std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << ','
-              << accum_stats.processed_nodes << ',' << accum_stats.ignored_nodes << ','
-              << shared_data.solution.load() << '\n';
+              << accum_stats.processed_nodes << ',' << accum_stats.ignored_nodes << ',' << shared_data.solution.load()
+              << '\n';
     return true;
 }
 
