@@ -2,8 +2,6 @@
 
 // Adapted from klsm
 
-#include "wrapper/priority.hpp"
-
 #include "cxxopts.hpp"
 
 #include <ios>
@@ -13,89 +11,79 @@
 #include <ostream>
 #include <utility>
 
-using capq_type = struct fpasl_catree_set;
+extern "C" {
+#include "capq/capq.h"
+#include "capq/gc/gc.h"
+}
 
-namespace wrapper {
+namespace wrapper::capq {
 
-namespace detail {
 // GC has MAX_THREADS = 128
 // (unsigned long) -1 is signaling empty
 
-class CAPQBase {
+template <bool Min>
+class CAPQ {
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
-    struct config_type {};
+    using handle_type = CAPQ&;
 
    private:
     struct Deleter {
-        void operator()(capq_type*);
+        void operator()(::fpasl_catree_set* /*unused*/) {
+            ::_destroy_gc_subsystem();
+        }
     };
-    alignas(64) std::unique_ptr<capq_type, Deleter> pq_;
+    alignas(64) std::unique_ptr<::fpasl_catree_set, Deleter> pq_;
 
-   protected:
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
-    void push(value_type const& value);
-    std::optional<value_type> try_pop();
 
    public:
-    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
+    explicit CAPQ() {
+        ::_init_gc_subsystem();
+        pq_.reset(::capq_new());
     }
 
-    CAPQBase(int num_threads, std::size_t initial_capacity, config_type const& config);
-
-    static std::ostream& describe(std::ostream& out) {
-        out << "CA-PQ";
-        return out;
-    }
-};
-
-}  // namespace detail
-
-template <typename Key = unsigned long, typename T = unsigned long, Priority = Priority::Min>
-class CAPQ {
-    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
-                  "Only unsigned long as Key and T are supported");
-};
-
-template <Priority P>
-class CAPQ<unsigned long, unsigned long, P> : public detail::CAPQBase {
-   public:
-    using detail::CAPQBase::CAPQBase;
-
-    class Handle {
-        friend CAPQ;
-        CAPQ* pq_;
-
-        explicit Handle(CAPQ* pq) : pq_{pq} {
+    void push(value_type const& value) {
+        if constexpr (Min) {
+            ::capq_put_param(pq_.get(), value.first, value.second, true);
+        } else {
+            ::capq_put_param(pq_.get(), sentinel - value.first - 1, value.second, true);
         }
-
-       public:
-        void push(value_type const& value) {
-            if constexpr (P == Priority::Max) {
-                pq_->push({sentinel - value.first - 1, value.second});
-            } else {
-                pq_->push(value);
-            }
+    }
+    std::optional<value_type> try_pop() {
+        unsigned long key;
+        unsigned long value = ::capq_remove_min_param(pq_.get(), &key, true, true, true);
+        if (key == sentinel) {
+            return std::nullopt;
         }
+        if constexpr (!Min) {
+            key = sentinel - key - 1;
+        }
+        return value_type{key, value};
+    }
 
-        std::optional<value_type> try_pop() {
-            auto ret = pq_->try_pop();
-            if constexpr (P == Priority::Max) {
-                if (ret) {
-                    ret->first = sentinel - ret->first - 1;
-                }
-            }
-            return ret;
-        };
-    };
-
-    using handle_type = Handle;
-
-    Handle get_handle() {
-        return Handle{this};
+    handle_type get_handle() {
+        return *this;
     }
 };
 
-}  // namespace wrapper
+template <bool Min>
+using PQWrapper = CAPQ<Min>;
+
+inline void add_options(cxxopts::Options& /*options*/) {
+}
+
+template <bool Min = true>
+CAPQ<Min> create(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*result*/) {
+    return CAPQ<Min>{};
+}
+
+template <bool Min>
+std::ostream& describe(CAPQ<Min> const& /*unused*/, std::ostream& out) {
+    out << "CA-PQ";
+    return out;
+}
+
+}  // namespace wrapper::capq

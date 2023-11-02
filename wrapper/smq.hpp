@@ -2,8 +2,6 @@
 
 #include "StealingMultiQueue.hpp"
 
-#include "wrapper/priority.hpp"
-
 #include "cxxopts.hpp"
 
 #include <algorithm>
@@ -16,16 +14,47 @@
 #include <ostream>
 #include <utility>
 
-namespace wrapper {
+namespace wrapper::stealing_mq {
 
-template <typename Key, typename T, Priority P = Priority::Min>
+namespace detail {
+template <typename Key, typename Value>
+struct KeyOfValue {
+    static_assert(std::is_same_v<Key, Value>, "KeyOfValue not specialized for this value type");
+};
+
+template <typename Key>
+struct KeyOfValue<Key, Key> {
+    static constexpr Key const& get(Key const& key) noexcept {
+        return key;
+    }
+};
+
+template <typename Key, typename T>
+struct KeyOfValue<Key, std::pair<Key, T>> {
+    static constexpr Key const& get(std::pair<Key, T> const& p) noexcept {
+        return p.first;
+    }
+};
+}  // namespace detail
+
+template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
+          typename KeyOfValue = detail::KeyOfValue<Key, Value>>
 class StealingMQ {
    public:
     using key_type = Key;
-    using mapped_type = T;
-    using value_type = std::pair<key_type, mapped_type>;
-    struct config_type {};
-    using key_comp = std::conditional_t<P == Priority::Min, std::greater<Key>, std::less<Key>>;
+    using value_type = Value;
+    using key_compare = std::conditional_t<Min, std::greater<key_type>, std::less<key_type>>;
+    class value_compare {
+        [[no_unique_address]] key_compare comp;
+
+       public:
+        explicit value_compare(key_compare const& compare = key_compare{}) : comp{compare} {
+        }
+
+        constexpr bool operator()(value_type const& lhs, value_type const& rhs) const noexcept {
+            return comp(KeyOfValue::get(lhs), KeyOfValue::get(rhs));
+        }
+    };
 
 #ifdef SMQ_STEAL_PROB
     static constexpr std::size_t StealProb = SMQ_STEAL_PROB;
@@ -39,20 +68,8 @@ class StealingMQ {
 #endif
 
    private:
-    class value_compare {
-        [[no_unique_address]] key_comp comp;
-
-       public:
-        explicit value_compare(key_comp const& compare = key_comp{}) : comp{compare} {
-        }
-
-        constexpr bool operator()(value_type const& lhs, value_type const& rhs) const noexcept {
-            return comp(lhs.first, rhs.first);
-        }
-    };
     using pq_type = Galois::WorkList::StealingMultiQueue<value_type, value_compare, StealProb, StealBatchSize>;
 
-   public:
     class Handle {
         friend StealingMQ;
 
@@ -72,28 +89,39 @@ class StealingMQ {
         }
     };
 
+   public:
     using handle_type = Handle;
 
    private:
-    alignas(64) std::unique_ptr<pq_type> pq_;
+    pq_type pq_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
-    }
-
-    explicit StealingMQ(int num_threads, std::size_t /*initial_capacity*/, config_type const& /*config*/)
-        : pq_(new pq_type(num_threads)) {
+    explicit StealingMQ(int num_threads) : pq_(num_threads) {
     }
 
     Handle get_handle() {
         static std::atomic_int id{0};
-        return Handle{pq_.get(), id.fetch_add(1)};
-    }
-
-    std::ostream& describe(std::ostream& out) {
-        out << "Stealing MultiQueue (StealProb=" << StealProb << ", StealBatchSize=" << StealBatchSize << ")";
-        return out;
+        return Handle{&pq_, id.fetch_add(1)};
     }
 };
 
-}  // namespace wrapper
+template <bool Min, typename Key, typename Value, typename KeyOfValue>
+using PQWrapper = StealingMQ<Min, Key, Value, KeyOfValue>;
+
+inline void add_options(cxxopts::Options& /*options*/) {
+}
+
+template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
+          typename KeyOfValue = detail::KeyOfValue<Key, Value>>
+StealingMQ<Min, Key, Value, KeyOfValue> create(int num_threads, std::size_t /*initial_capacity*/,
+                                               cxxopts::ParseResult const& /*result*/) {
+    return StealingMQ<Min, Key, Value, KeyOfValue>{num_threads};
+}
+
+template <typename PQ>
+std::ostream& describe(PQ const& pq, std::ostream& out) {
+    out << "Stealing MultiQueue (StealProb=" << PQ::StealProb << ", StealBatchSize=" << PQ::StealBatchSize << ")";
+    return out;
+}
+
+}  // namespace wrapper::stealing_mq

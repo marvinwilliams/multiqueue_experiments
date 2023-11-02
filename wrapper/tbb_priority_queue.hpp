@@ -1,7 +1,5 @@
 #pragma once
 
-#include "wrapper/priority.hpp"
-
 #include "cxxopts.hpp"
 
 #include <tbb/concurrent_priority_queue.h>
@@ -12,16 +10,16 @@
 
 namespace wrapper {
 
-template <typename Key, typename T, Priority P = Priority::Min>
+template <bool Min, typename Key = unsigned long, typename T = unsigned long>
 class TBBPriorityQueue {
    public:
     using key_type = Key;
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
-    using key_compare = std::conditional_t<P == Priority::Min, std::greater<key_type>, std::less<key_type>>;
-    struct config_type {};
+    using key_compare = std::conditional_t<Min, std::greater<key_type>, std::less<key_type>>;
+
     class value_compare {
-        friend class TBBPriorityQueue<Key, T, P>;
+        friend TBBPriorityQueue;
         [[no_unique_address]] key_compare comp;
 
         explicit value_compare(key_compare const& c) : comp{c} {
@@ -37,46 +35,46 @@ class TBBPriorityQueue {
     using pq_type = tbb::concurrent_priority_queue<value_type, value_compare>;
 
    public:
-    class Handle {
-        friend TBBPriorityQueue;
-        pq_type* pq_;
-
-       public:
-        void push(value_type const& value) {
-            pq_->push(value);
-        }
-        std::optional<value_type> try_pop() {
-            value_type retval;
-            if (!pq_->try_pop(retval)) {
-                return std::nullopt;
-            }
-            return retval;
-        }
-    };
-
-    using handle_type = Handle;
+    using handle_type = TBBPriorityQueue&;
 
    private:
     pq_type pq_;
 
    public:
-    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
+    TBBPriorityQueue(std::size_t initial_capacity) : pq_(initial_capacity, value_compare{key_compare{}}) {
     }
 
-    TBBPriorityQueue(int /*num_threads*/, std::size_t initial_capacity, config_type const& /*options*/)
-        : pq_(initial_capacity, value_compare{key_compare{}}) {
+    void push(value_type const& value) {
+        pq_->push(value);
     }
 
-    Handle get_handle() {
-        auto h = Handle{};
-        h.pq_ = &pq_;
-        return h;
+    std::optional<value_type> try_pop() {
+        value_type retval;
+        if (!pq_->try_pop(retval)) {
+            return std::nullopt;
+        }
+        return retval;
     }
 
-    std::ostream& describe(std::ostream& out) {
-        out << "TBB PriorityQueue";
-        return out;
+    handle_type get_handle() {
+        return *this;
     }
 };
 
+template <bool Min = true, typename Key = unsigned long, typename T = unsigned long>
+using PQWrapper = TBBPriorityQueue<Min, Key, T>;
+
+inline void add_options(cxxopts::Options& /*options*/) {
+}
+
+template <bool Min = true, typename Key = unsigned long, typename T = unsigned long>
+TBBPriorityQueue<Min, Key, T> create(int /*num_threads*/, std::size_t initial_capacity, cxxopts::ParseResult const& /*result*/) {
+    return TBBPriorityQueue<Min, Key, T>{initial_capacity};
+}
+
+template <typename PQ>
+std::ostream& describe(PQ const& /*unused*/, std::ostream& out) {
+    out << "TBB PriorityQueue";
+    return out;
+}
 }  // namespace wrapper

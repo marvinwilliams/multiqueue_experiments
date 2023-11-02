@@ -1,6 +1,6 @@
 /**
 ******************************************************************************
-* @file:   select_queue.hpp
+* @file:   selector.hpp
 *
 * @author: Marvin Williams
 * @date:   2021/02/22 13:23
@@ -9,41 +9,33 @@
 **/
 #pragma once
 
-#include "wrapper/priority.hpp"
+#include <utility>
 
 #if defined PQ_MQ
 #include "wrapper/multiqueue.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue = wrapper::MultiQueue<Key, T, P>;
+using namespace wrapper::multiqueue;
 #elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue = wrapper::CAPQ<Key, T, P>;
+using namespace wrapper::capq;
 #elif defined PQ_KLSM
 #include "wrapper/klsm.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue = wrapper::KLSM<Key, T, P>;
+using namespace wrapper::klsm;
 #elif defined PQ_LINDEN
 #include "wrapper/linden.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue = wrapper::Linden<Key, T, P>;
+using namespace wrapper::linden;
 #elif defined PQ_SPRAYLIST
 #include "wrapper/spraylist.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue = wrapper::Spraylist<Key, T, P>;
+using namespace wrapper::spraylist;
 #elif defined PQ_TBB_PQ
 #include "wrapper/tbb_priority_queue.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue =
-    wrapper::TBBPriorityQueue<Key, T, P>;
+using namespace wrapper::TBBPriorityQueue;
 #elif defined PQ_TBB_FIFO
 #include "wrapper/tbb_queue.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue = wrapper::TBBQueue<Key, T, P>;
+using namespace wrapper::TBBQueue;
 #elif defined PQ_SMQ
+#include <functional>
 #include "wrapper/smq.hpp"
-template <typename Key, typename T, Priority P>
-using PriorityQueue = wrapper::StealingMQ<Key, T, P>;
+using namespace wrapper::smq;
 #else
 #error No valid PQ specified
 #endif

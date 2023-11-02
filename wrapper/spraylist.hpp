@@ -2,72 +2,52 @@
 
 // Adapted from klsm
 
-#include "wrapper/priority.hpp"
+extern "C" {
+#include "spraylist_linden/include/random.h"
+#include "spraylist_linden/intset.h"
+#include "ssalloc.h"
+}
+
+#undef min
+#undef max
 
 #include "cxxopts.hpp"
 
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <ostream>
 #include <utility>
 
-namespace wrapper {
+namespace wrapper::spraylist {
 
-namespace detail {
-
-class SpraylistBase {
+template <bool Min>
+class Spraylist {
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
-    struct config_type {};
 
    private:
     struct PQWrapper;
     struct Deleter {
-        void operator()(PQWrapper*);
+        void operator()(PQWrapper* p) {
+            ::sl_set_delete(p);
+        }
     };
     alignas(64) std::unique_ptr<PQWrapper, Deleter> pq_;
     int num_threads_;
 
-   protected:
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
 
-    struct ThreadDataWrapper;
+    struct ThreadDataWrapper : ::thread_data_t {};
     struct ThreadDataDeleter {
-        void operator()(ThreadDataWrapper*);
+        void operator()(ThreadDataWrapper* p) {
+            delete static_cast<thread_data_t*>(p);
+        }
     };
-
-    void push(value_type const& value);
-    std::optional<value_type> try_pop(ThreadDataWrapper* data);
-    [[nodiscard]] std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter> new_thread_data() const;
-
-   public:
-    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
-    }
-
-    SpraylistBase(int num_threads, std::size_t initial_capacity, config_type const& config);
-
-    static std::ostream& describe(std::ostream& out) {
-        out << "Spraylist";
-        return out;
-    }
-};
-
-}  // namespace detail
-
-template <typename Key = unsigned long, typename T = unsigned long, Priority = Priority::Min>
-class Spraylist {
-    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
-                  "Only unsigned long as Key and T are supported");
-};
-
-template <Priority P>
-class Spraylist<unsigned long, unsigned long, P> : public detail::SpraylistBase {
-   public:
-    using detail::SpraylistBase::SpraylistBase;
 
     class Handle {
         friend Spraylist;
@@ -79,29 +59,72 @@ class Spraylist<unsigned long, unsigned long, P> : public detail::SpraylistBase 
 
        public:
         void push(value_type const& value) {
-            if constexpr (P == Priority::Max) {
-                pq_->push({sentinel - value.first - 1, value.second});
+            if constexpr (Min) {
+                ::sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
             } else {
-                pq_->push(value);
+                ::sl_add_val(pq_, sentinel - value.first - 1, value.second, TRANSACTIONAL);
             }
         }
 
         std::optional<value_type> try_pop() {
-            auto ret = pq_->try_pop(data_.get());
-            if constexpr (P == Priority::Max) {
-                if (ret) {
-                    ret->first = sentinel - ret->first - 1;
-                }
+            unsigned long key;
+            unsigned long value;
+            int ret;
+            do {
+                ret = ::spray_delete_min_key(pq_, &key, &value, data_.get());
+            } while (ret == 0 && key != sentinel);
+            if (key == sentinel) {
+                return std::nullopt;
             }
-            return ret;
+            if constexpr (!Min) {
+                key = sentinel - key - 1;
+            }
+            return value_type{key, value};
         };
     };
 
+    [[nodiscard]] std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter> new_thread_data() const {
+        static std::mutex m;
+        auto l = std::scoped_lock(m);
+        ::ssalloc_init(num_threads_);
+        seeds = ::seed_rand();
+        auto thread_data =
+            std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter>(static_cast<ThreadDataWrapper*>(new thread_data_t));
+        thread_data->seed = ::rand();
+        thread_data->seed2 = ::rand();
+        thread_data->nb_threads = num_threads_;
+        return thread_data;
+    }
+
+   public:
     using handle_type = Handle;
+
+    Spraylist(int num_threads, std::size_t initial_capacity) : num_threads_(num_threads) {
+        ::ssalloc_init(num_threads_);
+        *levelmax = floor_log_2(initial_capacity);
+        pq_.reset(static_cast<PQWrapper*>(sl_set_new()));
+    }
 
     Handle get_handle() {
         return Handle{this};
     }
 };
 
-}  // namespace wrapper
+template <bool Min>
+using PQWrapper = Spraylist<Min>;
+
+inline void add_options(cxxopts::Options& /*options*/) {
+}
+
+template <bool Min>
+Spraylist<Min> create(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& /*result*/) {
+    return Spraylist<Min>{num_threads, initial_capacity};
+}
+
+template <bool Min>
+std::ostream& describe(Spraylist<Min> const& /*unused*/, std::ostream& out) {
+    out << "Spraylist";
+    return out;
+}
+
+}  // namespace wrapper::spraylist

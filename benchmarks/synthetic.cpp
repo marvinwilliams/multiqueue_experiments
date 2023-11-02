@@ -1,6 +1,5 @@
 #include "build_info.hpp"
 #include "task.hpp"
-#include "wrapper/priority.hpp"
 #include "wrapper/selector.hpp"
 
 #include "cxxopts.hpp"
@@ -54,7 +53,7 @@ using key_type = unsigned long;
 using value_type = unsigned long;
 #endif
 
-using pq_type = PriorityQueue<key_type, value_type, Priority::Min>;
+using pq_type = PQWrapper<>;
 using handle_type = pq_type::handle_type;
 
 struct Settings {
@@ -64,7 +63,6 @@ struct Settings {
     long long prefill_per_thread = 1 << 20;
     long long num_iterations = 1 << 24;
     Mode mode = Mode::Update;
-    pq_type::config_type pq_settings{};
     key_type min_prefill = 1;
     key_type max_prefill = 1 << 20;
     long min_update = 0;
@@ -481,7 +479,7 @@ void benchmark_thread(Settings const& settings, task::Control tc, pq_type& pq, B
 #endif
 }
 
-bool run_benchmark(Settings const& settings) {
+bool run_benchmark(Settings const& settings, cxxopts::ParseResult const& parse_result) {
     BenchmarkData benchmark_data{};
     benchmark_data.start_time = std::chrono::steady_clock::now();
 
@@ -523,9 +521,9 @@ bool run_benchmark(Settings const& settings) {
         (settings.mode == Settings::Mode::PushAscending || settings.mode == Settings::Mode::PushRandom
              ? benchmark_data.work.size()
              : 0);
-    auto pq = pq_type(settings.num_threads, 2 * max_capacity, settings.pq_settings);
+    auto pq = create(settings.num_threads, 2 * max_capacity, parse_result);
     std::clog << "Priority queue: ";
-    pq.describe(std::clog) << '\n' << '\n';
+    describe(pq, std::clog) << '\n' << '\n';
 
     task::Runner runner(affinity::NUMA{cores_per_numa_node, num_numa_nodes}, settings.num_threads,
                         [&](auto tc) { benchmark_thread(settings, tc, pq, benchmark_data); });
@@ -638,22 +636,24 @@ int main(int argc, char* argv[]) {
 #endif
         // clang-format on
         ;
-    pq_type::add_options(cmd, settings.pq_settings);
+    add_options(cmd);
+    cxxopts::ParseResult args;
     try {
-        auto args = cmd.parse(argc, argv);
-        if (args.count("help") > 0) {
-            std::clog << cmd.help() << std::endl;
-            return EXIT_SUCCESS;
-        }
-        if (args.count("mode") > 0) {
-            settings.mode = parse_mode(args["mode"].as<char>());
-        }
-        settings.timeout = std::chrono::seconds(timeout_ms);
+        args = cmd.parse(argc, argv);
     } catch (std::exception const& e) {
         std::cerr << "Error parsing command line: " << e.what() << std::endl;
         std::cerr << cmd.help() << std::endl;
         return EXIT_FAILURE;
     }
+
+    if (args.count("help") > 0) {
+        std::clog << cmd.help() << std::endl;
+        return EXIT_SUCCESS;
+    }
+    if (args.count("mode") > 0) {
+        settings.mode = parse_mode(args["mode"].as<char>());
+    }
+    settings.timeout = std::chrono::seconds(timeout_ms);
 
     std::clog << '\n';
     std::clog << "Command line:";
@@ -680,6 +680,6 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    bool success = run_benchmark(settings);
+    bool success = run_benchmark(settings, args);
     return success ? EXIT_SUCCESS : EXIT_FAILURE;
 }

@@ -36,6 +36,8 @@ static constexpr auto num_numa_nodes = NUM_NUMA_NODES;
 #else
 static constexpr auto num_numa_nodes = 16;
 #endif
+#define PACKED_PAYLOAD
+#ifdef PACKED_PAYLOAD
 using pq_type = PriorityQueue<unsigned long, unsigned long, Priority::Max>;
 using handle_type = pq_type::handle_type;
 
@@ -59,7 +61,14 @@ constexpr payload_type to_payload(std::size_t index, long long free_capacity, lo
     payload |= index;
     return payload;
 }
-
+#else
+struct Node {
+    long long priority;
+    std::size_t index;
+    long long free_capacity;
+    long long value;
+};
+#endif
 struct Settings {
     int num_threads = 4;
     std::filesystem::path knapsack_file;

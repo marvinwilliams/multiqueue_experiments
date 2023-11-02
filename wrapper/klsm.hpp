@@ -16,12 +16,12 @@
 #include <ostream>
 #include <utility>
 
-namespace wrapper {
+namespace wrapper::klsm {
 
 // The k-LSM can find remaining elements only from the thread that has the elements in its local buffer
 
-template <typename Key, typename T, Priority P>
-class KLSM {
+template <bool Min, typename Key = unsigned long, typename T = unsigned long>
+class KLsm {
    public:
     using key_type = Key;
     using mapped_type = T;
@@ -32,56 +32,56 @@ class KLSM {
     static constexpr std::size_t relaxation = KLSM_K;
 #endif
     struct config_type {};
+    using handle_type = KLsm&;
 
    private:
     using pq_type = ::kpq::k_lsm<key_type, mapped_type, relaxation>;
     static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
    public:
-    class Handle {
-        friend KLSM;
-        pq_type* pq_;
-
-        Handle(pq_type* pq) : pq_{pq} {
-        }
-
-       public:
-        void push(value_type const& value) {
-            pq_->insert(P == Priority::Min ? value.first : sentinel_ - value.first - 1, value.second);
-        }
-
-        std::optional<value_type> try_pop() {
-            value_type retval;
-            if (!pq_->delete_min(retval.first, retval.second)) {
-                return std::nullopt;
-            }
-            if (P == Priority::Max) {
-                retval.first = sentinel_ - retval.first - 1;
-            }
-            return retval;
-        }
-    };
-
-    using handle_type = Handle;
-
    private:
-    alignas(64) std::unique_ptr<pq_type> pq_;
+    pq_type pq_{};
 
    public:
-    static void add_options(cxxopts::Options& /*options*/, config_type& /*config*/) {
+    explicit KLsm() = default;
+
+    void push(value_type const& value) {
+        pq_.insert(Min ? value.first : sentinel_ - value.first - 1, value.second);
     }
 
-    KLSM(int /*num_threads*/, std::size_t /*initial_capacity*/, config_type const& /*options*/) : pq_(new pq_type()) {
+    std::optional<value_type> try_pop() {
+        key_type key;
+        mapped_type value;
+        if (!pq_.delete_min(key, value)) {
+            return std::nullopt;
+        }
+        if (!Min) {
+            key = sentinel_ - key - 1;
+        }
+        return value_type{key, value};
     }
 
-    Handle get_handle() {
-        return Handle{pq_.get()};
-    }
-
-    std::ostream& describe(std::ostream& out) {
-        out << "k-LSM (k: " << relaxation << ')';
-        return out;
+    handle_type get_handle() {
+        return *this;
     }
 };
 
-}  // namespace wrapper
+template <bool Min = true, typename Key = unsigned long, typename T = unsigned long>
+using PQWrapper = KLsm<Min, Key, T>;
+
+inline void add_options(cxxopts::Options& /*options*/) {
+}
+
+template <bool Min = true, typename Key = unsigned long, typename T = unsigned long>
+KLsm<Min, Key, T> create(int /*num_threads*/, std::size_t /*initial_capacity*/,
+                         cxxopts::ParseResult const& /*result*/) {
+    return KLsm<Min, Key, T>{};
+}
+
+template <typename PQ>
+std::ostream& describe(PQ const& /*unused*/, std::ostream& out) {
+    out << "k-LSM (k: " << PQ::relaxation << ')';
+    return out;
+}
+
+}  // namespace wrapper::klsm
