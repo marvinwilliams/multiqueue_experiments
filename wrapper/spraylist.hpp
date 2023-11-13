@@ -21,9 +21,11 @@ extern "C" {
 #include <ostream>
 #include <utility>
 
+inline __thread unsigned long* seeds; // NOLINT
+
 namespace wrapper::spraylist {
 
-template <bool Min>
+template <bool Min = true>
 class Spraylist {
    public:
     using key_type = unsigned long;
@@ -31,30 +33,28 @@ class Spraylist {
     using value_type = std::pair<key_type, mapped_type>;
 
    private:
-    struct PQWrapper;
     struct Deleter {
-        void operator()(PQWrapper* p) {
+        void operator()(::sl_intset_t* p) {
             ::sl_set_delete(p);
         }
     };
-    alignas(64) std::unique_ptr<PQWrapper, Deleter> pq_;
+    alignas(64) std::unique_ptr<::sl_intset_t, Deleter> pq_;
     int num_threads_;
 
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
 
-    struct ThreadDataWrapper : ::thread_data_t {};
     struct ThreadDataDeleter {
-        void operator()(ThreadDataWrapper* p) {
-            delete static_cast<thread_data_t*>(p);
+        void operator()(::thread_data_t* p) {
+            delete p;
         }
     };
 
     class Handle {
         friend Spraylist;
-        Spraylist* pq_;
-        std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter> data_;
+        ::sl_intset_t* pq_;
+        std::unique_ptr<::thread_data_t, ThreadDataDeleter> data_;
 
-        explicit Handle(Spraylist* pq) : pq_{pq}, data_{pq_->new_thread_data()} {
+        explicit Handle(Spraylist& pq) : pq_{pq.pq_.get()}, data_{pq.new_thread_data()} {
         }
 
        public:
@@ -83,13 +83,12 @@ class Spraylist {
         };
     };
 
-    [[nodiscard]] std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter> new_thread_data() const {
+    [[nodiscard]] std::unique_ptr<::thread_data_t, ThreadDataDeleter> new_thread_data() const {
         static std::mutex m;
         auto l = std::scoped_lock(m);
         ::ssalloc_init(num_threads_);
         seeds = ::seed_rand();
-        auto thread_data =
-            std::unique_ptr<ThreadDataWrapper, ThreadDataDeleter>(static_cast<ThreadDataWrapper*>(new thread_data_t));
+        auto thread_data = std::unique_ptr<::thread_data_t, ThreadDataDeleter>(new thread_data_t);
         thread_data->seed = ::rand();
         thread_data->seed2 = ::rand();
         thread_data->nb_threads = num_threads_;
@@ -101,22 +100,22 @@ class Spraylist {
 
     Spraylist(int num_threads, std::size_t initial_capacity) : num_threads_(num_threads) {
         ::ssalloc_init(num_threads_);
-        *levelmax = floor_log_2(initial_capacity);
-        pq_.reset(static_cast<PQWrapper*>(sl_set_new()));
+        *::levelmax = floor_log_2(initial_capacity);
+        pq_.reset(sl_set_new());
     }
 
     Handle get_handle() {
-        return Handle{this};
+        return Handle{*this};
     }
 };
 
-template <bool Min>
+template <bool Min = true>
 using PQWrapper = Spraylist<Min>;
 
 inline void add_options(cxxopts::Options& /*options*/) {
 }
 
-template <bool Min>
+template <bool Min = true>
 Spraylist<Min> create(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& /*result*/) {
     return Spraylist<Min>{num_threads, initial_capacity};
 }

@@ -28,26 +28,26 @@ class Linden {
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
     struct config_type {};
+    using handle_type = Linden&;
 
    private:
-    struct PQWrapper;
     struct Deleter {
-        void operator()(PQWrapper* p) {
+        void operator()(::pq_t* p) {
             // Avoid segfault
             ::insert(p, 1, 1);
             ::pq_destroy(p);
             ::_destroy_gc_subsystem();
         };
-    }
+    };
 
-    alignas(64) std::unique_ptr<PQWrapper, Deleter> pq_;
+    alignas(64) std::unique_ptr<::pq_t, Deleter> pq_;
 
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
 
    public:
     explicit Linden() {
         _init_gc_subsystem();
-        pq_.reset(static_cast<PQWrapper*>(::pq_init(32)));
+        pq_.reset(::pq_init(32));
     }
 
     void push(value_type const& value) {
@@ -70,15 +70,19 @@ class Linden {
         }
         return value_type{key, value};
     }
+
+    handle_type get_handle() {
+        return *this;
+    }
 };
 
-template <bool Min>
+template <bool Min = true>
 using PQWrapper = Linden<Min>;
 
 inline void add_options(cxxopts::Options& /*options*/) {
 }
 
-template <bool Min>
+template <bool Min = true>
 Linden<Min> create(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*result*/) {
     return Linden<Min>{};
 }

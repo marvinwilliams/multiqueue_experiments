@@ -150,7 +150,15 @@ set(COMPETITORS
     linden
     capq
     spraylist
-    tbb_pq)
+    tbb_pq
+    locked_pq
+)
+
+set(GENERIC_COMPETITORS
+    smq
+    tbb_pq
+    locked_pq
+)
 
 add_library(throughput INTERFACE)
 target_sources(throughput INTERFACE synthetic.cpp
@@ -299,6 +307,16 @@ foreach(target ${MQ_VARIANTS} ${COMPETITORS})
         "$<TARGET_FILE:knapsack_${target}> -j 8 -f data/knapsack_large.txt "
       WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
   endif()
+endforeach()
+
+add_library(knapsack_node INTERFACE)
+target_sources(knapsack_node INTERFACE knapsack_node.cpp
+                                  "${CMAKE_SOURCE_DIR}/util/threading.cpp")
+target_link_libraries(knapsack_node INTERFACE benchmark_base Threads::Threads)
+
+foreach(target ${MQ_VARIANTS} ${GENERIC_COMPETITORS})
+  add_executable(knapsack_node_${target})
+  target_link_libraries(knapsack_node_${target} PRIVATE ${target} knapsack_node)
 endforeach()
 
 add_executable(knapsack_seq knapsack_seq.cpp)

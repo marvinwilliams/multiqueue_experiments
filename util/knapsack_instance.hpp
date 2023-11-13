@@ -11,16 +11,17 @@
 #include <numeric>
 #include <vector>
 
+template <typename WeightType = long long, typename ValueType = WeightType>
 class KnapsackInstance {
    public:
     struct Item {
-        long long weight;
-        long long value;
+        WeightType weight;
+        ValueType value;
     };
 
    private:
     std::vector<Item> prefix_sum_;
-    long long capacity_{};
+    WeightType capacity_{};
 
    public:
     KnapsackInstance() = default;
@@ -71,19 +72,19 @@ class KnapsackInstance {
         return prefix_sum_.size() - 1;
     }
 
-    [[nodiscard]] long long capacity() const noexcept {
+    [[nodiscard]] WeightType capacity() const noexcept {
         return capacity_;
     }
 
-    [[nodiscard]] long long weight(std::size_t index) const noexcept {
+    [[nodiscard]] WeightType weight(std::size_t index) const noexcept {
         return prefix_sum_[index + 1].weight - prefix_sum_[index].weight;
     }
 
-    [[nodiscard]] long long value(std::size_t index) const noexcept {
+    [[nodiscard]] ValueType value(std::size_t index) const noexcept {
         return prefix_sum_[index + 1].value - prefix_sum_[index].value;
     }
 
-    [[nodiscard]] std::pair<long long, long long> compute_bounds_linear(long long capacity,
+    [[nodiscard]] std::pair<ValueType, ValueType> compute_bounds_linear(WeightType capacity,
                                                                         std::size_t index) const noexcept {
         assert(index < prefix_sum_.size());
         auto value_offset = prefix_sum_[index].value;
@@ -100,13 +101,13 @@ class KnapsackInstance {
         return {lower_bound, lower_bound + fractional_value};
     }
 
-    [[nodiscard]] std::pair<long long, long long> compute_bounds_binary(long long capacity,
+    [[nodiscard]] std::pair<ValueType, ValueType> compute_bounds_binary(WeightType capacity,
                                                                         std::size_t index) const noexcept {
         assert(index < prefix_sum_.size());
         auto it = std::upper_bound(std::next(prefix_sum_.begin(), static_cast<std::ptrdiff_t>(index) + 1),
                                    prefix_sum_.end(), prefix_sum_[index].weight + capacity,
                                    [](auto lhs, auto const& rhs) { return lhs < rhs.weight; });
-        long long lower_bound = std::prev(it)->value - prefix_sum_[index].value;
+        ValueType lower_bound = std::prev(it)->value - prefix_sum_[index].value;
         if (it == prefix_sum_.end()) {
             return {lower_bound, lower_bound};
         }

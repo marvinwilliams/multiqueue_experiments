@@ -69,7 +69,7 @@ target_compile_options(linden PRIVATE -w -std=gnu++17)
 target_compile_definitions(linden PUBLIC INTEL
                                           CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
 target_include_directories(
-  linden PRIVATE ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
+  linden PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
                  ${KLSM_DIR}/lib/spraylist_linden/include)
 set_property(TARGET linden PROPERTY pq_name linden)
 target_compile_definitions(linden INTERFACE PQ_LINDEN)
@@ -115,3 +115,7 @@ target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
 add_library(tbb_pq INTERFACE)
 target_link_libraries(tbb_pq INTERFACE wrapper tbb)
 target_compile_definitions(tbb_pq INTERFACE PQ_TBB_PQ)
+
+add_library(locked_pq INTERFACE)
+target_link_libraries(locked_pq INTERFACE wrapper locked_pq)
+target_compile_definitions(locked_pq INTERFACE PQ_LOCKED_PQ)

@@ -21,7 +21,7 @@ namespace wrapper::capq {
 // GC has MAX_THREADS = 128
 // (unsigned long) -1 is signaling empty
 
-template <bool Min>
+template <bool Min = true>
 class CAPQ {
    public:
     using key_type = unsigned long;
@@ -69,7 +69,7 @@ class CAPQ {
     }
 };
 
-template <bool Min>
+template <bool Min = true>
 using PQWrapper = CAPQ<Min>;
 
 inline void add_options(cxxopts::Options& /*options*/) {

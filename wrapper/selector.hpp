@@ -28,14 +28,16 @@ using namespace wrapper::linden;
 using namespace wrapper::spraylist;
 #elif defined PQ_TBB_PQ
 #include "wrapper/tbb_priority_queue.hpp"
-using namespace wrapper::TBBPriorityQueue;
+using namespace wrapper::tbb_priority_queue;
 #elif defined PQ_TBB_FIFO
 #include "wrapper/tbb_queue.hpp"
-using namespace wrapper::TBBQueue;
+using namespace wrapper::tbb_queue;
 #elif defined PQ_SMQ
-#include <functional>
 #include "wrapper/smq.hpp"
-using namespace wrapper::smq;
+using namespace wrapper::stealing_mq;
+#elif defined PQ_LOCKED_PQ
+#include "wrapper/locked_pq.hpp"
+using namespace wrapper::locked_pq;
 #else
 #error No valid PQ specified
 #endif

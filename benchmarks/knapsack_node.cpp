@@ -36,26 +36,33 @@ static constexpr auto num_numa_nodes = NUM_NUMA_NODES;
 static constexpr auto num_numa_nodes = 16;
 #endif
 
-using pq_type = PQWrapper<false>;
+struct Node {
+    double upper_bound;
+    std::size_t index;
+    double free_capacity;
+    double value;
+};
+
+struct NodePriority {
+    static double get(Node const& node) noexcept {
+        return node.upper_bound;
+    }
+};
+
+using pq_type = PQWrapper<false, double, Node, NodePriority>;
 using handle_type = pq_type::handle_type;
-
-static_assert(sizeof(unsigned long) >= sizeof(std::uint64_t), "64bit unsigned long required");
-using payload_type = unsigned long;
-
-constexpr pq_type::value_type to_payload(long long upper_bound, std::size_t index, long long free_capacity,
-                                         long long value) noexcept {
-    assert(upper_bound >= 0 && static_cast<unsigned long>(upper_bound) < 1UL << 32);
-    assert(index < (1UL << 32));
-    assert(free_capacity >= 0 && static_cast<unsigned long>(free_capacity) < 1UL << 32);
-    assert(value >= 0 && static_cast<unsigned long>(value) < 1UL << 32);
-    return pq_type::value_type{static_cast<unsigned long>(upper_bound) << 32 | static_cast<payload_type>(index),
-                               static_cast<payload_type>(free_capacity) << 32 | static_cast<payload_type>(value)};
-}
 
 struct Settings {
     int num_threads = 4;
     std::filesystem::path knapsack_file;
     int seed = 1;
+    pq_type::config_type pq_settings{};
+
+    void options(cxxopts::Options& cmd) {
+        cmd.add_options()("j,threads", "The number of threads", cxxopts::value<int>(num_threads), "NUMBER")(
+            "file", "The input graph", cxxopts::value<std::filesystem::path>(knapsack_file), "PATH");
+        cmd.parse_positional({"file"});
+    }
 };
 
 void write_settings(Settings const& settings, std::ostream& out) {
@@ -71,11 +78,11 @@ struct ThreadStats {
 };
 
 struct SharedData {
-    KnapsackInstance<long long> instance;
-    std::atomic_llong solution{0};
+    KnapsackInstance<double> instance;
+    std::atomic<double> solution{0};
     termination_detection::Data termination_detection_data{};
 
-    void update_solution(long long& current, long long update) noexcept {
+    void update_solution(double& current, double update) noexcept {
         while (update > current) {
             if (solution.compare_exchange_weak(current, update, std::memory_order_relaxed)) {
                 current = update;
@@ -91,25 +98,21 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
     }
     ++stats.processed_nodes;
     auto solution = data.solution.load(std::memory_order_relaxed);
-    auto upper_bound = static_cast<long long>(node->first >> 32);
-    if (upper_bound <= solution) {
+    if (node->upper_bound <= solution) {
         ++stats.ignored_nodes;
         return true;
     }
-    auto index = static_cast<std::size_t>(node->first & ((1UL << 32) - 1));
-    auto free_capacity = static_cast<long long>(node->second >> 32);
-    assert(free_capacity <= data.instance.capacity());
-    auto value = static_cast<long long>(node->second & ((1UL << 32) - 1));
-    auto [lb, ub] = data.instance.compute_bounds_linear(free_capacity, index + 1);
-    data.update_solution(solution, value + lb);
-    if (index + 2 < data.instance.size()) {
-        if (value + ub > solution) {
-            handle.push(to_payload(value + ub, index + 1, free_capacity, value));
+    auto [lb, ub] = data.instance.compute_bounds_linear(node->free_capacity, node->index + 1);
+    data.update_solution(solution, node->value + lb);
+    if (node->index + 2 < data.instance.size()) {
+        if (node->value + ub > solution) {
+            handle.push({node->value + ub, node->index + 1, node->free_capacity, node->value});
             ++stats.pushed_nodes;
         }
-        if (free_capacity >= data.instance.weight(index)) {
-            handle.push(to_payload(upper_bound, index + 1, free_capacity - data.instance.weight(index),
-                                   value + data.instance.value(index)));
+        if (node->free_capacity >= data.instance.weight(node->index)) {
+            auto payload = to_payload(node->index + 1, node->free_capacity - data.instance.weight(node->index),
+                                      node->value + data.instance.value(node->index));
+            handle.push({node->first, payload});
             ++stats.pushed_nodes;
         }
     }
@@ -123,7 +126,7 @@ ThreadStats benchmark_thread(task::Control tc, pq_type& pq, SharedData& data) {
         auto [lb, ub] = data.instance.compute_bounds_linear(data.instance.capacity(), 0);
         data.solution.store(lb, std::memory_order_relaxed);
         if (ub > lb) {
-            handle.push(to_payload(ub, 0, data.instance.capacity(), 0));
+            handle.push({ub, 0, data.instance.capacity(), 0});
             ++stats.pushed_nodes;
         }
     }
@@ -138,16 +141,12 @@ ThreadStats benchmark_thread(task::Control tc, pq_type& pq, SharedData& data) {
 bool run_benchmark(Settings const& settings, pq_type& pq) {
     SharedData shared_data;
     try {
-        shared_data.instance = KnapsackInstance(settings.knapsack_file);
+        shared_data.instance = KnapsackInstance<double>(settings.knapsack_file);
     } catch (std::runtime_error const& e) {
         std::clog << "Error reading problem file: " << e.what() << std::endl;
         return false;
     }
 
-    if (shared_data.instance.size() + 1 >= (1UL << 32) || shared_data.instance.capacity() >= (1LL << 32)) {
-        std::clog << "Error: Instance cannot be represented\n";
-        return false;
-    }
     std::vector<ThreadStats> all_stats(static_cast<std::size_t>(settings.num_threads));
     affinity::NUMA numa_affinity{cores_per_numa_node, num_numa_nodes};
     std::clog << "Working...\n";
@@ -191,14 +190,9 @@ int main(int argc, char* argv[]) {
 
     Settings settings{};
     cxxopts::Options cmd(argv[0]);
-    // clang-format off
-    cmd.add_options()
-      ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
-      ("file", "The input graph", cxxopts::value<std::filesystem::path>(settings.knapsack_file), "PATH")
-      ("h,help", "Print this help");
-    // clang-format on
+    cmd.add_options()("h,help", "Print this help");
+    settings.options(cmd);
     add_options(cmd);
-    cmd.parse_positional({"file"});
 
     auto args = cxxopts::ParseResult{};
     try {
@@ -221,7 +215,7 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
 
-    auto pq = create<false>(settings.num_threads, 1 << 24, args);
+    auto pq = create<false, double, Node, NodePriority>(settings.num_threads, 1 << 24, args);
     std::clog << "Priority queue: ";
     describe(pq, std::clog) << '\n' << '\n';
     bool success = run_benchmark(settings, pq);

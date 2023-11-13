@@ -1,6 +1,7 @@
 #pragma once
 
 #include "multiqueue/multiqueue.hpp"
+#include "util.hpp"
 
 namespace wrapper::multiqueue::detail::queue_selection {
 #ifdef MQ_NUM_POP_PQS
@@ -200,7 +201,7 @@ struct MultiQueueBuilder {
 }  // namespace detail
 
 template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = ::multiqueue::defaults::KeyOfValue<Key, Value>>
+          typename KeyOfValue = util::KeyOfValue<Key, Value>>
 using PQWrapper = typename detail::MultiQueueBuilder<Min, Key, Value, KeyOfValue>::multiqueue_type;
 
 inline void add_options(cxxopts::Options &options) {
@@ -211,7 +212,7 @@ inline void add_options(cxxopts::Options &options) {
 }
 
 template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = ::multiqueue::defaults::KeyOfValue<Key, Value>>
+          typename KeyOfValue = util::KeyOfValue<Key, Value>>
 PQWrapper<Min, Key, Value, KeyOfValue> create(int num_threads, std::size_t initial_capacity,
                                             cxxopts::ParseResult const &result) {
     typename PQWrapper<Min, Key, Value, KeyOfValue>::queue_selection_config_type config{};

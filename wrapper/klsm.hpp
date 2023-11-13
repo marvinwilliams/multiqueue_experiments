@@ -2,8 +2,6 @@
 
 // Adapted from klsm
 
-#include "wrapper/priority.hpp"
-
 #include "k_lsm/k_lsm.h"
 
 #include "cxxopts.hpp"
