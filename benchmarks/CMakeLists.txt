@@ -51,7 +51,7 @@ function(add_pop_pq_variant num_pop_pqs)
   add_library(${name} INTERFACE)
   target_compile_definitions(
     ${name}
-    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
+    INTERFACE MQ_STICK_POLICY=0
               MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=0
               MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=0
               MQ_HEAP_ARITY=2
@@ -72,7 +72,7 @@ function(add_tuning_variant buffer_size degree)
   add_library(${name} INTERFACE)
   target_compile_definitions(
     ${name}
-    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
+    INTERFACE MQ_STICK_POLICY=0
               MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
               MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size}
               MQ_HEAP_ARITY=${degree})
@@ -88,7 +88,7 @@ function(add_tuning_pq_variant buffer_size)
   add_library(${name} INTERFACE)
   target_compile_definitions(
     ${name}
-    INTERFACE MQ_QUEUE_SELECTION_POLICY=0
+    INTERFACE MQ_STICK_POLICY=0
               MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE=${buffer_size}
               MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE=${buffer_size} MQ_USE_STD_PQ)
   target_link_libraries(${name} INTERFACE mq)
@@ -117,29 +117,29 @@ endforeach()
 add_library(mq_tuning_btree INTERFACE)
 target_compile_definitions(
   mq_tuning_btree
-  INTERFACE MQ_QUEUE_SELECTION_POLICY=0 MQ_USE_BTREE)
+  INTERFACE MQ_STICK_POLICY=0 MQ_USE_BTREE)
 target_link_libraries(mq_tuning_btree INTERFACE mq)
 list(APPEND MQ_TUNING_VARIANTS mq_tuning_btree)
 
+add_library(mq_noop INTERFACE)
+target_compile_definitions(mq_noop INTERFACE MQ_STICK_POLICY=0)
+target_link_libraries(mq_noop INTERFACE mq)
+list(APPEND MQ_VARIANTS mq_noop)
+
 add_library(mq_rand INTERFACE)
-target_compile_definitions(mq_rand INTERFACE MQ_QUEUE_SELECTION_POLICY=0)
+target_compile_definitions(mq_rand INTERFACE MQ_STICK_POLICY=1)
 target_link_libraries(mq_rand INTERFACE mq)
 list(APPEND MQ_VARIANTS mq_rand)
 
-add_library(mq_stick INTERFACE)
-target_compile_definitions(mq_stick INTERFACE MQ_QUEUE_SELECTION_POLICY=1)
-target_link_libraries(mq_stick INTERFACE mq)
-list(APPEND MQ_VARIANTS mq_stick)
-
 add_library(mq_swap INTERFACE)
-target_compile_definitions(mq_swap INTERFACE MQ_QUEUE_SELECTION_POLICY=2)
+target_compile_definitions(mq_swap INTERFACE MQ_STICK_POLICY=2)
 target_link_libraries(mq_swap INTERFACE mq)
 list(APPEND MQ_VARIANTS mq_swap)
 
-add_library(mq_perm INTERFACE)
-target_compile_definitions(mq_perm INTERFACE MQ_QUEUE_SELECTION_POLICY=3)
-target_link_libraries(mq_perm INTERFACE mq)
-list(APPEND MQ_VARIANTS mq_perm)
+add_library(mq_parametric INTERFACE)
+target_compile_definitions(mq_parametric INTERFACE MQ_STICK_POLICY=3)
+target_link_libraries(mq_parametric INTERFACE mq)
+list(APPEND MQ_VARIANTS mq_parametric)
 
 set(COMPETITORS
     klsm4

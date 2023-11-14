@@ -391,7 +391,7 @@ std::ostream& log(std::ostream& out, std::chrono::steady_clock::time_point start
 }
 
 void benchmark_thread(Settings const& settings, task::Control tc, pq_type& pq, BenchmarkData& benchmark_data) {
-    pq_type::handle_type handle = pq.get_handle();
+    handle_type handle = pq.get_handle();
     Stats stats{};
 #ifdef QUALITY
     operation_log::OperationLog op_log{};
