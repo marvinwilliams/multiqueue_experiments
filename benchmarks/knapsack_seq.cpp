@@ -37,7 +37,7 @@ struct Data {
     long long processed_nodes{0};
 };
 
-void knapsack(pq_type& pq, Data& data, KnapsackInstance const& instance) noexcept {
+void knapsack(pq_type& pq, Data& data, KnapsackInstance<> const& instance) noexcept {
     while (!pq.empty()) {
 #ifdef USE_FIFO
         auto node = pq.front();
@@ -97,9 +97,9 @@ int main(int argc, char* argv[]) {
         return 1;
     }
 
-    KnapsackInstance instance;
+    KnapsackInstance<> instance;
     try {
-        instance = KnapsackInstance(instance_file);
+        instance = KnapsackInstance<>(instance_file);
     } catch (std::runtime_error const& e) {
         std::clog << "failed: " << e.what() << std::endl;
         return 1;

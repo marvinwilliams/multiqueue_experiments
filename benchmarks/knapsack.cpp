@@ -55,12 +55,10 @@ constexpr pq_type::value_type to_payload(long long upper_bound, std::size_t inde
 struct Settings {
     int num_threads = 4;
     std::filesystem::path knapsack_file;
-    int seed = 1;
 };
 
 void write_settings(Settings const& settings, std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n'
-        << "Seed: " << settings.seed << '\n'
         << "Problem file: " << settings.knapsack_file << '\n';
 }
 
