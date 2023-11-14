@@ -290,23 +290,11 @@ target_sources(knapsack INTERFACE knapsack.cpp
                                   "${CMAKE_SOURCE_DIR}/util/threading.cpp")
 target_link_libraries(knapsack INTERFACE benchmark_base Threads::Threads)
 
+add_custom_target(knapsack_all)
 foreach(target ${MQ_VARIANTS} ${COMPETITORS})
   add_executable(knapsack_${target})
   target_link_libraries(knapsack_${target} PRIVATE ${target} knapsack)
-  if(BUILD_TESTING)
-    add_test(
-      NAME knapsack_${target}_seq
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:knapsack_${target}> -j 1 -f data/knapsack_small.txt"
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-    add_test(
-      NAME knapsack_${target}_large
-      COMMAND
-        /bin/bash -c
-        "$<TARGET_FILE:knapsack_${target}> -j 8 -f data/knapsack_large.txt "
-      WORKING_DIRECTORY ${CMAKE_SOURCE_DIR})
-  endif()
+  add_dependencies(knapsack_all knapsack_${target})
 endforeach()
 
 add_library(knapsack_node INTERFACE)
@@ -315,18 +303,18 @@ target_sources(knapsack_node INTERFACE knapsack_node.cpp
 target_link_libraries(knapsack_node INTERFACE benchmark_base Threads::Threads)
 
 foreach(target ${MQ_VARIANTS} ${GENERIC_COMPETITORS})
-  add_executable(knapsack_node_${target})
-  target_link_libraries(knapsack_node_${target} PRIVATE ${target} knapsack_node)
+  add_executable(knapsack_node_f_${target})
+  target_link_libraries(knapsack_node_f_${target} PRIVATE ${target} knapsack_node)
+  add_dependencies(knapsack_all knapsack_node_f_${target})
+  add_executable(knapsack_node_i_${target})
+  target_link_libraries(knapsack_node_i_${target} PRIVATE ${target} knapsack_node)
+  target_compile_definitions(knapsack_node_i_${target} PRIVATE INTEGER_INSTANCE)
+  add_dependencies(knapsack_all knapsack_node_i_${target})
 endforeach()
 
-add_executable(knapsack_seq knapsack_seq.cpp)
-target_link_libraries(knapsack_seq PRIVATE benchmark_base)
-add_executable(knapsack_seq_fifo knapsack_seq.cpp)
-target_link_libraries(knapsack_seq_fifo PRIVATE benchmark_base)
-target_compile_definitions(knapsack_seq_fifo PRIVATE -DUSE_FIFO)
-
-add_custom_target(knapsack_all)
-foreach(target ${MQ_VARIANTS} ${COMPETITORS})
-  add_dependencies(knapsack_all knapsack_${target})
-endforeach()
-add_dependencies(knapsack_all knapsack_seq knapsack_seq_fifo)
+add_executable(knapsack_seq_f knapsack_seq.cpp)
+target_link_libraries(knapsack_seq_f PRIVATE benchmark_base)
+add_executable(knapsack_seq_i knapsack_seq.cpp)
+target_link_libraries(knapsack_seq_i PRIVATE benchmark_base)
+target_compile_definitions(knapsack_seq_i PRIVATE INTEGER_INSTANCE)
+add_dependencies(knapsack_all knapsack_seq_f knapsack_seq_i)

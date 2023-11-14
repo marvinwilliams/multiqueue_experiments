@@ -368,7 +368,6 @@ class StealingMultiQueue {
             heaps[tId].data.fillBufferIfStolen();
             return val;
         }
-        std::optional<T> emptyResult;
         // rand == 0 -- try to steal
         // otherwise, pop locally
         if (nQ > 1 && random() % StealProb == 0) {
@@ -381,7 +380,7 @@ class StealingMultiQueue {
             return minVal;
 
         // Our heap is empty.
-        return nQ == 1 ? emptyResult : trySteal(tId);
+        return nQ == 1 ? std::nullopt : trySteal(tId);
     }
 };
 

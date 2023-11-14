@@ -9,6 +9,7 @@
 #include <filesystem>
 #include <fstream>
 #include <numeric>
+#include <random>
 #include <vector>
 
 template <typename WeightType = long long, typename ValueType = WeightType>
@@ -23,6 +24,18 @@ class KnapsackInstance {
     std::vector<Item> prefix_sum_;
     WeightType capacity_{};
 
+    void to_prefix_sum() {
+        std::sort(prefix_sum_.begin(), prefix_sum_.end(), [](auto const& lhs, auto const& rhs) {
+            return (static_cast<double>(lhs.value) / static_cast<double>(lhs.weight)) >
+                (static_cast<double>(rhs.value) / static_cast<double>(rhs.weight));
+        });
+        std::inclusive_scan(prefix_sum_.begin(), prefix_sum_.end(), prefix_sum_.begin(),
+                            [](auto const& lhs, auto const& rhs) {
+                                return Item{lhs.weight + rhs.weight, lhs.value + rhs.value};
+                            });
+        prefix_sum_.insert(prefix_sum_.begin(), Item{0, 0});
+    }
+
    public:
     KnapsackInstance() = default;
     KnapsackInstance(std::filesystem::path const& file) {
@@ -35,7 +48,6 @@ class KnapsackInstance {
         if (!in || in.eof()) {
             throw std::runtime_error{"Could not get number of items"};
         }
-        prefix_sum_.clear();
         prefix_sum_.reserve(n + 1);
         in >> capacity_;
         if (!in || (n > 0 && in.eof())) {
@@ -57,15 +69,27 @@ class KnapsackInstance {
             }
             prefix_sum_.push_back(item);
         }
-        std::sort(prefix_sum_.begin(), prefix_sum_.end(), [](auto const& lhs, auto const& rhs) {
-            return (static_cast<double>(lhs.value) / static_cast<double>(lhs.weight)) >
-                (static_cast<double>(rhs.value) / static_cast<double>(rhs.weight));
+        to_prefix_sum();
+    }
+
+    KnapsackInstance(long long n, WeightType a, WeightType b, ValueType l, ValueType u, double f, unsigned long s)
+        : prefix_sum_(static_cast<std::size_t>(n)),
+          capacity_(static_cast<WeightType>(static_cast<double>(n) * static_cast<double>(b - a) * f)) {
+        std::default_random_engine rng(s);
+        std::generate(prefix_sum_.begin(), prefix_sum_.end(), [&rng, a, b, l, u]() {
+            if constexpr (std::is_floating_point_v<WeightType>) {
+                std::uniform_real_distribution<WeightType> random_weight(a, b);
+                std::uniform_real_distribution<ValueType> random_add(l, u);
+                auto weight = random_weight(rng);
+                return Item{weight, static_cast<ValueType>(weight) + random_add(rng)};
+            } else {
+                std::uniform_int_distribution<WeightType> random_weight(a, b);
+                std::uniform_int_distribution<ValueType> random_add(l, u);
+                auto weight = random_weight(rng);
+                return Item{weight, static_cast<ValueType>(weight) + random_add(rng)};
+            }
         });
-        std::inclusive_scan(prefix_sum_.begin(), prefix_sum_.end(), prefix_sum_.begin(),
-                            [](auto const& lhs, auto const& rhs) {
-                                return Item{lhs.weight + rhs.weight, lhs.value + rhs.value};
-                            });
-        prefix_sum_.insert(prefix_sum_.begin(), Item{0, 0});
+        to_prefix_sum();
     }
 
     [[nodiscard]] std::size_t size() const noexcept {
