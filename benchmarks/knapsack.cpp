@@ -118,7 +118,7 @@ bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data) {
 
 ThreadStats benchmark_thread(task::Control tc, pq_type& pq, SharedData& data) {
     ThreadStats stats;
-    auto handle = pq.get_handle();
+    handle_type handle = pq.get_handle();
     if (tc.id() == 0) {
         auto [lb, ub] = data.instance.compute_bounds_linear(data.instance.capacity(), 0);
         data.solution.store(lb, std::memory_order_relaxed);
