@@ -139,7 +139,7 @@ list(APPEND MQ_VARIANTS mq_swap)
 add_library(mq_parametric INTERFACE)
 target_compile_definitions(mq_parametric INTERFACE MQ_STICK_POLICY=3)
 target_link_libraries(mq_parametric INTERFACE mq)
-list(APPEND MQ_VARIANTS mq_parametric)
+# list(APPEND MQ_VARIANTS mq_parametric)
 
 set(COMPETITORS
     klsm4
@@ -156,7 +156,7 @@ set(COMPETITORS
 
 set(GENERIC_COMPETITORS
     smq
-    tbb_pq
+    # tbb_pq
     locked_pq
 )
 

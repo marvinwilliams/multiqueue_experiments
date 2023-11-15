@@ -53,15 +53,15 @@ static constexpr data_type default_u = 0.125;
 #endif
 
 struct Node {
-    data_type upper_bound;
-    std::size_t index;
-    data_type free_capacity;
-    data_type value;
+    data_type upper_bound{};
+    std::size_t index = std::numeric_limits<std::size_t>::max();
+    data_type free_capacity{};
+    data_type value{};
 };
 
+// Only needed by smq for checking if a node is a dummy
 bool operator==(Node const& lhs, Node const& rhs) noexcept {
-    return lhs.upper_bound == rhs.upper_bound && lhs.index == rhs.index && lhs.free_capacity == rhs.free_capacity &&
-        lhs.value == rhs.value;
+  return lhs.index == rhs.index;
 }
 
 struct NodePriority {
