@@ -53,7 +53,7 @@ using key_type = unsigned long;
 using value_type = unsigned long;
 #endif
 
-using pq_type = PQWrapper<>;
+using pq_type = PQ<true, key_type, std::pair<key_type, value_type>>;
 using handle_type = pq_type::handle_type;
 
 struct Settings {
@@ -441,7 +441,7 @@ void benchmark_thread(Settings const& settings, task::Control tc, pq_type& pq, B
 #endif
     switch (settings.mode) {
         case Settings::Mode::Update: {
-            work_loop(settings, tc, stats, [&](auto i) {
+            work_loop(settings, tc, stats, [&](int i) {
                 auto key = pq_pop();
                 auto new_key = static_cast<key_type>(static_cast<long long>(key) +
                                                      benchmark_data.work[static_cast<std::size_t>(i)]);
@@ -450,7 +450,7 @@ void benchmark_thread(Settings const& settings, task::Control tc, pq_type& pq, B
             break;
         }
         case Settings::Mode::Random: {
-            work_loop(settings, tc, stats, [&](auto i) {
+            work_loop(settings, tc, stats, [&](int i) {
                 pq_pop();
                 auto new_key = static_cast<key_type>(benchmark_data.work[static_cast<std::size_t>(i)]);
                 pq_push(new_key, static_cast<value_type>(settings.num_threads * settings.prefill_per_thread + i));
@@ -459,14 +459,14 @@ void benchmark_thread(Settings const& settings, task::Control tc, pq_type& pq, B
         }
         case Settings::Mode::PushRandom:
         case Settings::Mode::PushAscending: {
-            work_loop(settings, tc, stats, [&](auto i) {
+            work_loop(settings, tc, stats, [&](int i) {
                 auto new_key = static_cast<key_type>(benchmark_data.work[static_cast<std::size_t>(i)]);
                 pq_push(new_key, static_cast<value_type>(settings.num_threads * settings.prefill_per_thread + i));
             });
             break;
         }
         case Settings::Mode::Pop: {
-            work_loop(settings, tc, stats, [&](auto) { pq_pop(); });
+            work_loop(settings, tc, stats, [&](int) { pq_pop(); });
             break;
         }
     }
@@ -521,9 +521,9 @@ bool run_benchmark(Settings const& settings, cxxopts::ParseResult const& parse_r
         (settings.mode == Settings::Mode::PushAscending || settings.mode == Settings::Mode::PushRandom
              ? benchmark_data.work.size()
              : 0);
-    auto pq = create(settings.num_threads, 2 * max_capacity, parse_result);
+    auto pq = pq_type(settings.num_threads, 2 * max_capacity, parse_result);
     std::clog << "Priority queue: ";
-    describe(pq, std::clog) << '\n' << '\n';
+    pq.describe(std::clog) << '\n' << '\n';
 
     task::Runner runner(affinity::NUMA{cores_per_numa_node, num_numa_nodes}, settings.num_threads,
                         [&](auto tc) { benchmark_thread(settings, tc, pq, benchmark_data); });
@@ -636,7 +636,7 @@ int main(int argc, char* argv[]) {
 #endif
         // clang-format on
         ;
-    add_options(cmd);
+    pq_type::add_options(cmd);
     cxxopts::ParseResult args;
     try {
         args = cmd.parse(argc, argv);

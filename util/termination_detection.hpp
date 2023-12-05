@@ -7,8 +7,6 @@
 #define PAUSE void(0)
 #endif
 #include <atomic>
-#include <condition_variable>
-#include <mutex>
 
 namespace termination_detection {
 

@@ -1,145 +1,115 @@
 #pragma once
 
+#include "multiqueue/buffered_pq.hpp"
 #include "multiqueue/multiqueue.hpp"
+#include "multiqueue/utils.hpp"
 #include "util.hpp"
 
-namespace wrapper::multiqueue::detail::stick_policy {
-#ifdef MQ_NUM_POP_PQS
-static constexpr unsigned int num_pop_pqs = MQ_NUM_POP_PQS;
-#else
-static constexpr unsigned int num_pop_pqs = 2;
-#endif
-}  // namespace wrapper::multiqueue::detail::stick_policy
-
-#ifndef MQ_STICK_POLICY
-#error "MQ_STICK_POLICY not defined"
-#endif
-
-#if MQ_STICK_POLICY == 0
-
-#include "multiqueue/stick_policy/noop.hpp"
-
-namespace wrapper::multiqueue::detail::stick_policy {
-
-using type = ::multiqueue::stick_policy::Noop<num_pop_pqs>;
-static constexpr auto name = "noop";
-static constexpr bool has_stickiness = false;
-
-}  // namespace wrapper::multiqueue::detail::stick_policy
-
-#elif MQ_STICK_POLICY == 1
-
-#include "multiqueue/stick_policy/random.hpp"
-
-namespace wrapper::multiqueue::detail::stick_policy {
-
-using type = ::multiqueue::stick_policy::Random<num_pop_pqs>;
-static constexpr auto name = "random";
-static constexpr bool has_stickiness = true;
-}  // namespace wrapper::multiqueue::detail::stick_policy
-
-#elif MQ_STICK_POLICY == 2
-
-#include "multiqueue/stick_policy/swap.hpp"
-
-namespace wrapper::multiqueue::detail::stick_policy {
-
-using type = ::multiqueue::stick_policy::Swap<num_pop_pqs>;
-static constexpr auto name = "swap";
-static constexpr bool has_stickiness = true;
-
-}  // namespace wrapper::multiqueue::detail::stick_policy
-
-#elif MQ_STICK_POLICY == 3
-
-#include "multiqueue/stick_policy/parametric.hpp"
-
-namespace wrapper::multiqueue::detail::stick_policy {
-
-using type = ::multiqueue::stick_policy::Parametric<num_pop_pqs>;
-static constexpr auto name = "parametric";
-static constexpr bool has_stickiness = true;
-
-}  // namespace wrapper::multiqueue::detail::stick_policy
-
-#else
-#error "Invalid MQ_STICK_POLICY"
-#endif
-
-#include "cxxopts.hpp"
-#ifdef MQ_USE_BTREE
+#ifdef MQ_USE_STD_PQ
+#include <queue>
+#include <vector>
+#elif defined MQ_USE_BTREE
 #include "tlx_btree.hpp"
 #endif
 
+#ifndef MQ_OP_POLICY
+#error "MQ_OP_POLICY not defined"
+#endif
+
+#if MQ_OP_POLICY == 0
+#include "multiqueue/operation_policy/noop.hpp"
+#elif MQ_OP_POLICY == 1
+#include "multiqueue/stick_policy/random.hpp"
+#elif MQ_OP_POLICY == 2
+#include "multiqueue/stick_policy/swap.hpp"
+#elif MQ_OP_POLICY == 3
+#include "multiqueue/stick_policy/parametric.hpp"
+#elif MQ_OP_POLICY == 3
+#include "multiqueue/stick_policy/parametric.hpp"
+#else
+#error "Invalid MQ_OP_POLICY"
+#endif
+
+#include "cxxopts.hpp"
+
 #include <ostream>
-#include <queue>
 #include <utility>
 
-namespace wrapper::multiqueue {
+namespace wrapper {
 
-namespace detail {
-
-#ifdef MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE
-static constexpr std::size_t insertion_buffersize = MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE;
-#else
-static constexpr std::size_t insertion_buffersize = 16;
-#endif
-#ifdef MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE
-static constexpr std::size_t deletion_buffersize = MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE;
-#else
-static constexpr std::size_t deletion_buffersize = 16;
-#endif
-#ifdef MQ_HEAP_ARITY
-static constexpr unsigned int heap_arity = MQ_HEAP_ARITY;
-#else
-static constexpr unsigned int heap_arity = 8;
-#endif
-
-struct Traits {
-    using stick_policy_type = stick_policy::type;
-#ifdef MQ_COMPARE_STRICT
-    static constexpr bool strict_comparison = true;
-#else
-    static constexpr bool strict_comparison = false;
-#endif
-#ifdef MQ_COUNT_STATS
-    static constexpr bool count_stats = true;
-#else
-    static constexpr bool count_stats = false;
-#endif
-#ifdef MQ_NUM_POP_TRIES
-    static constexpr unsigned int num_pop_tries = MQ_NUM_POP_TRIES;
-#else
-    static constexpr unsigned int num_pop_tries = 1;
-#endif
-#ifdef MQ_NOSCAN_ON_FAILED_POP
-    static constexpr bool scan_on_failed_pop = false;
-#else
-    static constexpr bool scan_on_failed_pop = true;
-#endif
-};
-
-template <bool Min, typename Key, typename Value, typename KeyOfValue>
-struct MultiQueueBuilder {
+template <bool Min, typename Key = unsigned long, typename Value = std::pair<Key, Key>,
+          typename KeyOfValue = util::KeyOfValue<Key, Value>>
+class MultiQueue {
     using key_type = Key;
     using value_type = Value;
-    using key_compare = std::conditional_t<Min, std::greater<key_type>, std::less<key_type>>;
-    using key_of_value = KeyOfValue;
+    using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
+    using value_compare = ::multiqueue::utils::ValueCompare<Value, KeyOfValue, key_compare>;
 
-    struct value_compare {
-        key_compare comp;
+#ifdef MQ_NUM_POP_CANDIDATES
+    static constexpr unsigned int num_pop_candidates = MQ_NUM_POP_CANDIDATES;
+#else
+    static constexpr unsigned int num_pop_candidates = 2;
+#endif
 
-        bool operator()(value_type const &lhs, value_type const &rhs) const noexcept {
-            return comp(key_of_value::get(lhs), key_of_value::get(rhs));
-        }
+#ifdef MQ_NO_POP_STALE
+    static constexpr bool pop_stale = false;
+#else
+    static constexpr bool pop_stale = false;
+#endif
+
+#ifdef MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE
+    static constexpr std::size_t insertion_buffersize = MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE;
+#else
+    static constexpr std::size_t insertion_buffersize = 16;
+#endif
+
+#ifdef MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE
+    static constexpr std::size_t deletion_buffersize = MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE;
+#else
+    static constexpr std::size_t deletion_buffersize = 16;
+#endif
+
+#ifdef MQ_HEAP_ARITY
+    static constexpr unsigned int heap_arity = MQ_HEAP_ARITY;
+#else
+    static constexpr unsigned int heap_arity = 8;
+#endif
+
+    struct OperationTraits {
+#if MQ_OP_POLICY == 0
+        using policy_type = ::multiqueue::operation_policy::Random<num_pop_candidates, pop_stale>;
+        static constexpr auto name = "random";
+        static constexpr bool has_stickiness = false;
+#elif MQ_OP_POLICY == 1
+        using policy_type = ::multiqueue::operation_policy::StickRandomIndependent<num_pop_candidates>;
+        static constexpr auto name = "stick random independent";
+        static constexpr bool has_stickiness = true;
+#elif MQ_OP_POLICY == 2
+        using policy_type = ::multiqueue::operation_policy::StickRandomCommon<num_pop_candidates>;
+        static constexpr auto name = "stick random common";
+        static constexpr bool has_stickiness = true;
+#elif MQ_OP_POLICY == 3
+        using policy_type = ::multiqueue::operation_policy::StickPermutationIndividual<num_pop_candidates>;
+        static constexpr auto name = "stick permutation individual";
+        static constexpr bool has_stickiness = true;
+#elif MQ_OP_POLICY == 4
+        using policy_type = ::multiqueue::operation_policy::StickPermutationGlobal<num_pop_candidates>;
+        static constexpr auto name = "stick permutation global";
+        static constexpr bool has_stickiness = true;
+#endif
+#ifdef MQ_NOSCAN_IF_EMPTY
+        static constexpr bool scan_if_empty = false;
+#else
+        static constexpr bool scan_if_empty = true;
+#endif
     };
 
 #ifdef MQ_USE_STD_PQ
-    using pq_type = std::multiqueue::BufferedPQ<std::priority_queue<value_type, std::vector<value_type>, value_compare>,
-                                                insertion_buffersize, deletion_buffersize>;
+    using pq_type = ::multiqueue::BufferedPQ<std::priority_queue<value_type, std::vector<value_type>, value_compare>,
+                                             insertion_buffersize, deletion_buffersize>;
 #elif defined MQ_USE_BTREE
-    class BTreePQWrapper {
-        using btree_type = tlx::BTree<key_type, value_type, key_of_value, key_compare,
+    class pq_type {
+        using btree_type = tlx::BTree<key_type, value_type, KeyOfValue, key_compare,
                                       tlx::btree_default_traits<key_type, value_type>, true>;
 
        public:
@@ -150,9 +120,7 @@ struct MultiQueueBuilder {
         using value_compare = btree_type::value_compare;
 
        private:
-        tlx::BTree<key_type, value_type, KeyOfValue, compare_type, tlx::btree_default_traits<key_type, value_type>,
-                   true>
-            btree_;
+        btree_type btree_;
 
        public:
         BTreePQWrapper() = default;
@@ -190,63 +158,68 @@ struct MultiQueueBuilder {
         }
     };
 
-    using pq_type = BTreePQWrapper;
 #else
-    using pq_type = ::multiqueue::BufferedPQ<::multiqueue::Heap<value_type, value_compare, heap_arity>,
-                                             insertion_buffersize, deletion_buffersize>;
+    using pq_type = ::multiqueue::BufferedPQ<
+        ::multiqueue::Heap<Value, ::multiqueue::utils::ValueCompare<value_type, KeyOfValue, key_compare>, heap_arity>,
+        insertion_buffersize, deletion_buffersize>;
 #endif
-    using multiqueue_type = ::multiqueue::MultiQueue<key_type, key_compare, value_type, key_of_value, Traits, pq_type>;
-};
 
-}  // namespace detail
+    using multiqueue_type =
+        ::multiqueue::MultiQueue<key_type, value_type, KeyOfValue, key_compare, OperationTraits, pq_type>;
 
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
-using PQWrapper = typename detail::MultiQueueBuilder<Min, Key, Value, KeyOfValue>::multiqueue_type;
-
-inline void add_options(cxxopts::Options &options) {
-    options.add_options()("c,factor", "The number of queues per thread", cxxopts::value<int>(), "NUMBER");
-    if (detail::stick_policy::has_stickiness) {
-        options.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(), "NUMBER");
+    auto parse_config(cxxopts::ParseResult const &result) {
+        typename multiqueue_type::operation_config_type config{};
+        if constexpr (OperationTraits::has_stickiness) {
+            if (result.count("stickiness") > 0) {
+                config.stickiness = result["stickiness"].as<int>();
+            }
+        }
+        return config;
     }
-}
 
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
-PQWrapper<Min, Key, Value, KeyOfValue> create(int num_threads, std::size_t initial_capacity,
-                                            cxxopts::ParseResult const &result) {
-    typename PQWrapper<Min, Key, Value, KeyOfValue>::stick_policy_config_type config{};
-    int factor = result.count("factor") > 0 ? result["factor"].as<int>() : 2;
-    if constexpr (detail::stick_policy::has_stickiness) {
-        if (result.count("stickiness") > 0) {
-            config.stickiness = result["stickiness"].as<int>();
+    multiqueue_type mq_;
+
+   public:
+    using handle_type = typename multiqueue_type::handle_type;
+
+    explicit MultiQueue(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const &result)
+        : mq_{num_threads * (result.count("factor") > 0 ? result["factor"].as<int>() : 2), initial_capacity,
+              parse_config(result)} {
+    }
+
+    static void add_options(cxxopts::Options &options) {
+        options.add_options()("c,factor", "The number of queues per thread", cxxopts::value<int>(), "NUMBER");
+        if (OperationTraits::has_stickiness) {
+            options.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(), "NUMBER");
         }
     }
-    return PQWrapper<Min, Key, Value, KeyOfValue>{num_threads * factor, initial_capacity, config};
-}
 
-template <typename MultiQueue>
-std::ostream &describe(MultiQueue const &mq, std::ostream &out) {
-    out << "MultiQueue (comparisons: " << (detail::Traits::strict_comparison ? "strict" : "non-strict")
-        << ", pop tries: " << detail::Traits::num_pop_tries
-        << ", scan on failed pop: " << (detail::Traits::scan_on_failed_pop ? "true" : "false")
-        << ", stick policy: " << detail::stick_policy::name
-        << ", pop pqs: " << detail::stick_policy::num_pop_pqs;
-    out << ", pq type: "
+    std::ostream &describe(std::ostream &out) {
+        out << "MultiQueue ("
+            << "operations: " << OperationTraits::name << ", pop stale: " << (pop_stale ? "true" : "false")
+            << ", pop candidates: " << num_pop_candidates
+            << ", scan if empty: " << (OperationTraits::scan_if_empty ? "true" : "false") << ", pq type: "
 #ifdef MQ_USE_STD_PQ
-        << "buffered std::priority_queue, buffer size (i/d): " << insertion_buffersize << '/' << deletion_buffersize;
+            << "buffered std::priority_queue, buffer size (i/d): " << insertion_buffersize << '/'
+            << deletion_buffersize;
 #elif defined MQ_USE_BTREE
-        << "tlx::btree";
+            << "tlx::btree";
 #else
-        << "buffered d-ary heap (d: " << detail::heap_arity << ')'
-        << ", buffer size (i/d): " << detail::insertion_buffersize << '/' << detail::deletion_buffersize << ")";
+            << "buffered d-ary heap"
+            << ", arity: " << heap_arity << ", buffer size [ins/del]: " << insertion_buffersize << '/'
+            << deletion_buffersize;
 #endif
-    out << ", pqs: " << mq.num_pqs();
-    if constexpr (detail::stick_policy::has_stickiness) {
-        out << ", stickiness: " << mq.get_stick_policy_config().stickiness;
+        out << ", pqs: " << mq_.num_pqs();
+        if constexpr (OperationTraits::has_stickiness) {
+            out << ", stickiness: " << mq_.get_stick_policy_config().stickiness;
+        }
+        out << ')';
+        return out;
     }
-    out << ')';
-    return out;
-}
 
-}  // namespace wrapper::multiqueue
+    auto get_handle() {
+        return mq_.get_handle();
+    }
+};
+
+}  // namespace wrapper

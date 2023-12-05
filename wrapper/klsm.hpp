@@ -64,7 +64,7 @@ class KLsm {
     }
 };
 
-template <bool Min = true, typename Key = unsigned long, typename T = unsigned long>
+template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>>
 using PQWrapper = KLsm<Min, Key, T>;
 
 inline void add_options(cxxopts::Options& /*options*/) {
