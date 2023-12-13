@@ -651,7 +651,13 @@ int main(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
     if (args.count("mode") > 0) {
-        settings.mode = parse_mode(args["mode"].as<char>());
+        try {
+            settings.mode = parse_mode(args["mode"].as<char>());
+        } catch (std::invalid_argument const& e) {
+            std::cerr << "Error parsing command line: " << e.what() << std::endl;
+            std::cerr << cmd.help() << std::endl;
+            return EXIT_FAILURE;
+        }
     }
     settings.timeout = std::chrono::seconds(timeout_ms);
 
