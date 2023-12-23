@@ -7,3 +7,8 @@ target_compile_features(
   knapsack_generator PRIVATE
   cxx_std_17
 )
+
+add_executable(analyze_quality analyze_quality.cpp)
+target_compile_definitions(analyze_quality
+                           PRIVATE $<$<CONFIG:Debug>:-DREPLAY_TREE_DEBUG>)
+

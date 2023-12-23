@@ -57,14 +57,14 @@ class MultiQueue {
     static constexpr bool pop_stale = false;
 #endif
 
-#ifdef MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE
-    static constexpr std::size_t insertion_buffersize = MQ_BUFFERED_PQ_INSERTION_BUFFER_SIZE;
+#ifdef MQ_INSERTION_BUFFER_SIZE
+    static constexpr std::size_t insertion_buffersize = MQ_INSERTION_BUFFER_SIZE;
 #else
     static constexpr std::size_t insertion_buffersize = 16;
 #endif
 
-#ifdef MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE
-    static constexpr std::size_t deletion_buffersize = MQ_BUFFERED_PQ_DELETION_BUFFER_SIZE;
+#ifdef MQ_DELETION_BUFFER_SIZE
+    static constexpr std::size_t deletion_buffersize = MQ_DELETION_BUFFER_SIZE;
 #else
     static constexpr std::size_t deletion_buffersize = 16;
 #endif

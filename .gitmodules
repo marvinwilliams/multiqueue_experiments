@@ -7,9 +7,6 @@
 [submodule "third_party/klsm"]
 	path = external/klsm
 	url = https://github.com/marvinwilliams/klsm.git
-[submodule "smq"]
-	path = external/smq
-	url = https://github.com/marvinwilliams/mq-based-schedulers.git
 [submodule "multiqueue"]
 	path = external/multiqueue
 	url = https://github.com/marvinwilliams/multiqueue

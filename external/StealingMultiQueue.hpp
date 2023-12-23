@@ -1,5 +1,4 @@
-#ifndef GALOIS_STEALINGMULTIQUEUE_H
-#define GALOIS_STEALINGMULTIQUEUE_H
+#pragma once
 
 // adapted to standalone from https://github.com/npostnikova/mq-based-schedulers
 
@@ -388,5 +387,3 @@ class StealingMultiQueue {
 
 }  // namespace WorkList
 }  // namespace Galois
-
-#endif  // GALOIS_STEALINGMULTIQUEUE_H

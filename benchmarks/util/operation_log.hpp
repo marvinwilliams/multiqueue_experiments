@@ -34,12 +34,6 @@ struct OperationLog {
     std::vector<Pop> pops;
 };
 
-struct Metrics {
-    std::size_t rank_error;
-    std::size_t delay;
-};
-
 void write(OperationLog const& log, std::ostream& out);
-std::vector<Metrics> replay(OperationLog const& logs);
 
 }  // namespace operation_log

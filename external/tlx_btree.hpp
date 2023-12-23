@@ -1,4 +1,6 @@
-// adopted to standalone from https://github.com/tlx/tlx/blob/master/tlx/container/btree.hpp
+#pragma once
+
+// adapted to standalone from https://github.com/tlx/tlx/blob/master/tlx/container/btree.hpp
 
 /*******************************************************************************
  * tlx/container/btree.hpp
@@ -10,8 +12,6 @@
  * All rights reserved. Published under the Boost Software License, Version 1.0
  ******************************************************************************/
 
-#ifndef TLX_CONTAINER_BTREE_HEADER
-#define TLX_CONTAINER_BTREE_HEADER
 
 // *** Required Headers from the STL
 
@@ -3342,7 +3342,5 @@ class BTree {
 //! \}
 
 }  // namespace tlx
-
-#endif  // !TLX_CONTAINER_BTREE_HEADER
 
 /******************************************************************************/

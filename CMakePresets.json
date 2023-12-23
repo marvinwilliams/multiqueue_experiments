@@ -6,100 +6,115 @@
   },
   "configurePresets": [
     {
-      "name": "release",
-      "displayName": "Release Preset",
-      "binaryDir": "build/release",
+      "name": "default",
+      "displayName": "Default Preset",
+      "binaryDir": "build",
+      "environment": {
+        "WARNINGS": "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wduplicated-branches -Wduplicated-cond -Wlogical-op -Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wold-style-cast -Wformat=2 -Wundef -Wcast-align -Wcast-qual -Wdisabled-optimization -Wredundant-decls -Wunsafe-loop-optimizations -Wnoexcept -Wsuggest-final-types -Wsuggest-final-methods -Wsuggest-override"
+      },
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "MULTIQUEUE_BUILD_TESTS": "OFF",
+        "CMAKE_CXX_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto $env{WARNINGS}",
+        "MULTIQUEUE_BUILD_TESTS": "ON",
         "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
-        "MULTIQUEUE_BUILD_EXAMPLES": "OFF",
-        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF",
-        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -flto=auto",
-        "CMAKE_C_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -flto=auto"
+        "MULTIQUEUE_BUILD_EXAMPLES": "ON",
+        "EXP_BUILD_TESTS": "ON"
+      },
+      "warnings": {
+        "dev": true,
+        "uninitialized": true
       }
     },
     {
-      "name": "profile",
-      "displayName": "Profile Preset",
-      "binaryDir": "build/profile",
+      "name": "release",
+      "displayName": "Release Preset",
+      "inherits": "default",
+      "binaryDir": "build-release",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Profile",
-        "MULTIQUEUE_BUILD_TESTS": "OFF",
-        "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
-        "MULTIQUEUE_BUILD_EXAMPLES": "OFF",
-        "MULTIQUEUE_EXP_BUILD_TESTS": "OFF",
-        "CMAKE_CXX_FLAGS_PROFILE": "-O3 -DNDEBUG -march=native -flto=auto -g -fno-omit-frame-pointer",
-        "CMAKE_C_FLAGS_PROFILE": "-O3 -DNDEBUG -march=native -flto=auto -g -fno-omit-frame-pointer"
+        "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -march=native -flto=auto $env{WARNINGS}"
       }
     },
     {
       "name": "debug",
       "displayName": "Debug Preset",
-      "binaryDir": "build/debug",
+      "inherits": "default",
+      "binaryDir": "build-debug",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "MULTIQUEUE_BUILD_TESTS": "ON",
-        "MULTIQUEUE_BUILD_BENCHMARKS": "OFF",
-        "MULTIQUEUE_BUILD_EXAMPLES": "ON",
-        "MULTIQUEUE_EXP_BUILD_TESTS": "ON",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_CXX_FLAGS_DEBUG": "-Og -ggdb",
-        "CMAKE_C_FLAGS_DEBUG": "-Og -ggdb"
+        "CMAKE_CXX_FLAGS": "-Og -ggdb $env{WARNINGS}",
+        "CMAKE_C_FLAGS": "-Og -ggdb"
       }
     },
     {
-      "name": "pgo",
-      "inherits": "release",
-      "displayName": "PGO Preset",
-      "binaryDir": "build/pgo",
+      "name": "pgo-generate",
+      "inherits": "default",
+      "displayName": "PGO Generate Preset",
+      "binaryDir": "build-pgo",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "MULTIQUEUE_BUILD_TESTS": "ON",
-        "MULTIQUEUE_BUILD_BENCHMARKS": "OFF",
-        "MULTIQUEUE_BUILD_EXAMPLES": "ON",
-        "MULTIQUEUE_EXP_BUILD_TESTS": "ON",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "MULTIQUEUE_EXP_PGO": "ON"
+        "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -march=native -flto=auto -fprofile-generate $env{WARNINGS}"
       }
     },
     {
-      "name": "san",
-      "inherits": "debug",
-      "displayName": "UBSAN/ASAN Preset",
-      "binaryDir": "build/sanitize",
+      "name": "pgo-use",
+      "inherits": "default",
+      "displayName": "PGO Use Preset",
+      "binaryDir": "build-pgo",
       "cacheVariables": {
-        "MULTIQUEUE_EXP_ASAN": "ON",
-        "MULTIQUEUE_EXP_UBSAN": "ON",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "OFF"
+        "CMAKE_CXX_FLAGS": "-O3 -DNDEBUG -march=native -flto=auto -fprofile-use -fprofile-correction $env{WARNINGS}"
+      }
+    },
+    {
+      "name": "asan",
+      "inherits": "default",
+      "displayName": "ASAN Preset",
+      "binaryDir": "build-asan",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto $env{WARNINGS} -fsanitize=address",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=address",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=address"
+      }
+    },
+    {
+      "name": "ubsan",
+      "inherits": "default",
+      "displayName": "UBSAN Preset",
+      "binaryDir": "build-ubsan",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto $env{WARNINGS} -fsanitize=undefined",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=undefined",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=undefined"
       }
     },
     {
       "name": "tsan",
-      "inherits": "debug",
+      "inherits": "default",
       "displayName": "TSAN Preset",
-      "binaryDir": "build/thread_sanitize",
+      "binaryDir": "build-tsan",
       "cacheVariables": {
-        "MULTIQUEUE_EXP_TSAN": "ON",
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "OFF"
+        "CMAKE_CXX_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto $env{WARNINGS} -fsanitize=thread",
+        "CMAKE_EXE_LINKER_FLAGS": "-fsanitize=thread",
+        "CMAKE_SHARED_LINKER_FLAGS": "-fsanitize=thread"
+      }
+    },
+    {
+      "name": "clangd",
+      "displayName": "Clangd Preset",
+      "binaryDir": "build-clangd",
+      "cacheVariables": {
+        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
+        "CMAKE_CXX_COMPILER": "clang++",
+        "CMAKE_C_COMPILER": "clang"
       }
     }
   ],
   "buildPresets": [
     {
+      "name": "default",
+      "displayName": "Default Preset",
+      "configurePreset": "default"
+    },
+    {
       "name": "release",
-      "displayName": "Release Build preset",
+      "displayName": "Release Preset",
       "configurePreset": "release"
-    },
-    {
-      "name": "profile",
-      "displayName": "Profile Build preset",
-      "configurePreset": "profile"
-    },
-    {
-      "name": "pgo",
-      "displayName": "PGO Build preset",
-      "configurePreset": "pgo"
     },
     {
       "name": "debug",
@@ -107,13 +122,28 @@
       "configurePreset": "debug"
     },
     {
-      "name": "san",
-      "displayName": "UBSAN/ASAN Build Preset",
-      "configurePreset": "san"
+      "name": "pgo-generate",
+      "displayName": "PGO Generate Preset",
+      "configurePreset": "pgo-generate"
+    },
+    {
+      "name": "pgo-use",
+      "displayName": "PGO Use Preset",
+      "configurePreset": "pgo-use"
+    },
+    {
+      "name": "asan",
+      "displayName": "ASAN Preset",
+      "configurePreset": "asan"
+    },
+    {
+      "name": "ubsan",
+      "displayName": "UBSAN Preset",
+      "configurePreset": "ubsan"
     },
     {
       "name": "tsan",
-      "displayName": "TSAN Build Preset",
+      "displayName": "TSAN Preset",
       "configurePreset": "tsan"
     }
  ]
