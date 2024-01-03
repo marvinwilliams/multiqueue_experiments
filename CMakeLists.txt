@@ -43,13 +43,20 @@ set(CORES_PER_NUMA_NODE
     256
     CACHE STRING "The number of cores per NUMA node")
 option(EXP_TUNING_TARGETS "Generate tuning targets" OFF)
-if (EXP_TUNING_TARGETS)
-  set(EXP_NUM_POP_PQS
-      ""
-      CACHE STRING "Generate tuning targets for the specified list of number of pop pqs")
-set(EXP_BUFFER_SIZES
-    ""
-    CACHE STRING "Generate tuning targets for the specified list of buffer sizes")
+if(EXP_TUNING_TARGETS)
+  set(EXP_TUNING_POP_PQS
+      "1;2;4;8"
+      CACHE
+        STRING
+        "Generate tuning targets for the specified list of number of pop pqs")
+  set(EXP_TUNING_BUFFER_SIZES
+      "0;4;16;64;256;1024"
+      CACHE STRING
+            "Generate tuning targets for the specified list of buffer sizes")
+  set(EXP_TUNING_HEAP_ARITIES
+      "2;4;8;16"
+      CACHE STRING
+            "Generate tuning targets for the specified list of heap arities")
 endif()
 
 if(NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")

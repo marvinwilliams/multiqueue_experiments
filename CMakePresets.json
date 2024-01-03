@@ -17,7 +17,8 @@
         "MULTIQUEUE_BUILD_TESTS": "ON",
         "MULTIQUEUE_BUILD_BENCHMARKS": "ON",
         "MULTIQUEUE_BUILD_EXAMPLES": "ON",
-        "EXP_BUILD_TESTS": "ON"
+        "EXP_BUILD_TESTS": "ON",
+        "EXP_TUNING_TARGETS": "ON"
       },
       "warnings": {
         "dev": true,

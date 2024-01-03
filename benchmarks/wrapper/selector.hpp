@@ -9,7 +9,6 @@
 **/
 #pragma once
 
-// NOLINTBEGIN(include)
 #if defined PQ_MQ
 #include "wrapper/multiqueue.hpp"
 #define PQ wrapper::MultiQueue
@@ -40,4 +39,3 @@ using namespace wrapper::locked_pq;
 #else
 #error No valid PQ specified
 #endif
-// NOLINTEND(include)

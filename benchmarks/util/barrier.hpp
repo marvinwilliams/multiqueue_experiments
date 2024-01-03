@@ -17,8 +17,6 @@
 #include <iostream>
 #include <system_error>
 
-namespace utils {
-
 class Barrier {
     pthread_barrier_t b_{};
 
@@ -58,5 +56,3 @@ class Barrier {
         }
     }
 };
-
-}  // namespace utils

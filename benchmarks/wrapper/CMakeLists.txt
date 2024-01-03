@@ -48,28 +48,31 @@ if(EXP_TUNING_TARGETS)
               MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=2)
   target_link_libraries(tuning_baseline INTERFACE mq)
 
-  foreach(i ${EXP_NUM_POP_PQS})
+  foreach(i ${EXP_TUNING_POP_PQS})
     add_library(mq_tuning_pop_${i} INTERFACE)
-    target_link_libraries(mq_tuning_pop_${i} INTERFACE tuning_baseline)
-    target_compile_definitions(mq_tuning_pop_${i} INTERFACE MQ_NUM_POP_PQS=${i})
+    target_link_libraries(mq_tuning_pop_${i} INTERFACE mq)
+    target_compile_definitions(
+      mq_tuning_pop_${i}
+      INTERFACE MQ_OP_POLICY=0 MQ_INSERTION_BUFFER_SIZE=0
+                MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=${i})
     list(APPEND TUNING_TARGETS mq_tuning_pop_${i})
   endforeach()
-  foreach(bs ${EXP_BUFFER_SIZES})
-    foreach(d ${EXP_ARITIES})
+  foreach(bs ${EXP_TUNING_BUFFER_SIZES})
+    foreach(d ${EXP_TUNING_HEAP_ARITIES})
       add_library(mq_tuning_bs_${bs}_d_${d} INTERFACE)
-      target_link_libraries(mq_tuning_bs_${bs}_d_${d} INTERFACE tuning_baseline)
+      target_link_libraries(mq_tuning_bs_${bs}_d_${d} INTERFACE mq)
       target_compile_definitions(
         mq_tuning_bs_${bs}_d_${d}
-        INTERFACE MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
-                  MQ_HEAP_ARITY=${d})
+        INTERFACE MQ_OP_POLICY=0 MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
+                  MQ_HEAP_ARITY=${d} MQ_NUM_POP_PQS=2)
       list(APPEND TUNING_TARGETS mq_tuning_bs_${bs}_d_${d})
     endforeach()
     add_library(mq_tuning_bs_${bs}_std INTERFACE)
-    target_link_libraries(mq_tuning_bs_${bs}_std INTERFACE tuning_baseline)
+    target_link_libraries(mq_tuning_bs_${bs}_std INTERFACE mq)
     target_compile_definitions(
       mq_tuning_bs_${bs}_std
-      INTERFACE MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
-                MQ_USE_STD_PQ)
+      INTERFACE MQ_OP_POLICY=0 MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
+                MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=2 MQ_USE_STD_PQ)
     list(APPEND TUNING_TARGETS mq_tuning_bs_${bs}_std)
   endforeach()
   add_library(mq_tuning_btree INTERFACE)
@@ -171,7 +174,7 @@ target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
 
 find_package(TBB)
 
-if (TBB_FOUND)
+if(TBB_FOUND)
   add_library(tbb_pq INTERFACE)
   target_link_libraries(tbb_pq INTERFACE tbb)
   target_compile_definitions(tbb_pq INTERFACE PQ_TBB_PQ)
