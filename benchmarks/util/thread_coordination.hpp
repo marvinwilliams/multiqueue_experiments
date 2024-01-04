@@ -18,7 +18,7 @@
 namespace thread_coordination {
 
 class Context {
-    friend class Runner;
+    friend class Dispatcher;
 
     int id_;
     Barrier* barrier_;
@@ -71,24 +71,23 @@ class Context {
     }
 };
 
-class Runner {
+class Dispatcher {
     std::vector<threading::pthread> threads_;
     Barrier barrier_;
     std::mutex write_mutex_;
 
    public:
     template <typename Affinity, typename Task, typename... Args>
-    explicit Runner(Affinity affinity, int num_threads, Task task, Args... args)
+    explicit Dispatcher(Affinity affinity, int num_threads, Task task, Args... args)
         : threads_(static_cast<std::size_t>(num_threads)), barrier_(num_threads) {
         for (int i = 0; i < num_threads; ++i) {
-            Context context{i, barrier_, write_mutex_};
-            threads_[i] = threading::pthread(affinity(i), task, context, args...);
+            threads_[static_cast<std::size_t>(i)] = threading::pthread(affinity(i), task, Context{i, barrier_, write_mutex_}, args...);
         }
     }
 
     template <typename Task, typename... Args>
-    explicit Runner(int num_threads, Task task, Args&&... args)
-        : Runner(affinity::individual_cores{}, num_threads, task, std::forward<Args>(args)...) {
+    explicit Dispatcher(int num_threads, Task task, Args&&... args)
+        : Dispatcher(affinity::individual_cores{}, num_threads, task, std::forward<Args>(args)...) {
     }
 
     void wait() {

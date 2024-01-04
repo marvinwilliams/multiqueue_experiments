@@ -85,10 +85,20 @@ struct Settings {
             return false;
         }
 #ifdef WITH_PAPI
-        for (auto const& name : settings.papi_events) {
-            if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
-                std::cerr << "Error: PAPI event " << name << " not available\n";
+        if (!settings.papi_events.empty()) {
+            if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
+                std::cerr << "Error: Failed to initialize PAPI library\n";
                 return false;
+            }
+            if (int ret = PAPI_thread_init(pthread_self); ret != PAPI_OK) {
+                std::cerr << "Error: Failed to initialize PAPI thread support\n";
+                return false;
+            }
+            for (auto const& name : settings.papi_events) {
+                if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
+                    std::cerr << "Error: PAPI event '" << name << "' not available\n";
+                    return false;
+                }
             }
         }
 #endif
@@ -103,8 +113,8 @@ struct ThreadData {
     long long pop_count = 0;
     long long failed_pop_count = 0;
 #ifdef WITH_PAPI
-    bool papi_success = true;
     std::vector<long long> papi_counter{};
+    bool papi_success = true;
 #endif
 #ifdef LOG_OPERATIONS
     struct PushLog {
@@ -123,11 +133,10 @@ struct ThreadData {
 class Context : public thread_coordination::Context {
     handle_type handle_;
     ThreadData data_;
-    std::atomic_bool& failed_;
 
    public:
-    explicit Context(thread_coordination::Context ctx, handle_type handle, std::atomic_bool& failed)
-        : thread_coordination::Context{std::move(ctx)}, handle_{std::move(handle)}, failed_{failed} {
+    explicit Context(thread_coordination::Context ctx, handle_type handle)
+        : thread_coordination::Context{std::move(ctx)}, handle_{std::move(handle)} {
     }
 
 #ifdef LOG_OPERATIONS
@@ -158,28 +167,19 @@ class Context : public thread_coordination::Context {
     ThreadData& data() {
         return data_;
     }
-
-    void fail() {
-        failed_ = true;
-    }
-
-    bool failed() const {
-        return failed_;
-    }
 };
 
 class Update {
     std::vector<long long> data_;
-    std::atomic_size_t counter_{0};
+    std::atomic_llong counter_{0};
 
    public:
     explicit Update(Settings const& settings)
         : data_(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads)) {
     }
 
-    void prepare(Settings const& settings, Context const& context) {
-        std::seed_seq seed{settings.seed, context.id()};
-        std::default_random_engine rng(seed);
+    template <typename RNG>
+    void prepare(Settings const& settings, Context const& context, RNG&& rng) {
         std::generate_n(data_.begin() + context.id() * settings.iterations_per_thread, settings.iterations_per_thread,
                         [&rng, min = settings.min_update, max = settings.max_update]() {
                             return std::uniform_int_distribution<long>(min, max)(rng);
@@ -188,16 +188,19 @@ class Update {
 
     void work(Settings const& settings, Context& context) {
         auto offset = static_cast<value_type>(settings.num_threads * settings.prefill_per_thread);
-        for (auto from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < data_.size();
+        long long max = settings.iterations_per_thread * settings.num_threads;
+        for (auto from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
              from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, data_.size());
+            auto to = std::min(from + settings.batch_size, max);
             for (auto i = from; i < to; ++i) {
                 auto key = context.try_pop();
                 while (!key) {
                     ++context.data().failed_pop_count;
                     key = context.try_pop();
                 }
-                context.push(static_cast<key_type>(key + data_[i]), offset + static_cast<value_type>(i));
+                context.push(
+                    {static_cast<key_type>(static_cast<long long>(key->first) + data_[static_cast<std::size_t>(i)]),
+                     offset + static_cast<value_type>(i)});
             }
             context.data().push_count += to - from;
             context.data().pop_count += to - from;
@@ -219,16 +222,15 @@ class Update {
 
 class Random {
     std::vector<key_type> keys_;
-    std::atomic_size_t counter_{0};
+    std::atomic_llong counter_{0};
 
    public:
     explicit Random(Settings const& settings)
         : keys_(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads)) {
     }
 
-    void prepare(Settings const& settings, Context const& context) {
-        std::seed_seq seed{settings.seed, context.id()};
-        std::default_random_engine rng(seed);
+    template <typename RNG>
+    void prepare(Settings const& settings, Context const& context, RNG&& rng) {
         std::generate_n(keys_.begin() + context.id() * settings.iterations_per_thread, settings.iterations_per_thread,
                         [&rng, min = settings.min_random, max = settings.max_random]() {
                             return std::uniform_int_distribution<key_type>(min, max)(rng);
@@ -237,14 +239,15 @@ class Random {
 
     void work(Settings const& settings, Context& context) {
         auto offset = static_cast<value_type>(settings.num_threads * settings.prefill_per_thread);
-        for (auto from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < keys_.size();
+        long long max = settings.iterations_per_thread * settings.num_threads;
+        for (auto from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
              from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, keys_.size());
+            auto to = std::min(from + settings.batch_size, max);
             for (auto i = from; i < to; ++i) {
                 while (!context.try_pop()) {
                     ++context.data().failed_pop_count;
                 }
-                context.push(keys_[i], offset + static_cast<value_type>(i));
+                context.push({keys_[static_cast<std::size_t>(i)], offset + static_cast<value_type>(i)});
             }
             context.data().push_count += to - from;
             context.data().pop_count += to - from;
@@ -265,15 +268,16 @@ class Random {
 };
 
 class PopAll {
-    std::atomic_size_t counter_{0};
+    std::atomic_llong counter_{0};
 
    public:
-    void prepare(Settings const&, Context const&) {
+    template <typename RNG>
+    void prepare(Settings const&, Context const&, RNG const&) {
     }
 
     void work(Settings const& settings, Context& context) {
         while (true) {
-            std::size_t count = 0;
+            long long count = 0;
             while (context.try_pop()) {
                 ++count;
             }
@@ -285,11 +289,11 @@ class PopAll {
         }
     }
 
-    std::size_t required_capacity(Settings const& settings) const noexcept {
+    std::size_t required_capacity(Settings const&) const noexcept {
         return 0;
     }
 
-    std::size_t pushes_per_thread(Settings const& settings) const noexcept {
+    std::size_t pushes_per_thread(Settings const&) const noexcept {
         return 0;
     }
 
@@ -300,17 +304,16 @@ class PopAll {
 
 class PushPop {
     std::vector<key_type> keys_;
-    std::atomic_size_t push_counter_{0};
-    std::atomic_size_t pop_counter_{0};
+    std::atomic_llong push_counter_{0};
+    std::atomic_llong pop_counter_{0};
 
    public:
     explicit PushPop(Settings const& settings)
         : keys_(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads)) {
     }
 
-    void prepare(Settings const& settings, Context const& context) {
-        std::seed_seq seed{settings.seed, context.id()};
-        std::default_random_engine rng(seed);
+    template <typename RNG>
+    void prepare(Settings const& settings, Context const& context, RNG&& rng) {
         std::generate_n(keys_.begin() + context.id() * settings.iterations_per_thread, settings.iterations_per_thread,
                         [&rng, min = settings.min_random, max = settings.max_random]() {
                             return std::uniform_int_distribution<key_type>(min, max)(rng);
@@ -319,17 +322,18 @@ class PushPop {
 
     void work(Settings const& settings, Context& context) {
         auto offset = static_cast<value_type>(settings.num_threads * settings.prefill_per_thread);
-        for (auto from = push_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < keys_.size();
-             from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, keys_.size());
+        long long max = settings.iterations_per_thread * settings.num_threads;
+        for (auto from = push_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
+             from = push_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
+            auto to = std::min(from + settings.batch_size, max);
             for (auto i = from; i < to; ++i) {
-                context.push(keys_[i], offset + static_cast<value_type>(i));
+                context.push({keys_[static_cast<std::size_t>(i)], offset + static_cast<value_type>(i)});
             }
             context.data().push_count += to - from;
         }
-        for (auto from = pop_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < keys_.size();
+        for (auto from = pop_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
              from = pop_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, keys_.size());
+            auto to = std::min(from + settings.batch_size, max);
             for (auto i = from; i < to; ++i) {
                 while (!context.try_pop()) {
                     ++context.data().failed_pop_count;
@@ -351,21 +355,6 @@ class PushPop {
         return static_cast<std::size_t>(settings.iterations_per_thread);
     }
 };
-
-Settings::Mode parse_mode(char c) {
-    switch (c) {
-        case 'u':
-            return Settings::Mode::Update;
-        case 'r':
-            return Settings::Mode::Random;
-        case 'p':
-            return Settings::Mode::PopAll;
-        case 'a':
-            return Settings::Mode::PushPop;
-        default:
-            throw std::invalid_argument("Invalid work mode");
-    }
-}
 
 static constexpr auto mode_name(Settings::Mode mode) noexcept {
     switch (mode) {
@@ -391,8 +380,8 @@ void output_json(pq_type const& pq, Settings const& settings, std::vector<Thread
                            return lhs.start_time < rhs.start_time;
                        })->start_time;
     std::cout << '{';
-    print_kv("name", pq.name());
-    std::cout << ',' << std::cout << std::quoted("settings") << ':' << '{';
+    print_kv("pq", pq.describe_json());
+    std::cout << ',' << std::quoted("settings") << ':' << '{';
     print_kv("num_threads", settings.num_threads);
     std::cout << ',';
     print_kv("prefill_per_thread", settings.prefill_per_thread);
@@ -421,6 +410,17 @@ void output_json(pq_type const& pq, Settings const& settings, std::vector<Thread
     print_kv("seed", settings.seed);
     std::cout << ',';
     print_kv("timeout", settings.timeout.count());
+#ifdef WITH_PAPI
+    std::cout << ',';
+    std::cout << std::quoted("papi_events") << ':' << '[';
+    for (std::size_t i = 0; i < settings.papi_events.size(); ++i) {
+        std::cout << std::quoted(settings.papi_events[i]);
+        if (i != settings.papi_events.size() - 1) {
+            std::cout << ',';
+        }
+    }
+    std::cout << ']';
+#endif
     std::cout << '}';
     std::cout << ',' << std::quoted("results") << ':' << '{';
     print_kv("total_time", (last_end - first_start).count());
@@ -435,18 +435,23 @@ void output_json(pq_type const& pq, Settings const& settings, std::vector<Thread
         std::cout << ',';
         print_kv("failed_pops", it->failed_pop_count);
 #ifdef WITH_PAPI
-        std::cout << ',' << std::quoted("performance_counters") << ':' << '[';
-        for (std::size_t i = 0; i < settings.papi_events.size(); ++i) {
-            std::cout << '{';
-            print_kv("name", std::quoted(settings.papi_events[i]));
-            std::cout << ',';
-            print_kv("value", it->papi_counter[i]);
-            std::cout << '}';
-            if (i != settings.papi_events.size() - 1) {
+        std::cout << ',' << std::quoted("papi_events") << ':';
+        if (it->papi_success) {
+            std::cout << '[';
+            for (std::size_t i = 0; i < settings.papi_events.size(); ++i) {
+                std::cout << '{';
+                print_kv("name", std::quoted(settings.papi_events[i]));
                 std::cout << ',';
+                print_kv("count", it->papi_counter[i]);
+                std::cout << '}';
+                if (i != settings.papi_events.size() - 1) {
+                    std::cout << ',';
+                }
             }
+            std::cout << ']';
+        } else {
+            std::cout << "null";
         }
-        std::cout << ']';
 #endif
         std::cout << '}';
         if (it != std::prev(data.end())) {
@@ -457,44 +462,39 @@ void output_json(pq_type const& pq, Settings const& settings, std::vector<Thread
 }
 
 #ifdef WITH_PAPI
-int start_papi(std::vector<std::string> const& events) {
+int prepare_papi(Settings const& settings) {
+    if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
+        throw std::runtime_error{"Failed to register thread for PAPI"};
+    }
+    int event_set = PAPI_NULL;
+    if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
+        throw std::runtime_error{"Failed to create PAPI event set"};
+    }
+    for (auto const& name : settings.papi_events) {
+        auto event = PAPI_NULL;
+        if (PAPI_event_name_to_code(name.c_str(), &event) != PAPI_OK) {
+            throw std::runtime_error{"Failed to resolve PAPI event '" + name + '\''};
+        }
+        if (PAPI_add_event(event_set, event) != PAPI_OK) {
+            throw std::runtime_error{"Failed to add PAPI event '" + name + '\''};
+        }
+    }
+    return event_set;
 }
 #endif
 
 template <typename Task>
-void benchmark_thread(Settings const& settings, Context& context, Task& task) {
+ThreadData benchmark_thread(thread_coordination::Context thread_context, Settings const& settings, pq_type& pq,
+                            Task& task) {
+    Context context{std::move(thread_context), pq.get_handle()};
 #ifdef WITH_PAPI
     int event_set = PAPI_NULL;
     if (!settings.papi_events.empty()) {
         context.data().papi_counter.resize(settings.papi_events.size());
-        auto start_papi = [&]() {
-            if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
-                context.write(std::cerr) << "Error: Failed to register thread for PAPI";
-                return false;
-            }
-            if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
-                context.write(std::cerr) << "Error: Failed to create PAPI event set";
-                return false;
-            }
-            for (auto const& name : events) {
-                auto event = PAPI_NULL;
-                if (PAPI_event_name_to_code(name.c_str(), &event) != PAPI_OK) {
-                    context.write(std::cerr) << "Error: Failed to resolve PAPI event '" << name << '\'';
-                    return false;
-                }
-                if (PAPI_add_event(event_set, event) != PAPI_OK) {
-                    context.write(std::cerr) << "Error: Failed to add PAPI event '" << name << '\'';
-                    return false;
-                }
-            }
-            return true;
-        };
-        if (!start_papi()) {
-            context.fail();
-        }
-        context.synchronize();
-        if (context.failed()) {
-            return;
+        try {
+            event_set = prepare_papi(settings);
+        } catch (std::exception const& e) {
+            context.write(std::cerr) << e.what() << '\n';
         }
     }
 #endif
@@ -504,25 +504,32 @@ void benchmark_thread(Settings const& settings, Context& context, Task& task) {
     data.pops.reserve(2 * task.pops_per_thread(settings));
 #endif
 
-    if (context.id() == 0) {
-        std::clog << "Preparing...\n";
-    }
-    std::seed_seq seed{settings.seed, id};
-    std::default_random_engine rng(seed);
-    std::vector<key_type> prefill(static_cast<std::size_t>(settings.prefill_per_thread));
-    std::generate(prefill.begin(), prefill.end(), [&rng, min = settings.min_prefill, max = settings.max_prefill]() {
-        return std::uniform_int_distribution<key_type>(min, max)(rng);
-    });
-    context.synchronize();
-    task.prepare(settings, context);
-    context.synchronize();
-    if (context.id() == 0) {
-        std::clog << "Prefilling...\n";
-    }
-    context.synchronize();
-    for (auto i = 0LL; i < settings.prefill_per_thread; ++i) {
-        context.push(prefill[static_cast<std::size_t>(i)],
-                     static_cast<value_type>(id * settings.prefill_per_thread + i));
+    {
+        std::vector<key_type> prefill(static_cast<std::size_t>(settings.prefill_per_thread));
+
+        if (context.id() == 0) {
+            std::clog << "Preparing...\n";
+        }
+        {
+            std::seed_seq seed{settings.seed, context.id()};
+            std::default_random_engine rng(seed);
+            context.synchronize();
+            std::generate(prefill.begin(), prefill.end(),
+                          [&rng, min = settings.min_prefill, max = settings.max_prefill]() {
+                              return std::uniform_int_distribution<key_type>(min, max)(rng);
+                          });
+            context.synchronize();
+            task.prepare(settings, context, rng);
+        }
+        context.synchronize();
+        if (context.id() == 0) {
+            std::clog << "Prefilling...\n";
+        }
+        context.synchronize();
+        for (auto i = 0LL; i < settings.prefill_per_thread; ++i) {
+            context.push({prefill[static_cast<std::size_t>(i)],
+                          static_cast<value_type>(context.id() * settings.prefill_per_thread + i)});
+        }
     }
     context.synchronize();
     if (context.id() == 0) {
@@ -532,8 +539,7 @@ void benchmark_thread(Settings const& settings, Context& context, Task& task) {
 #ifdef WITH_PAPI
     if (!settings.papi_events.empty()) {
         if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
-            context.write(std::cerr) << "Error: Failed to start performance counters\n";
-            context.fail();
+            context.write(std::cerr) << "Failed to start performance counters\n";
         }
     }
 #endif
@@ -542,12 +548,12 @@ void benchmark_thread(Settings const& settings, Context& context, Task& task) {
     context.data().end_time = std::chrono::high_resolution_clock::now();
 #ifdef WITH_PAPI
     if (!settings.papi_events.empty()) {
-        if (int ret = PAPI_stop(event_set, data.papi_counter.data()); ret != PAPI_OK) {
-            context.write(std::cerr) << "Error: Failed to stop performance counters\n";
-            context.fail();
+        if (int ret = PAPI_stop(event_set, context.data().papi_counter.data()); ret != PAPI_OK) {
+            context.write(std::cerr) << "Failed to stop performance counters\n";
         }
     }
 #endif
+    return std::move(context.data());
 }
 
 #ifdef LOG_OPERATIONS
@@ -584,6 +590,10 @@ void output_log(std::ostream& log_out, std::vector<ThreadData> const& thread_dat
 #endif
 
 bool run_benchmark(Settings const& settings, cxxopts::ParseResult const& parse_result) {
+    if (!Settings::validate(settings)) {
+        return false;
+    }
+
 #ifdef LOG_OPERATIONS
     std::ofstream log_out;
     if (!settings.log_file.empty()) {
@@ -596,16 +606,18 @@ bool run_benchmark(Settings const& settings, cxxopts::ParseResult const& parse_r
 #endif
 
     std::vector<ThreadData> thread_data(static_cast<std::size_t>(settings.num_threads));
-    std::atomic_bool failed{false};
-    auto dispatch = [](auto& task) {
-        auto pq = pq_type(settings.num_threads, task.max_capacity(), parse_result);
-        std::clog << "Priority queue: " << pq.describe_json() << '\n' << '\n';
-        task::Runner runner(affinity::NUMA{cores_per_numa_node, num_numa_nodes}, settings.num_threads, [&](auto t_ctx) {
-            Context context{std::move(t_ctx), pq.get_handle(), failed};
-            benchmark_thread(settings, context, task);
-            thread_data[static_cast<std::size_t>(context.id())] = std::move(context.data());
-        });
-        runner.wait();
+    std::unique_ptr<pq_type> pq;
+    auto dispatch = [&](auto& task) {
+        pq = std::make_unique<pq_type>(settings.num_threads,
+                                       static_cast<std::size_t>(settings.prefill_per_thread * settings.num_threads) +
+                                           task.required_capacity(settings),
+                                       parse_result);
+        auto dispatcher = thread_coordination::Dispatcher(
+            affinity::NUMA{cores_per_numa_node, num_numa_nodes}, settings.num_threads, [&](auto t_ctx) {
+                thread_data[static_cast<std::size_t>(t_ctx.id())] =
+                    benchmark_thread(std::move(t_ctx), settings, *pq, task);
+            });
+        dispatcher.wait();
     };
 
     switch (settings.mode) {
@@ -631,12 +643,7 @@ bool run_benchmark(Settings const& settings, cxxopts::ParseResult const& parse_r
         }
     }
 
-    output_json(pq, settings, thread_data);
-
-    if (failed) {
-        std::clog << "Benchmark failed\n";
-        return false;
-    }
+    output_json(*pq, settings, thread_data);
 #ifdef LOG_OPERATIONS
     output_log(log_out, thread_data);
 #endif
@@ -646,6 +653,12 @@ bool run_benchmark(Settings const& settings, cxxopts::ParseResult const& parse_r
 
 int main(int argc, char* argv[]) {
     write_build_info(std::clog);
+    std::clog << "\nCommand line:";
+    for (int i = 0; i < argc; ++i) {
+        std::clog << ' ' << argv[i];
+    }
+    std::clog << '\n';
+
     Settings settings;
     cxxopts::Options cmd(argv[0]);
     int timeout_ms = 0;
@@ -691,39 +704,26 @@ int main(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
     if (args.count("mode") > 0) {
-        try {
-            settings.mode = parse_mode(args["mode"].as<char>());
-        } catch (std::invalid_argument const& e) {
-            std::cerr << "Error parsing command line: " << e.what() << std::endl;
-            std::cerr << cmd.help() << std::endl;
-            return EXIT_FAILURE;
+        switch (args["mode"].as<char>()) {
+            case 'u':
+                settings.mode = Settings::Mode::Update;
+                break;
+            case 'r':
+                settings.mode = Settings::Mode::Random;
+                break;
+            case 'p':
+                settings.mode = Settings::Mode::PopAll;
+                break;
+            case 'a':
+                settings.mode = Settings::Mode::PushPop;
+                break;
+            default:
+                std::cerr << "Error parsing command line: Invalid mode\n";
+                std::cerr << cmd.help() << std::endl;
+                return EXIT_FAILURE;
         }
     }
     settings.timeout = std::chrono::seconds(timeout_ms);
-
-    std::clog << '\n';
-    std::clog << "Command line:";
-    for (int i = 0; i < argc; ++i) {
-        std::clog << ' ' << argv[i];
-    }
-    std::clog << '\n';
-
-#ifdef WITH_PAPI
-    if (!settings.papi_events.empty()) {
-        if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
-            std::cerr << "Error: Failed to initialize PAPI library\n";
-            return EXIT_FAILURE;
-        }
-        if (int ret = PAPI_thread_init(pthread_self); ret != PAPI_OK) {
-            std::cerr << "Error: Failed to initialize PAPI thread support\n";
-            return EXIT_FAILURE;
-        }
-    }
-#endif
-
-    if (!Settings::validate(settings)) {
-        return EXIT_FAILURE;
-    }
 
     bool success = run_benchmark(settings, args);
     return success ? EXIT_SUCCESS : EXIT_FAILURE;

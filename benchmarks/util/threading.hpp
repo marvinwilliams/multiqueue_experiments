@@ -40,7 +40,7 @@ struct invoker : invoker_base {
 
     template <size_t... I>
     void invoke(std::index_sequence<I...> /*unused*/) {
-        std::invoke(std::move(f), std::get<I>(args)...);
+        std::invoke(std::move(f), std::move(std::get<I>(args))...);
     }
 
     void operator()() noexcept override {
