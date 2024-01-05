@@ -9,6 +9,8 @@ target_compile_features(
 )
 
 add_executable(analyze_quality analyze_quality.cpp)
+target_include_directories(
+  analyze_quality PRIVATE ".")
 target_compile_definitions(analyze_quality
                            PRIVATE $<$<CONFIG:Debug>:-DREPLAY_TREE_DEBUG>)
 

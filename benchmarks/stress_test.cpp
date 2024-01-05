@@ -665,14 +665,14 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
         push_index[static_cast<std::size_t>(pushes[i].element.second)] = i;
     }
     std::sort(pops.begin(), pops.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
+    out << pushes.size() << ' ' << pops.size() << '\n';
     std::size_t i = 0;
     for (auto const& pop : pops) {
-        auto ref_index = push_index[static_cast<std::size_t>(pop.val)];
-        while ((i != pushes.size() && pushes[i].tick < pop.tick) || i <= ref_index) {
-            out << i << ' ' << pushes[i].element.first << '\n';
+        while ((i != pushes.size() && pushes[i].tick < pop.tick)) {
+            out << '+' << pushes[i].element.first << '\n';
             ++i;
         }
-        out << '-' << ref_index << '\n';
+        out << '-' << push_index[static_cast<std::size_t>(pop.val)] << '\n';
     }
     for (; i < pushes.size(); ++i) {
         out << i << ' ' << pushes[i].element.first << '\n';
