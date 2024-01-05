@@ -5,7 +5,7 @@
 	path = third_party/Catch2
 	url = https://github.com/catchorg/Catch2.git
 [submodule "third_party/klsm"]
-	path = external/klsm
+	path = third_party/klsm
 	url = https://github.com/marvinwilliams/klsm.git
 [submodule "multiqueue"]
 	path = multiqueue

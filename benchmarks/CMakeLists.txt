@@ -2,7 +2,7 @@ add_subdirectory(wrapper)
 
 add_library(benchmark_base INTERFACE)
 target_include_directories(benchmark_base INTERFACE ".")
-target_include_directories(benchmark_base SYSTEM INTERFACE "${CMAKE_SOURCE_DIR}/external")
+target_include_directories(benchmark_base SYSTEM INTERFACE "${CMAKE_SOURCE_DIR}/third_party")
 target_compile_definitions(benchmark_base
                            INTERFACE L1_CACHE_LINESIZE=${L1_CACHE_LINESIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGESIZE=${PAGESIZE})

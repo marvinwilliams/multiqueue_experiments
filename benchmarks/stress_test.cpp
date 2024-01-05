@@ -111,7 +111,8 @@ struct Settings {
             }
         }
         if (args.count("mode") > 0) {
-            switch (args["mode"].as<char>()) {
+            auto c = args["mode"].as<char>();
+            switch (c) {
                 case 'u':
                     settings.mode = Mode::Update;
                     break;
@@ -125,7 +126,7 @@ struct Settings {
                     settings.mode = Mode::PushPop;
                     break;
                 default:
-                    std::cerr << "Error: Invalid mode\n";
+                    std::cerr << "Error: Invalid mode '" << c << "' (must be one of 'u', 'r', 'a', 'p')\n";
                     return {};
             }
         }
@@ -180,8 +181,8 @@ struct Settings {
 #ifdef LOG_OPERATIONS
         std::string log_file_name =
             args.count("log-file") > 0 ? args["log-file"].as<std::filesystem::path>() : "operation_log.txt";
-        settings.log_out.open(log_file_name);
-        if (!settings.log_out) {
+        settings.log_file.open(log_file_name);
+        if (!settings.log_file) {
             std::cerr << "Error: Could not open file '" << log_file_name << "' for writing" << std::endl;
             return {};
         }
@@ -456,7 +457,7 @@ class PushPop {
         return static_cast<std::size_t>(settings.iterations_per_thread);
     }
 
-    std::size_t pops_per_threads(Settings const& settings) const noexcept {
+    std::size_t pops_per_thread(Settings const& settings) const noexcept {
         return static_cast<std::size_t>(settings.iterations_per_thread);
     }
 };
@@ -591,7 +592,7 @@ ThreadData benchmark_thread(thread_coordination::Context thread_context, Setting
 #ifdef LOG_OPERATIONS
     context.data().pushes.reserve(static_cast<std::size_t>(settings.prefill_per_thread) +
                                   2 * task.pushes_per_thread(settings));
-    data.pops.reserve(2 * task.pops_per_thread(settings));
+    context.data().pops.reserve(2 * task.pops_per_thread(settings));
 #endif
 
     {
@@ -643,10 +644,6 @@ ThreadData benchmark_thread(thread_coordination::Context thread_context, Setting
         }
     }
 #endif
-    context.synchronize();
-    if (context.id() == 0) {
-        std::clog << "Finished\n";
-    }
     return std::move(context.data());
 }
 
@@ -727,10 +724,12 @@ bool run_benchmark(cxxopts::ParseResult const& parse_result) {
         }
     }
 
-    write_json(*pq, *settings, thread_data, std::cout);
 #ifdef LOG_OPERATIONS
-    write_log(thread_data, settings->log_out);
+    std::clog << "Writing logs...\n";
+    write_log(thread_data, settings->log_file);
 #endif
+    std::clog << "Done\n";
+    write_json(*pq, *settings, thread_data, std::cout);
     return true;
 }
 
@@ -740,7 +739,7 @@ int main(int argc, char* argv[]) {
     for (int i = 0; i < argc; ++i) {
         std::clog << ' ' << argv[i];
     }
-    std::clog << '\n';
+    std::clog << '\n' << '\n';
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help", cxxopts::value<bool>());
@@ -750,7 +749,7 @@ int main(int argc, char* argv[]) {
         args = cmd.parse(argc, argv);
     } catch (std::exception const& e) {
         std::cerr << "Error parsing command line: " << e.what() << std::endl;
-        std::cerr << cmd.help() << std::endl;
+        std::cerr << "Use --help for usage information" << std::endl;
         return EXIT_FAILURE;
     }
 

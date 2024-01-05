@@ -85,7 +85,7 @@ if(EXP_TUNING_TARGETS)
       PARENT_SCOPE)
 endif()
 
-set(KLSM_DIR "${CMAKE_SOURCE_DIR}/external/klsm")
+set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
 
 add_library(klsm ${KLSM_DIR}/src/util/thread_local_ptr.cpp)
 target_include_directories(klsm SYSTEM INTERFACE ${KLSM_DIR}/src
