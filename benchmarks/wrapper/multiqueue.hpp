@@ -183,8 +183,8 @@ class MultiQueue {
     using handle_type = typename multiqueue_type::handle_type;
 
     explicit MultiQueue(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const &result)
-        : mq_{static_cast<std::size_t>(num_threads * (result.count("factor") > 0 ? result["factor"].as<int>() : 2)), initial_capacity,
-              parse_config(result)} {
+        : mq_{static_cast<std::size_t>(num_threads * (result.count("factor") > 0 ? result["factor"].as<int>() : 2)),
+              initial_capacity, parse_config(result)} {
     }
 
     static void add_options(cxxopts::Options &options) {
@@ -194,45 +194,46 @@ class MultiQueue {
         }
     }
 
-    [[nodiscard]] auto describe_json() const {
-        auto out = std::ostringstream{};
-        // clang-format off
-        out
-          << '{' << std::quoted("name") << ':' << std::quoted("MultiQueue")
-          << ',' << std::quoted("configuration") << ':' 
-          << '{' << std::quoted("operation_policy") << ':' << std::quoted(OperationTraits::name)
-          << ',' << std::quoted("pop_stale") << ':' << std::boolalpha << pop_stale
-          << ',' << std::quoted("pop_candidates") << ':' << num_pop_candidates
-          << ',' << std::quoted("scan_if_empty") << ':' << std::boolalpha << OperationTraits::scan_if_empty
+    void write_json(std::ostream &out) const {
+        out << '{';
+        out << std::quoted("name") << ':' << std::quoted("MultiQueue");
+        out << ',' << std::quoted("configuration") << ':';
+        out << '{';
+        out << std::quoted("operation_policy") << ':' << std::quoted(OperationTraits::name);
+        out << ',' << std::quoted("pop_stale") << ':' << std::boolalpha << pop_stale;
+        out << ',' << std::quoted("pop_candidates") << ':' << num_pop_candidates;
+        out << ',' << std::quoted("scan_if_empty") << ':' << std::boolalpha << OperationTraits::scan_if_empty;
 #ifdef MQ_USE_STD_PQ
-          << ',' << std::quoted("pq") << ':' 
-          << '{' << std::quoted("name") << ':' << std::quoted("buffered")
-          << ',' << std::quoted("type") << ':' << std::quoted("std::priority_queue")
-          << ',' << std::quoted("insertion_buffersize") << ':' << insertion_buffersize
-          << ',' << std::quoted("deletion_buffersize") << ':' << deletion_buffersize
-          << '}'
+        out << ',' << std::quoted("pq") << ':';
+        out << '{';
+        out << std::quoted("name") << ':' << std::quoted("buffered");
+        out << ',' << std::quoted("type") << ':' << std::quoted("std::priority_queue");
+        out << ',' << std::quoted("insertion_buffersize") << ':' << insertion_buffersize;
+        out << ',' << std::quoted("deletion_buffersize") << ':' << deletion_buffersize;
+        out << '}';
 #elif defined MQ_USE_BTREE
-          << ',' << std::quoted("pq") << ':' << std::quoted("tlx::btree")
+        out << ',' << std::quoted("pq") << ':' << std::quoted("tlx::btree");
 #else
-          << ',' << std::quoted("pq") << ':' 
-          << '{' << std::quoted("name") << ':' << std::quoted("buffered")
-          << ',' << std::quoted("type") << ':' 
-          << '{' << std::quoted("name") << ':' << std::quoted("heap")
-          << ',' << std::quoted("arity") << ':' << heap_arity
-          << '}'
-          << ',' << std::quoted("insertion_buffersize") << ':' << insertion_buffersize
-          << ',' << std::quoted("deletion_buffersize") << ':' << deletion_buffersize
-          << '}'
+        out << ',' << std::quoted("pq") << ':';
+        out << '{';
+        out << std::quoted("name") << ':' << std::quoted("buffered");
+        out << ',' << std::quoted("type") << ':';
+        out << '{';
+        out << std::quoted("name") << ':' << std::quoted("heap");
+        out << ',' << std::quoted("arity") << ':' << heap_arity;
+        out << '}';
+        out << ',' << std::quoted("insertion_buffersize") << ':' << insertion_buffersize;
+        out << ',' << std::quoted("deletion_buffersize") << ':' << deletion_buffersize;
+        out << '}';
 #endif
-          << '}'
-          << ',' << std::quoted("options") << ':'
-          << '{' << std::quoted("num_pqs") << ':' << mq_.num_pqs();
-        // clang-format on
+        out << '}';
+        out << ',' << std::quoted("options") << ':';
+        out << '{' << std::quoted("num_pqs") << ':' << mq_.num_pqs();
         if constexpr (OperationTraits::has_stickiness) {
             out << ',' << std::quoted("stickiness") << ':' << mq_.get_stick_policy_config().stickiness;
         }
-        out << '}' << '}';
-        return out.str();
+        out << '}';
+        out << '}';
     }
 
     auto get_handle() {
