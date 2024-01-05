@@ -8,6 +8,6 @@
 	path = external/klsm
 	url = https://github.com/marvinwilliams/klsm.git
 [submodule "multiqueue"]
-	path = external/multiqueue
+	path = multiqueue
 	url = https://github.com/marvinwilliams/multiqueue
 	branch = devel
