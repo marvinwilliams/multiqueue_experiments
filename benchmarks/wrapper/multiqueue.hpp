@@ -187,7 +187,7 @@ class MultiQueue {
               initial_capacity, parse_config(result)} {
     }
 
-    static void add_options(cxxopts::Options &options) {
+    static void add_cmd_options(cxxopts::Options &options) {
         options.add_options()("c,factor", "The number of queues per thread", cxxopts::value<int>(), "NUMBER");
         if (OperationTraits::has_stickiness) {
             options.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(), "NUMBER");

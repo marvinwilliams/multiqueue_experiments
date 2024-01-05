@@ -662,7 +662,7 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
     std::sort(pushes.begin(), pushes.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
     std::vector<std::size_t> push_index(pushes.size());
     for (std::size_t i = 0; i < pushes.size(); ++i) {
-        push_index[static_cast<std::size_t>(pushes[i].element.second)] = i;
+        push_index[pushes[i].element.second] = i;
     }
     std::sort(pops.begin(), pops.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
     out << pushes.size() << ' ' << pops.size() << '\n';
@@ -744,6 +744,7 @@ int main(int argc, char* argv[]) {
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help", cxxopts::value<bool>());
     Settings::add_cmd_options(cmd);
+    pq_type::add_cmd_options(cmd);
     cxxopts::ParseResult args;
     try {
         args = cmd.parse(argc, argv);
