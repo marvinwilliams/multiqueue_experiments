@@ -12,20 +12,16 @@
 #include "tlx_btree.hpp"
 #endif
 
-#ifndef MQ_OP_POLICY
-#error "MQ_OP_POLICY not defined"
-#endif
-
-#if MQ_OP_POLICY == 0
-#include "multiqueue/operation_policy/noop.hpp"
-#elif MQ_OP_POLICY == 1
-#include "multiqueue/stick_policy/random.hpp"
-#elif MQ_OP_POLICY == 2
-#include "multiqueue/stick_policy/swap.hpp"
-#elif MQ_OP_POLICY == 3
-#include "multiqueue/stick_policy/parametric.hpp"
+#if defined MQ_MODE_RANDOM || defined MQ_MODE_RANDOM_STRICT
+#include "multiqueue/modes/random.hpp"
+#elif defined MQ_MODE_STICK_RANDOM
+#include "multiqueue/modes/stick_random.hpp"
+#elif defined MQ_MODE_STICK_SWAP
+#include "multiqueue/modes/stick_swap.hpp"
+#elif defined MQ_MODE_STICK_PARAMETRIC
+#include "multiqueue/modes/stick_parametric.hpp"
 #else
-#error "Invalid MQ_OP_POLICY"
+#error "No mode specified"
 #endif
 
 #include "cxxopts.hpp"
@@ -51,12 +47,6 @@ class MultiQueue {
     static constexpr unsigned int num_pop_candidates = 2;
 #endif
 
-#ifdef MQ_NO_POP_STALE
-    static constexpr bool pop_stale = false;
-#else
-    static constexpr bool pop_stale = false;
-#endif
-
 #ifdef MQ_INSERTION_BUFFER_SIZE
     static constexpr std::size_t insertion_buffersize = MQ_INSERTION_BUFFER_SIZE;
 #else
@@ -75,33 +65,30 @@ class MultiQueue {
     static constexpr unsigned int heap_arity = 8;
 #endif
 
-    struct OperationTraits {
-#if MQ_OP_POLICY == 0
-        using policy_type = ::multiqueue::operation_policy::Random<num_pop_candidates, pop_stale>;
+    struct Policy {
+#if defined MQ_MODE_RANDOM
+        using mode_type = ::multiqueue::mode::Random<num_pop_candidates, true>;
         static constexpr auto name = "random";
         static constexpr bool has_stickiness = false;
-#elif MQ_OP_POLICY == 1
-        using policy_type = ::multiqueue::operation_policy::StickRandomIndependent<num_pop_candidates>;
-        static constexpr auto name = "stick random independent";
+#elif defined MQ_MODE_RANDOM_STRICT
+        using mode_type = ::multiqueue::mode::Random<num_pop_candidates, false>;
+        static constexpr auto name = "random_strict";
+        static constexpr bool has_stickiness = false;
+#elif defined MQ_MODE_STICK_RANDOM
+        using mode_type = ::multiqueue::mode::StickRandom<num_pop_candidates>;
+        static constexpr auto name = "stick_random";
         static constexpr bool has_stickiness = true;
-#elif MQ_OP_POLICY == 2
-        using policy_type = ::multiqueue::operation_policy::StickRandomCommon<num_pop_candidates>;
-        static constexpr auto name = "stick random common";
+#elif defined MQ_MODE_STICK_SWAP
+        using mode_type = ::multiqueue::mode::StickSwap<num_pop_candidates>;
+        static constexpr auto name = "stick_swap";
         static constexpr bool has_stickiness = true;
-#elif MQ_OP_POLICY == 3
-        using policy_type = ::multiqueue::operation_policy::StickPermutationIndividual<num_pop_candidates>;
-        static constexpr auto name = "stick permutation individual";
-        static constexpr bool has_stickiness = true;
-#elif MQ_OP_POLICY == 4
-        using policy_type = ::multiqueue::operation_policy::StickPermutationGlobal<num_pop_candidates>;
-        static constexpr auto name = "stick permutation global";
+#elif defined MQ_MODE_STICK_PARAMETRIC
+        using mode_type = ::multiqueue::mode::StickParametric<num_pop_candidates>;
+        static constexpr auto name = "stick_parametric";
         static constexpr bool has_stickiness = true;
 #endif
-#ifdef MQ_NOSCAN_IF_EMPTY
-        static constexpr bool scan_if_empty = false;
-#else
-        static constexpr bool scan_if_empty = true;
-#endif
+        static constexpr int pop_tries = 1;
+        static constexpr bool scan = true;
     };
 
 #ifdef MQ_USE_STD_PQ
@@ -164,12 +151,11 @@ class MultiQueue {
         insertion_buffersize, deletion_buffersize>;
 #endif
 
-    using multiqueue_type =
-        ::multiqueue::MultiQueue<key_type, value_type, KeyOfValue, key_compare, OperationTraits, pq_type>;
+    using multiqueue_type = ::multiqueue::MultiQueue<key_type, value_type, KeyOfValue, key_compare, Policy, pq_type>;
 
     auto parse_config(cxxopts::ParseResult const &result) {
-        typename multiqueue_type::operation_config_type config{};
-        if constexpr (OperationTraits::has_stickiness) {
+        typename multiqueue_type::config_type config{};
+        if constexpr (Policy::has_stickiness) {
             if (result.count("stickiness") > 0) {
                 config.stickiness = result["stickiness"].as<int>();
             }
@@ -189,7 +175,7 @@ class MultiQueue {
 
     static void add_cmd_options(cxxopts::Options &options) {
         options.add_options()("c,factor", "The number of queues per thread", cxxopts::value<int>(), "NUMBER");
-        if (OperationTraits::has_stickiness) {
+        if (Policy::has_stickiness) {
             options.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(), "NUMBER");
         }
     }
@@ -199,10 +185,8 @@ class MultiQueue {
         out << std::quoted("name") << ':' << std::quoted("MultiQueue");
         out << ',' << std::quoted("configuration") << ':';
         out << '{';
-        out << std::quoted("operation_policy") << ':' << std::quoted(OperationTraits::name);
-        out << ',' << std::quoted("pop_stale") << ':' << std::boolalpha << pop_stale;
+        out << std::quoted("mode") << ':' << std::quoted(Policy::name);
         out << ',' << std::quoted("pop_candidates") << ':' << num_pop_candidates;
-        out << ',' << std::quoted("scan_if_empty") << ':' << std::boolalpha << OperationTraits::scan_if_empty;
 #ifdef MQ_USE_STD_PQ
         out << ',' << std::quoted("pq") << ':';
         out << '{';
@@ -229,8 +213,8 @@ class MultiQueue {
         out << '}';
         out << ',' << std::quoted("options") << ':';
         out << '{' << std::quoted("num_pqs") << ':' << mq_.num_pqs();
-        if constexpr (OperationTraits::has_stickiness) {
-            out << ',' << std::quoted("stickiness") << ':' << mq_.get_stick_policy_config().stickiness;
+        if constexpr (Policy::has_stickiness) {
+            out << ',' << std::quoted("stickiness") << ':' << mq_.config().stickiness;
         }
         out << '}';
         out << '}';

@@ -5,38 +5,36 @@ add_library(mq INTERFACE)
 target_link_libraries(mq INTERFACE multiqueue::multiqueue)
 target_compile_definitions(mq INTERFACE PQ_MQ)
 
-add_library(mq_classic INTERFACE)
-target_compile_definitions(mq_classic INTERFACE MQ_OP_POLICY=0)
-target_link_libraries(mq_classic INTERFACE mq)
+add_library(mq_random INTERFACE)
+target_compile_definitions(mq_random INTERFACE MQ_MODE_RANDOM)
+target_link_libraries(mq_random INTERFACE mq)
 
-add_library(mq_classic_strict INTERFACE)
-target_compile_definitions(mq_classic_strict INTERFACE MQ_OP_POLICY=0)
-target_link_libraries(mq_classic_strict INTERFACE mq)
-target_compile_definitions(mq_classic_strict INTERFACE MQ_NO_POP_STALE)
+add_library(mq_random_strict INTERFACE)
+target_compile_definitions(mq_random_strict INTERFACE MQ_MODE_RANDOM_STRICT)
+target_link_libraries(mq_random_strict INTERFACE mq)
 
 add_library(mq_stick_random INTERFACE)
-target_compile_definitions(mq_stick_random INTERFACE MQ_OP_POLICY=1)
+target_compile_definitions(mq_stick_random INTERFACE MQ_MODE_STICK_RANDOM)
 target_link_libraries(mq_stick_random INTERFACE mq)
 
-add_library(mq_stick_random_shared INTERFACE)
-target_compile_definitions(mq_stick_random_shared INTERFACE MQ_OP_POLICY=2)
-target_link_libraries(mq_stick_random_shared INTERFACE mq)
+# add_library(mq_stick_random_shared INTERFACE)
+# target_compile_definitions(mq_stick_random_shared INTERFACE MQ_MODE_STICK_)
+# target_link_libraries(mq_stick_random_shared INTERFACE mq)
 
 add_library(mq_stick_swap INTERFACE)
-target_compile_definitions(mq_stick_swap INTERFACE MQ_OP_POLICY=3)
+target_compile_definitions(mq_stick_swap INTERFACE MQ_MODE_STICK_SWAP)
 target_link_libraries(mq_stick_swap INTERFACE mq)
 
 add_library(mq_stick_parametric INTERFACE)
-target_compile_definitions(mq_stick_parametric INTERFACE MQ_OP_POLICY=4)
+target_compile_definitions(mq_stick_parametric INTERFACE MQ_MODE_STICK_PARAMETRIC)
 target_link_libraries(mq_stick_parametric INTERFACE mq)
 
 list(
   APPEND
   MQ_VARIANTS
-  mq_classic
-  mq_classic_strict
+  mq_random
+  mq_random_strict
   mq_stick_random
-  mq_stick_random_shared
   mq_stick_swap
   mq_stick_parametric)
 
@@ -44,7 +42,7 @@ if(EXP_TUNING_TARGETS)
   add_library(tuning_baseline INTERFACE)
   target_compile_definitions(
     tuning_baseline
-    INTERFACE MQ_OP_POLICY=0 MQ_INSERTION_BUFFER_SIZE=0
+    INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=0
               MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=2)
   target_link_libraries(tuning_baseline INTERFACE mq)
 
@@ -53,7 +51,7 @@ if(EXP_TUNING_TARGETS)
     target_link_libraries(mq_tuning_pop_${i} INTERFACE mq)
     target_compile_definitions(
       mq_tuning_pop_${i}
-      INTERFACE MQ_OP_POLICY=0 MQ_INSERTION_BUFFER_SIZE=0
+      INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=0
                 MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=${i})
     list(APPEND TUNING_TARGETS mq_tuning_pop_${i})
   endforeach()
@@ -63,7 +61,7 @@ if(EXP_TUNING_TARGETS)
       target_link_libraries(mq_tuning_bs_${bs}_d_${d} INTERFACE mq)
       target_compile_definitions(
         mq_tuning_bs_${bs}_d_${d}
-        INTERFACE MQ_OP_POLICY=0 MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
+        INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
                   MQ_HEAP_ARITY=${d} MQ_NUM_POP_PQS=2)
       list(APPEND TUNING_TARGETS mq_tuning_bs_${bs}_d_${d})
     endforeach()
@@ -71,7 +69,7 @@ if(EXP_TUNING_TARGETS)
     target_link_libraries(mq_tuning_bs_${bs}_std INTERFACE mq)
     target_compile_definitions(
       mq_tuning_bs_${bs}_std
-      INTERFACE MQ_OP_POLICY=0 MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
+      INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
                 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=2 MQ_USE_STD_PQ)
     list(APPEND TUNING_TARGETS mq_tuning_bs_${bs}_std)
   endforeach()
