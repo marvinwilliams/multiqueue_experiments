@@ -14,11 +14,11 @@ disable_intree_builds()
 # Read the system's L1 cache-line size and page size
 execute_process(
   COMMAND getconf LEVEL1_DCACHE_LINESIZE
-  OUTPUT_VARIABLE DEFAULT_L1_CACHE_LINESIZE
+  OUTPUT_VARIABLE DEFAULT_L1_CACHE_LINE_SIZE
   OUTPUT_STRIP_TRAILING_WHITESPACE)
 execute_process(
   COMMAND getconf PAGESIZE
-  OUTPUT_VARIABLE DEFAULT_PAGESIZE
+  OUTPUT_VARIABLE DEFAULT_PAGE_SIZE
   OUTPUT_STRIP_TRAILING_WHITESPACE)
 
 find_package(PAPI)
@@ -30,12 +30,12 @@ if(NOT PAPI_FOUND)
 endif()
 
 option("EXP_BUILD_TESTS" "Build unit tests for experiment tools" OFF)
-set(L1_CACHE_LINESIZE
-    ${DEFAULT_L1_CACHE_LINESIZE}
-    CACHE STRING "The assumed L1 cache linesize (bytes)")
-set(PAGESIZE
-    ${DEFAULT_PAGESIZE}
-    CACHE STRING "The assumed pagesize (bytes)")
+set(L1_CACHE_LINE_SIZE
+    ${DEFAULT_L1_CACHE_LINE_SIZE}
+    CACHE STRING "The assumed L1 cache line size (bytes)")
+set(PAGE_SIZE
+    ${DEFAULT_PAGE_SIZE}
+    CACHE STRING "The assumed page size (bytes)")
 set(NUM_NUMA_NODES
     1
     CACHE STRING "The number of NUMA nodes")
@@ -59,18 +59,18 @@ if(EXP_TUNING_TARGETS)
             "Generate tuning targets for the specified list of heap arities")
 endif()
 
-if(NOT "${L1_CACHE_LINESIZE}" MATCHES "^[0-9]+")
-  message(SEND_ERROR "Invalid L1 cache linesize")
+if(NOT "${L1_CACHE_LINE_SIZE}" MATCHES "^[0-9]+")
+  message(SEND_ERROR "Invalid L1 cache line size")
 endif()
-if(NOT "${PAGESIZE}" MATCHES "^[0-9]+")
-  message(SEND_ERROR "Invalid pagesize")
+if(NOT "${PAGE_SIZE}" MATCHES "^[0-9]+")
+  message(SEND_ERROR "Invalid page size")
 endif()
 
 add_subdirectory(multiqueue)
 add_subdirectory(benchmarks)
 add_subdirectory(tools)
 
-if(EXP_BUILD_TESTS AND TARGET Catch2::Catch2WithMain)
+if(EXP_BUILD_TESTS)
   include(CTest)
   add_subdirectory(tests)
 endif()

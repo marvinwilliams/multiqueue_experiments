@@ -21,7 +21,7 @@
 #elif defined MQ_MODE_STICK_PARAMETRIC
 #include "multiqueue/modes/stick_parametric.hpp"
 #else
-#error "No mode specified"
+#error "No valid mode specified"
 #endif
 
 #include "cxxopts.hpp"

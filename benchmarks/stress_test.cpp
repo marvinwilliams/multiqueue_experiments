@@ -38,22 +38,17 @@ using pq_type = PQ<true, key_type, std::pair<key_type, value_type>>;
 using handle_type = pq_type::handle_type;
 
 struct Settings {
-    enum class Mode { Update, Random, PopAll, PushPop };
-
     int num_threads = 4;
     long long prefill_per_thread = 1 << 20;
     long long iterations_per_thread = 1 << 22;
-    Mode mode = Mode::Update;
     key_type min_prefill = 1;
     key_type max_prefill = 1 << 20;
     long min_update = 0;
     long max_update = 1 << 20;
-    key_type min_random = 1;
-    key_type max_random = 1 << 20;
     long long batch_size = 1 << 12;
     int seed = 1;
 #ifdef LOG_OPERATIONS
-    std::ofstream log_file;
+    mutable std::ofstream log_file;
 #endif
 #ifdef WITH_PAPI
     std::vector<std::string> papi_events;
@@ -65,13 +60,10 @@ struct Settings {
         ("j,threads", "Number of threads", cxxopts::value<int>(), "NUMBER")
         ("p,prefill", "Prefill per thread", cxxopts::value<long long>(), "NUMBER")
         ("n,iterations", "Number of iterations per thread", cxxopts::value<long long>(), "NUMBER")
-        ("mode", "Operation mode ([u]pdate, [r]andom, pop [a]ll, [p]ush pop)", cxxopts::value<char>(), "STRING")
         ("min-prefill", "Min prefill key", cxxopts::value<key_type>(), "NUMBER")
         ("max-prefill", "Max prefill key", cxxopts::value<key_type>(), "NUMBER")
         ("min-update", "Min update", cxxopts::value<long>(), "NUMBER")
         ("max-update", "Max update", cxxopts::value<long>(), "NUMBER")
-        ("min-random", "Min random key", cxxopts::value<key_type>(), "NUMBER")
-        ("max-random", "Max random key", cxxopts::value<key_type>(), "NUMBER")
         ("batch-size", "Batch size", cxxopts::value<long long>(), "NUMBER")
         ("s,seed", "Initial seed", cxxopts::value<int>(), "NUMBER")
 #ifdef LOG_OPERATIONS
@@ -110,26 +102,6 @@ struct Settings {
                 return {};
             }
         }
-        if (args.count("mode") > 0) {
-            auto c = args["mode"].as<char>();
-            switch (c) {
-                case 'u':
-                    settings.mode = Mode::Update;
-                    break;
-                case 'r':
-                    settings.mode = Mode::Random;
-                    break;
-                case 'a':
-                    settings.mode = Mode::PopAll;
-                    break;
-                case 'p':
-                    settings.mode = Mode::PushPop;
-                    break;
-                default:
-                    std::cerr << "Error: Invalid mode '" << c << "' (must be one of 'u', 'r', 'a', 'p')\n";
-                    return {};
-            }
-        }
         if (args.count("min-prefill") > 0) {
             settings.min_prefill = args["min-prefill"].as<key_type>();
             if (settings.min_prefill <= 0) {
@@ -151,20 +123,6 @@ struct Settings {
             settings.max_update = args["max-update"].as<long>();
             if (settings.max_update < settings.min_update) {
                 std::cerr << "Error: Invalid update range\n";
-                return {};
-            }
-        }
-        if (args.count("min-random") > 0) {
-            settings.min_random = args["min-random"].as<key_type>();
-            if (settings.min_random <= 0) {
-                std::cerr << "Error: Random keys must be greater than 0\n";
-                return {};
-            }
-        }
-        if (args.count("max-random") > 0) {
-            settings.max_random = args["max-random"].as<key_type>();
-            if (settings.max_random < settings.min_random) {
-                std::cerr << "Error: Invalid random range\n";
                 return {};
             }
         }
@@ -215,8 +173,7 @@ struct Settings {
 struct ThreadData {
     std::chrono::high_resolution_clock::time_point start_time{};
     std::chrono::high_resolution_clock::time_point end_time{};
-    long long push_count = 0;
-    long long pop_count = 0;
+    long long iter_count = 0;
     long long failed_pop_count = 0;
 #ifdef WITH_PAPI
     std::vector<long long> papi_counter{};
@@ -270,17 +227,20 @@ class Context : public thread_coordination::Context {
     }
 #endif
 
-    ThreadData& data() {
+    ThreadData& data() noexcept {
+        return data_;
+    }
+    ThreadData const& data() const noexcept {
         return data_;
     }
 };
 
-class Update {
+class Task {
     std::vector<long long> data_;
     std::atomic_llong counter_{0};
 
    public:
-    explicit Update(Settings const& settings)
+    explicit Task(Settings const& settings)
         : data_(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads)) {
     }
 
@@ -308,157 +268,8 @@ class Update {
                     {static_cast<key_type>(static_cast<long long>(key->first) + data_[static_cast<std::size_t>(i)]),
                      offset + static_cast<value_type>(i)});
             }
-            context.data().push_count += to - from;
-            context.data().pop_count += to - from;
+            context.data().iter_count += to - from;
         }
-    }
-
-    std::size_t required_capacity(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.num_threads);
-    }
-
-    std::size_t pushes_per_thread(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.iterations_per_thread);
-    }
-
-    std::size_t pops_per_thread(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.iterations_per_thread);
-    }
-};
-
-class Random {
-    std::vector<key_type> keys_;
-    std::atomic_llong counter_{0};
-
-   public:
-    explicit Random(Settings const& settings)
-        : keys_(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads)) {
-    }
-
-    template <typename RNG>
-    void prepare(Settings const& settings, Context const& context, RNG&& rng) {
-        std::generate_n(keys_.begin() + context.id() * settings.iterations_per_thread, settings.iterations_per_thread,
-                        [&rng, min = settings.min_random, max = settings.max_random]() {
-                            return std::uniform_int_distribution<key_type>(min, max)(rng);
-                        });
-    }
-
-    void work(Settings const& settings, Context& context) {
-        auto offset = static_cast<value_type>(settings.num_threads * settings.prefill_per_thread);
-        long long max = settings.iterations_per_thread * settings.num_threads;
-        for (auto from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
-             from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, max);
-            for (auto i = from; i < to; ++i) {
-                while (!context.try_pop()) {
-                    ++context.data().failed_pop_count;
-                }
-                context.push({keys_[static_cast<std::size_t>(i)], offset + static_cast<value_type>(i)});
-            }
-            context.data().push_count += to - from;
-            context.data().pop_count += to - from;
-        }
-    }
-
-    std::size_t required_capacity(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.num_threads);
-    }
-
-    std::size_t pushes_per_thread(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.iterations_per_thread);
-    }
-
-    std::size_t pops_per_thread(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.iterations_per_thread);
-    }
-};
-
-class PopAll {
-    std::atomic_llong counter_{0};
-
-   public:
-    template <typename RNG>
-    void prepare(Settings const&, Context const&, RNG const&) {
-    }
-
-    void work(Settings const& settings, Context& context) {
-        while (true) {
-            long long count = 0;
-            while (context.try_pop()) {
-                ++count;
-            }
-            context.data().pop_count += count;
-            auto current = counter_.fetch_add(count, std::memory_order_relaxed) + count;
-            if (current >= settings.iterations_per_thread * settings.num_threads) {
-                break;
-            }
-        }
-    }
-
-    std::size_t required_capacity(Settings const&) const noexcept {
-        return 0;
-    }
-
-    std::size_t pushes_per_thread(Settings const&) const noexcept {
-        return 0;
-    }
-
-    std::size_t pops_per_thread(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.prefill_per_thread);
-    }
-};
-
-class PushPop {
-    std::vector<key_type> keys_;
-    std::atomic_llong push_counter_{0};
-    std::atomic_llong pop_counter_{0};
-
-   public:
-    explicit PushPop(Settings const& settings)
-        : keys_(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads)) {
-    }
-
-    template <typename RNG>
-    void prepare(Settings const& settings, Context const& context, RNG&& rng) {
-        std::generate_n(keys_.begin() + context.id() * settings.iterations_per_thread, settings.iterations_per_thread,
-                        [&rng, min = settings.min_random, max = settings.max_random]() {
-                            return std::uniform_int_distribution<key_type>(min, max)(rng);
-                        });
-    }
-
-    void work(Settings const& settings, Context& context) {
-        auto offset = static_cast<value_type>(settings.num_threads * settings.prefill_per_thread);
-        long long max = settings.iterations_per_thread * settings.num_threads;
-        for (auto from = push_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
-             from = push_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, max);
-            for (auto i = from; i < to; ++i) {
-                context.push({keys_[static_cast<std::size_t>(i)], offset + static_cast<value_type>(i)});
-            }
-            context.data().push_count += to - from;
-        }
-        for (auto from = pop_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
-             from = pop_counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, max);
-            for (auto i = from; i < to; ++i) {
-                while (!context.try_pop()) {
-                    ++context.data().failed_pop_count;
-                }
-            }
-            context.data().pop_count += to - from;
-        }
-    }
-
-    std::size_t required_capacity(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads);
-    }
-
-    std::size_t pushes_per_thread(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.iterations_per_thread);
-    }
-
-    std::size_t pops_per_thread(Settings const& settings) const noexcept {
-        return static_cast<std::size_t>(settings.iterations_per_thread);
     }
 };
 
@@ -472,28 +283,8 @@ void write_json(pq_type const& pq, Settings const& settings, std::vector<ThreadD
     out << ',' << std::quoted("iterations_per_thread") << ':' << settings.iterations_per_thread;
     out << ',' << std::quoted("prefill_min") << ':' << settings.min_prefill;
     out << ',' << std::quoted("prefill_max") << ':' << settings.max_prefill;
-    auto mode_name = [](Settings::Mode mode) {
-        switch (mode) {
-            case Settings::Mode::Update:
-                return "update";
-            case Settings::Mode::Random:
-                return "random";
-            case Settings::Mode::PopAll:
-                return "pop_all";
-            case Settings::Mode::PushPop:
-                return "push_pop";
-            default:
-                return "unknown";
-        }
-    };
-    out << ',' << std::quoted("mode") << ':' << std::quoted(mode_name(settings.mode));
-    if (settings.mode == Settings::Mode::Update) {
-        out << ',' << std::quoted("update_min") << ':' << settings.min_update;
-        out << ',' << std::quoted("update_max") << ':' << settings.max_update;
-    } else if (settings.mode == Settings::Mode::Random) {
-        out << ',' << std::quoted("random_min") << ':' << settings.min_random;
-        out << ',' << std::quoted("random_max") << ':' << settings.max_random;
-    }
+    out << ',' << std::quoted("update_min") << ':' << settings.min_update;
+    out << ',' << std::quoted("update_max") << ':' << settings.max_update;
     out << ',' << std::quoted("batch_size") << ':' << settings.batch_size;
     out << ',' << std::quoted("seed") << ':' << settings.seed;
 #ifdef WITH_PAPI
@@ -520,8 +311,7 @@ void write_json(pq_type const& pq, Settings const& settings, std::vector<ThreadD
     for (auto it = data.begin(); it != data.end(); ++it) {
         out << '{';
         out << std::quoted("time") << ':' << (it->end_time - it->start_time).count();
-        out << ',' << std::quoted("pushes") << ':' << it->push_count;
-        out << ',' << std::quoted("pops") << ':' << it->pop_count;
+        out << ',' << std::quoted("iterations") << ':' << it->iter_count;
         out << ',' << std::quoted("failed_pops") << ':' << it->failed_pop_count;
 #ifdef WITH_PAPI
         out << ',' << std::quoted("papi_events") << ':';
@@ -574,7 +364,6 @@ int prepare_papi(Settings const& settings) {
 }
 #endif
 
-template <typename Task>
 ThreadData benchmark_thread(thread_coordination::Context thread_context, Settings const& settings, pq_type& pq,
                             Task& task) {
     Context context{std::move(thread_context), pq.get_handle()};
@@ -590,37 +379,32 @@ ThreadData benchmark_thread(thread_coordination::Context thread_context, Setting
     }
 #endif
 #ifdef LOG_OPERATIONS
-    context.data().pushes.reserve(static_cast<std::size_t>(settings.prefill_per_thread) +
-                                  2 * task.pushes_per_thread(settings));
-    context.data().pops.reserve(2 * task.pops_per_thread(settings));
+    context.data().pushes.reserve(static_cast<std::size_t>(settings.prefill_per_thread +
+                                  2 * settings.iterations_per_thread));
+    context.data().pops.reserve(static_cast<std::size_t>(2 * settings.iterations_per_thread));
 #endif
 
-    {
-        std::vector<key_type> prefill(static_cast<std::size_t>(settings.prefill_per_thread));
+    std::vector<key_type> prefill(static_cast<std::size_t>(settings.prefill_per_thread));
 
-        if (context.id() == 0) {
-            std::clog << "Preparing...\n";
-        }
-        {
-            std::seed_seq seed{settings.seed, context.id()};
-            std::default_random_engine rng(seed);
-            context.synchronize();
-            std::generate(prefill.begin(), prefill.end(),
-                          [&rng, min = settings.min_prefill, max = settings.max_prefill]() {
-                              return std::uniform_int_distribution<key_type>(min, max)(rng);
-                          });
-            context.synchronize();
-            task.prepare(settings, context, rng);
-        }
-        context.synchronize();
-        if (context.id() == 0) {
-            std::clog << "Prefilling...\n";
-        }
-        context.synchronize();
-        for (auto i = 0LL; i < settings.prefill_per_thread; ++i) {
-            context.push({prefill[static_cast<std::size_t>(i)],
-                          static_cast<value_type>(context.id() * settings.prefill_per_thread + i)});
-        }
+    if (context.id() == 0) {
+        std::clog << "Preparing...\n";
+    }
+    std::seed_seq seed{settings.seed, context.id()};
+    std::default_random_engine rng(seed);
+    context.synchronize();
+    std::generate(prefill.begin(), prefill.end(), [&rng, min = settings.min_prefill, max = settings.max_prefill]() {
+        return std::uniform_int_distribution<key_type>(min, max)(rng);
+    });
+    context.synchronize();
+    task.prepare(settings, context, rng);
+    context.synchronize();
+    if (context.id() == 0) {
+        std::clog << "Prefilling...\n";
+    }
+    context.synchronize();
+    for (auto i = 0LL; i < settings.prefill_per_thread; ++i) {
+        context.push({prefill[static_cast<std::size_t>(i)],
+                      static_cast<value_type>(context.id() * settings.prefill_per_thread + i)});
     }
     context.synchronize();
     if (context.id() == 0) {
@@ -680,57 +464,21 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
 }
 #endif
 
-bool run_benchmark(cxxopts::ParseResult const& parse_result) {
-    auto settings = Settings::from_cmd(parse_result);
-    if (!settings) {
-        return false;
-    }
-
-    std::vector<ThreadData> thread_data(static_cast<std::size_t>(settings->num_threads));
-    std::unique_ptr<pq_type> pq;
-    auto dispatch = [&](auto& task) {
-        pq = std::make_unique<pq_type>(settings->num_threads,
-                                       static_cast<std::size_t>(settings->prefill_per_thread * settings->num_threads) +
-                                           task.required_capacity(*settings),
-                                       parse_result);
-        auto dispatcher = thread_coordination::Dispatcher(
-            affinity::NUMA{cores_per_numa_node, num_numa_nodes}, settings->num_threads, [&](auto t_ctx) {
-                thread_data[static_cast<std::size_t>(t_ctx.id())] =
-                    benchmark_thread(std::move(t_ctx), *settings, *pq, task);
-            });
-        dispatcher.wait();
-    };
-
-    switch (settings->mode) {
-        case Settings::Mode::Update: {
-            auto task = Update(*settings);
-            dispatch(task);
-            break;
-        }
-        case Settings::Mode::Random: {
-            auto task = Random(*settings);
-            dispatch(task);
-            break;
-        }
-        case Settings::Mode::PopAll: {
-            auto task = PopAll();
-            dispatch(task);
-            break;
-        }
-        case Settings::Mode::PushPop: {
-            auto task = PushPop(*settings);
-            dispatch(task);
-            break;
-        }
-    }
+void run_benchmark(Settings const& settings, pq_type& pq) {
+    Task task(settings);
+    std::vector<ThreadData> thread_data(static_cast<std::size_t>(settings.num_threads));
+    auto dispatcher = thread_coordination::Dispatcher(
+        affinity::NUMA{cores_per_numa_node, num_numa_nodes}, settings.num_threads, [&](auto t_ctx) {
+            thread_data[static_cast<std::size_t>(t_ctx.id())] = benchmark_thread(std::move(t_ctx), settings, pq, task);
+        });
+    dispatcher.wait();
 
 #ifdef LOG_OPERATIONS
     std::clog << "Writing logs...\n";
-    write_log(thread_data, settings->log_file);
+    write_log(thread_data, settings.log_file);
 #endif
     std::clog << "Done\n";
-    write_json(*pq, *settings, thread_data, std::cout);
-    return true;
+    write_json(pq, settings, thread_data, std::cout);
 }
 
 int main(int argc, char* argv[]) {
@@ -759,6 +507,14 @@ int main(int argc, char* argv[]) {
         return EXIT_SUCCESS;
     }
 
-    bool success = run_benchmark(args);
-    return success ? EXIT_SUCCESS : EXIT_FAILURE;
+    auto settings = Settings::from_cmd(args);
+    if (!settings) {
+        return EXIT_FAILURE;
+    }
+
+    auto pq = pq_type(settings->num_threads,
+                      static_cast<std::size_t>(settings->prefill_per_thread * settings->num_threads), args);
+
+    run_benchmark(*settings, pq);
+    return EXIT_SUCCESS;
 }

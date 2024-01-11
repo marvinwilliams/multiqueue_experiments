@@ -26,7 +26,8 @@ target_compile_definitions(mq_stick_swap INTERFACE MQ_MODE_STICK_SWAP)
 target_link_libraries(mq_stick_swap INTERFACE mq)
 
 add_library(mq_stick_parametric INTERFACE)
-target_compile_definitions(mq_stick_parametric INTERFACE MQ_MODE_STICK_PARAMETRIC)
+target_compile_definitions(mq_stick_parametric
+                           INTERFACE MQ_MODE_STICK_PARAMETRIC)
 target_link_libraries(mq_stick_parametric INTERFACE mq)
 
 list(
@@ -55,23 +56,28 @@ if(EXP_TUNING_TARGETS)
                 MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=${i})
     list(APPEND TUNING_TARGETS mq_tuning_pop_${i})
   endforeach()
-  foreach(bs ${EXP_TUNING_BUFFER_SIZES})
-    foreach(d ${EXP_TUNING_HEAP_ARITIES})
-      add_library(mq_tuning_bs_${bs}_d_${d} INTERFACE)
-      target_link_libraries(mq_tuning_bs_${bs}_d_${d} INTERFACE mq)
+  foreach(ibs ${EXP_TUNING_BUFFER_SIZES})
+    foreach(dbs ${EXP_TUNING_BUFFER_SIZES})
+      foreach(d ${EXP_TUNING_HEAP_ARITIES})
+        add_library(mq_tuning_ibs_${ibs}_dbs_${dbs}_d_${d} INTERFACE)
+        target_link_libraries(mq_tuning_ibs_${ibs}_dbs_${dbs}_d_${d}
+                              INTERFACE mq)
+        target_compile_definitions(
+          mq_tuning_ibs_${ibs}_dbs_${dbs}_d_${d}
+          INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=${ibs}
+                    MQ_DELETION_BUFFER_SIZE=${dbs} MQ_HEAP_ARITY=${d}
+                    MQ_NUM_POP_PQS=2)
+        list(APPEND TUNING_TARGETS mq_tuning_ibs_${ibs}_dbs_${dbs}_d_${d})
+      endforeach()
+      add_library(mq_tuning_ibs_${ibs}_dbs_${dbs}_std INTERFACE)
+      target_link_libraries(mq_tuning_ibs_${ibs}_dbs_${dbs}_std INTERFACE mq)
       target_compile_definitions(
-        mq_tuning_bs_${bs}_d_${d}
-        INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
-                  MQ_HEAP_ARITY=${d} MQ_NUM_POP_PQS=2)
-      list(APPEND TUNING_TARGETS mq_tuning_bs_${bs}_d_${d})
+        mq_tuning_ibs_${ibs}_dbs_${dbs}_std
+        INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=${ibs}
+                  MQ_DELETION_BUFFER_SIZE=${dbs} MQ_HEAP_ARITY=2
+                  MQ_NUM_POP_PQS=2 MQ_USE_STD_PQ)
+      list(APPEND TUNING_TARGETS mq_tuning_ibs_${ibs}_dbs_${dbs}_std)
     endforeach()
-    add_library(mq_tuning_bs_${bs}_std INTERFACE)
-    target_link_libraries(mq_tuning_bs_${bs}_std INTERFACE mq)
-    target_compile_definitions(
-      mq_tuning_bs_${bs}_std
-      INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=${bs} MQ_DELETION_BUFFER_SIZE=${bs}
-                MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=2 MQ_USE_STD_PQ)
-    list(APPEND TUNING_TARGETS mq_tuning_bs_${bs}_std)
   endforeach()
   add_library(mq_tuning_btree INTERFACE)
   target_link_libraries(mq_tuning_btree INTERFACE tuning_baseline)
@@ -129,7 +135,7 @@ add_library(
   ${KLSM_DIR}/lib/spraylist_linden/gc/ptst.c)
 target_compile_options(linden PRIVATE -w -std=gnu++17)
 target_compile_definitions(linden PUBLIC INTEL
-                                         CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+                                         CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_include_directories(
   linden PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
                 ${KLSM_DIR}/lib/spraylist_linden/include)
@@ -148,7 +154,7 @@ target_include_directories(capq PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
                                        ${KLSM_DIR}/lib/capq/qdlocksrc)
 target_compile_options(capq PRIVATE -w -std=gnu++17)
 target_compile_definitions(capq PUBLIC INTEL
-                                       CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+                                       CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_compile_definitions(capq INTERFACE PQ_CAPQ)
 
 add_library(
@@ -163,7 +169,7 @@ add_library(
   ${KLSM_DIR}/lib/spraylist_linden/ssalloc.c)
 target_compile_options(spraylist PRIVATE -w -std=gnu17)
 target_compile_definitions(
-  spraylist PUBLIC INTEL LOCKFREE CACHE_LINE_SIZE=${L1_CACHE_LINESIZE})
+  spraylist PUBLIC INTEL LOCKFREE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_include_directories(
   spraylist PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
                    ${KLSM_DIR}/lib/spraylist_linden/include)
