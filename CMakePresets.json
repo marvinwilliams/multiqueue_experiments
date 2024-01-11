@@ -88,11 +88,6 @@
   ],
   "buildPresets": [
     {
-      "name": "multi",
-      "displayName": "Multi-Configuration Preset",
-      "configurePreset": "multi"
-    },
-    {
       "name": "development",
       "displayName": "Development Preset",
       "configurePreset": "development"
