@@ -6,10 +6,6 @@ target_include_directories(benchmark_base SYSTEM INTERFACE "${CMAKE_SOURCE_DIR}/
 target_compile_definitions(benchmark_base
                            INTERFACE L1_CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGE_SIZE=${PAGE_SIZE})
-target_compile_definitions(benchmark_base
-                           INTERFACE CORES_PER_NUMA_NODE=${CORES_PER_NUMA_NODE})
-target_compile_definitions(benchmark_base
-                           INTERFACE NUM_NUMA_NODES=${NUM_NUMA_NODES})
 target_compile_features(benchmark_base INTERFACE cxx_std_17)
 if(PAPI_FOUND)
   target_link_libraries(benchmark_base INTERFACE PAPI::PAPI)

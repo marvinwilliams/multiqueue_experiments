@@ -6,17 +6,6 @@
 
 #include <ostream>
 
-#ifdef CORES_PER_NUMA_NODE
-static constexpr auto cores_per_numa_node = CORES_PER_NUMA_NODE;
-#else
-static constexpr auto cores_per_numa_node = 4;
-#endif
-#ifdef NUM_NUMA_NODES
-static constexpr auto num_numa_nodes = NUM_NUMA_NODES;
-#else
-static constexpr auto num_numa_nodes = 16;
-#endif
-
 static std::ostream& write_build_info(std::ostream& out) {
     out << "Built on " << __DATE__ << ' ' << __TIME__ << " with\n";
 #if defined(__clang__)

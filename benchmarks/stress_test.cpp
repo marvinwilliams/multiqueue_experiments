@@ -379,8 +379,8 @@ ThreadData benchmark_thread(thread_coordination::Context thread_context, Setting
     }
 #endif
 #ifdef LOG_OPERATIONS
-    context.data().pushes.reserve(static_cast<std::size_t>(settings.prefill_per_thread +
-                                  2 * settings.iterations_per_thread));
+    context.data().pushes.reserve(
+        static_cast<std::size_t>(settings.prefill_per_thread + 2 * settings.iterations_per_thread));
     context.data().pops.reserve(static_cast<std::size_t>(2 * settings.iterations_per_thread));
 #endif
 
@@ -467,10 +467,9 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
 void run_benchmark(Settings const& settings, pq_type& pq) {
     Task task(settings);
     std::vector<ThreadData> thread_data(static_cast<std::size_t>(settings.num_threads));
-    auto dispatcher = thread_coordination::Dispatcher(
-        affinity::NUMA{cores_per_numa_node, num_numa_nodes}, settings.num_threads, [&](auto t_ctx) {
-            thread_data[static_cast<std::size_t>(t_ctx.id())] = benchmark_thread(std::move(t_ctx), settings, pq, task);
-        });
+    auto dispatcher = thread_coordination::Dispatcher(settings.num_threads, [&](auto t_ctx) {
+        thread_data[static_cast<std::size_t>(t_ctx.id())] = benchmark_thread(std::move(t_ctx), settings, pq, task);
+    });
     dispatcher.wait();
 
 #ifdef LOG_OPERATIONS

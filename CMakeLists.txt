@@ -36,12 +36,6 @@ set(L1_CACHE_LINE_SIZE
 set(PAGE_SIZE
     ${DEFAULT_PAGE_SIZE}
     CACHE STRING "The assumed page size (bytes)")
-set(NUM_NUMA_NODES
-    1
-    CACHE STRING "The number of NUMA nodes")
-set(CORES_PER_NUMA_NODE
-    256
-    CACHE STRING "The number of cores per NUMA node")
 option(EXP_TUNING_TARGETS "Generate tuning targets" OFF)
 if(EXP_TUNING_TARGETS)
   set(EXP_TUNING_POP_PQS
