@@ -46,6 +46,32 @@ struct same_cpu {
     }
 };
 
+struct same_caches {
+    std::vector<std::size_t> order;
+
+    same_caches() : order(std::thread::hardware_concurrency()) {
+        std::vector<std::array<std::size_t, 4>> caches(order.size());
+        for (std::size_t i = 0; i < caches.size(); ++i) {
+            caches[i][0] = i;
+            for (std::size_t l = 1; l < 4; ++l) {
+                auto ss = std::ifstream("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cache/index" +
+                                        std::to_string(l == 1 ? 0 : l) + "/id");
+                ss >> caches[i][l];
+            }
+        }
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&caches](std::size_t a, std::size_t b) {
+            return std::lexicographical_compare(caches[a].rbegin(), caches[a].rend(), caches[b].rbegin(), caches[b].rend());
+        });
+    }
+
+    threading::thread_config operator()(int id) const {
+        threading::thread_config cfg;
+        cfg.cpu_set.set(order[std::size_t(id)]);
+        return cfg;
+    }
+};
+
 struct distinct_caches {
     std::vector<std::size_t> order;
 
@@ -160,7 +186,7 @@ class Dispatcher {
 
     template <typename Task, typename... Args>
     explicit Dispatcher(int num_threads, Task task, Args&&... args)
-        : Dispatcher(affinity::distinct_caches{}, num_threads, task, std::forward<Args>(args)...) {
+        : Dispatcher(affinity::same_caches{}, num_threads, task, std::forward<Args>(args)...) {
     }
 
     void wait() {
