@@ -48,15 +48,15 @@ class MultiQueue {
 #endif
 
 #ifdef MQ_INSERTION_BUFFER_SIZE
-    static constexpr std::size_t insertion_buffersize = MQ_INSERTION_BUFFER_SIZE;
+    static constexpr std::size_t insertion_buffer_size = MQ_INSERTION_BUFFER_SIZE;
 #else
-    static constexpr std::size_t insertion_buffersize = 16;
+    static constexpr std::size_t insertion_buffer_size = 16;
 #endif
 
 #ifdef MQ_DELETION_BUFFER_SIZE
-    static constexpr std::size_t deletion_buffersize = MQ_DELETION_BUFFER_SIZE;
+    static constexpr std::size_t deletion_buffer_size = MQ_DELETION_BUFFER_SIZE;
 #else
-    static constexpr std::size_t deletion_buffersize = 16;
+    static constexpr std::size_t deletion_buffer_size = 16;
 #endif
 
 #ifdef MQ_HEAP_ARITY
@@ -93,7 +93,7 @@ class MultiQueue {
 
 #ifdef MQ_USE_STD_PQ
     using pq_type = ::multiqueue::BufferedPQ<std::priority_queue<value_type, std::vector<value_type>, value_compare>,
-                                             insertion_buffersize, deletion_buffersize>;
+                                             insertion_buffer_size, deletion_buffer_size>;
 #elif defined MQ_USE_BTREE
     class pq_type {
         using btree_type = tlx::BTree<key_type, value_type, KeyOfValue, key_compare,
@@ -148,76 +148,85 @@ class MultiQueue {
 #else
     using pq_type = ::multiqueue::BufferedPQ<
         ::multiqueue::Heap<Value, ::multiqueue::utils::ValueCompare<value_type, KeyOfValue, key_compare>, heap_arity>,
-        insertion_buffersize, deletion_buffersize>;
+        insertion_buffer_size, deletion_buffer_size>;
 #endif
 
     using multiqueue_type = ::multiqueue::MultiQueue<key_type, value_type, KeyOfValue, key_compare, Policy, pq_type>;
 
-    auto parse_config(cxxopts::ParseResult const &result) {
-        typename multiqueue_type::config_type config{};
-        if constexpr (Policy::has_stickiness) {
-            if (result.count("stickiness") > 0) {
-                config.stickiness = result["stickiness"].as<int>();
-            }
-        }
-        return config;
-    }
-
     multiqueue_type mq_;
 
    public:
+    struct Settings {
+        int factor = 2;
+        typename multiqueue_type::config_type config{};
+
+        static void add_cmd_options(cxxopts::Options &cmd) {
+            cmd.add_options()("c,factor", "The number of queues per thread", cxxopts::value<int>(), "NUMBER");
+            if (Policy::has_stickiness) {
+                cmd.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(), "NUMBER");
+            }
+        }
+
+        static std::optional<Settings> from_cmd(cxxopts::ParseResult const &args) {
+            Settings settings{};
+            if (args.count("factor") > 0) {
+                settings.factor = args["factor"].as<int>();
+                if (settings.factor <= 1) {
+                    std::cerr << "Error: Queue factor must be at least 2\n";
+                    return {};
+                }
+            }
+            if constexpr (Policy::has_stickiness) {
+                if (args.count("stickiness") > 0) {
+                    settings.config.stickiness = args["stickiness"].as<int>();
+                    if (settings.config.stickiness <= 0) {
+                        std::cerr << "Error: Stickiness must be at least 1\n";
+                        return {};
+                    }
+                }
+            }
+            return settings;
+        }
+
+        void describe(std::ostream &out) const {
+            out << "Queue factor: " << factor << '\n';
+            if constexpr (Policy::has_stickiness) {
+                out << "Stickiness: " << config.stickiness << '\n';
+            }
+        }
+
+        void write_json(std::ostream &out) const {
+            out << '{';
+            out << std::quoted("factor") << ':' << factor;
+            if constexpr (Policy::has_stickiness) {
+                out << ',' << std::quoted("stickiness") << ':' << config.stickiness;
+            }
+            out << '}';
+        }
+    };
+
     using handle_type = typename multiqueue_type::handle_type;
 
-    explicit MultiQueue(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const &result)
-        : mq_{static_cast<std::size_t>(num_threads * (result.count("factor") > 0 ? result["factor"].as<int>() : 2)),
-              initial_capacity, parse_config(result)} {
+    explicit MultiQueue(int num_threads, std::size_t initial_capacity, Settings const &settings)
+        : mq_{static_cast<std::size_t>(num_threads * settings.factor), initial_capacity, settings.config} {
     }
 
-    static void add_cmd_options(cxxopts::Options &options) {
-        options.add_options()("c,factor", "The number of queues per thread", cxxopts::value<int>(), "NUMBER");
-        if (Policy::has_stickiness) {
-            options.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(), "NUMBER");
-        }
-    }
-
-    void write_json(std::ostream &out) const {
-        out << '{';
-        out << std::quoted("name") << ':' << std::quoted("MultiQueue");
-        out << ',' << std::quoted("configuration") << ':';
-        out << '{';
-        out << std::quoted("mode") << ':' << std::quoted(Policy::name);
-        out << ',' << std::quoted("pop_candidates") << ':' << num_pop_candidates;
-#ifdef MQ_USE_STD_PQ
-        out << ',' << std::quoted("pq") << ':';
-        out << '{';
-        out << std::quoted("name") << ':' << std::quoted("buffered");
-        out << ',' << std::quoted("type") << ':' << std::quoted("std::priority_queue");
-        out << ',' << std::quoted("insertion_buffersize") << ':' << insertion_buffersize;
-        out << ',' << std::quoted("deletion_buffersize") << ':' << deletion_buffersize;
-        out << '}';
-#elif defined MQ_USE_BTREE
-        out << ',' << std::quoted("pq") << ':' << std::quoted("tlx::btree");
+    static void describe(std::ostream &out) {
+        out << "MultiQueue\n";
+        out << "  Mode: " << Policy::name << '\n';
+        out << "  Pop candidates: " << num_pop_candidates << '\n';
+#ifdef MQ_USE_BTREE
+        out << "  PQ: tlx::btree" << '\n';
 #else
-        out << ',' << std::quoted("pq") << ':';
-        out << '{';
-        out << std::quoted("name") << ':' << std::quoted("buffered");
-        out << ',' << std::quoted("type") << ':';
-        out << '{';
-        out << std::quoted("name") << ':' << std::quoted("heap");
-        out << ',' << std::quoted("arity") << ':' << heap_arity;
-        out << '}';
-        out << ',' << std::quoted("insertion_buffersize") << ':' << insertion_buffersize;
-        out << ',' << std::quoted("deletion_buffersize") << ':' << deletion_buffersize;
-        out << '}';
+#ifdef MQ_USE_STD_PQ
+        out << "  PQ: std::priority_queue" << '\n';
+#else
+        out << "  PQ: d-ary heap" << '\n';
+        out << "  Heap arity: " << heap_arity << '\n';
 #endif
-        out << '}';
-        out << ',' << std::quoted("options") << ':';
-        out << '{' << std::quoted("num_pqs") << ':' << mq_.num_pqs();
-        if constexpr (Policy::has_stickiness) {
-            out << ',' << std::quoted("stickiness") << ':' << mq_.config().stickiness;
-        }
-        out << '}';
-        out << '}';
+        out << "  Insertion buffer size: " << insertion_buffer_size << '\n';
+        out << "  Deletion buffer size: " << deletion_buffer_size << '\n';
+#endif
     }
 
     auto get_handle() {
