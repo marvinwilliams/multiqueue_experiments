@@ -11,7 +11,9 @@ extern "C" {
 #undef min
 #undef max
 
-#include "cxxopts.hpp"
+#include "util.hpp"
+
+#include <cxxopts.hpp>
 
 #include <cstdint>
 #include <limits>
@@ -21,12 +23,15 @@ extern "C" {
 #include <ostream>
 #include <utility>
 
-inline __thread unsigned long* seeds; // NOLINT
+inline __thread unsigned long* seeds;  // NOLINT
 
 namespace wrapper::spraylist {
 
-template <bool Min = true>
+template <bool Min, typename Key = unsigned long, typename T = Key>
 class Spraylist {
+    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
+                  "Spraylist only supports unsigned long as key and value type");
+
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
@@ -54,16 +59,12 @@ class Spraylist {
         ::sl_intset_t* pq_;
         std::unique_ptr<::thread_data_t, ThreadDataDeleter> data_;
 
-        explicit Handle(Spraylist& pq) : pq_{pq.pq_.get()}, data_{pq.new_thread_data()} {
+        explicit Handle(::sl_intset_t& pq, std::unique_ptr<::thread_data_t, ThreadDataDeleter> data) : pq_{&pq}, data_{std::move(data)} {
         }
 
        public:
         void push(value_type const& value) {
-            if constexpr (Min) {
-                ::sl_add_val(pq_, value.first, value.second, TRANSACTIONAL);
-            } else {
-                ::sl_add_val(pq_, sentinel - value.first - 1, value.second, TRANSACTIONAL);
-            }
+            ::sl_add_val(pq_, Min ? value.first : sentinel - value.first - 1, value.second, TRANSACTIONAL);
         }
 
         std::optional<value_type> try_pop() {
@@ -97,33 +98,23 @@ class Spraylist {
 
    public:
     using handle_type = Handle;
+    using settings_type = util::EmptySettings;
 
-    Spraylist(int num_threads, std::size_t initial_capacity) : num_threads_(num_threads) {
+    Spraylist(int num_threads, std::size_t initial_capacity, settings_type const& /*unused*/)
+        : num_threads_(num_threads) {
         ::ssalloc_init(num_threads_);
         *::levelmax = floor_log_2(initial_capacity);
         pq_.reset(sl_set_new());
     }
 
+    static void write_human_readable(std::ostream& out) {
+        out << "Spraylist\n";
+    }
+
+
     Handle get_handle() {
-        return Handle{*this};
+        return Handle{*pq_, new_thread_data()};
     }
 };
-
-template <bool Min = true>
-using PQWrapper = Spraylist<Min>;
-
-inline void add_options(cxxopts::Options& /*options*/) {
-}
-
-template <bool Min = true>
-Spraylist<Min> create(int num_threads, std::size_t initial_capacity, cxxopts::ParseResult const& /*result*/) {
-    return Spraylist<Min>{num_threads, initial_capacity};
-}
-
-template <bool Min>
-std::ostream& describe(Spraylist<Min> const& /*unused*/, std::ostream& out) {
-    out << "Spraylist";
-    return out;
-}
 
 }  // namespace wrapper::spraylist

@@ -1,10 +1,10 @@
-#include "build_info.hpp"
-#include "knapsack_instance.hpp"
-#include "task.hpp"
-#include "termination_detection.hpp"
+#include "util/build_info.hpp"
+#include "util/knapsack_instance.hpp"
+#include "util/termination_detection.hpp"
+#include "util/thread_coordination.hpp"
 #include "wrapper/selector.hpp"
 
-#include "cxxopts.hpp"
+#include <cxxopts.hpp>
 
 #include <algorithm>
 #include <array>
@@ -25,215 +25,281 @@
 #include <utility>
 #include <vector>
 
-#ifdef CORES_PER_NUMA_NODE
-static constexpr auto cores_per_numa_node = CORES_PER_NUMA_NODE;
-#else
-static constexpr auto cores_per_numa_node = 4;
-#endif
-#ifdef NUM_NUMA_NODES
-static constexpr auto num_numa_nodes = NUM_NUMA_NODES;
-#else
-static constexpr auto num_numa_nodes = 16;
-#endif
+#ifdef FLOAT_INSTANCE
+using data_type = double;
+static constexpr data_type default_min_weight = 0.01;
+static constexpr data_type default_max_weight = 1.01;
+static constexpr data_type default_min_add = 0.1;
+static constexpr data_type default_max_add = 0.125;
+struct Payload {
+    std::size_t index;
+    data_type free_capacity;
+    data_type weight;
+};
+using pq_type = PQ<false, double, Payload>;
+using node_type = pq_type::value_type;
 
-using pq_type = PQWrapper<false>;
-using handle_type = pq_type::handle_type;
-
-using data_type = long long;
-static_assert(sizeof(unsigned long) >= sizeof(std::uint64_t), "64bit unsigned long required");
-static constexpr auto default_n = 1000;
-static constexpr auto default_f = 0.5;
-static constexpr data_type default_a = 1000;
-static constexpr data_type default_b = 100000;
-static constexpr data_type default_l = 10000;
-static constexpr data_type default_u = 12500;
-
-constexpr pq_type::value_type to_payload(data_type upper_bound, std::size_t index, data_type free_capacity,
-                                         data_type value) noexcept {
-    assert(upper_bound >= 0 && static_cast<unsigned long>(upper_bound) < 1UL << 32);
-    assert(index < (1UL << 32));
-    assert(free_capacity >= 0 && static_cast<unsigned long>(free_capacity) < 1UL << 32);
-    assert(value >= 0 && static_cast<unsigned long>(value) < 1UL << 32);
-    return pq_type::value_type{static_cast<unsigned long>(upper_bound) << 32 | static_cast<unsigned long>(index),
-                               static_cast<unsigned long>(free_capacity) << 32 | static_cast<unsigned long>(value)};
+constexpr auto to_payload(data_type upper_bound, std::size_t index, data_type free_capacity, data_type value) noexcept {
+    return node_type{upper_bound, Payload{index, free_capacity, value}};
 }
+
+data_type extract_upper_bound(node_type const& node) noexcept {
+    return node.first;
+}
+
+std::size_t extract_index(node_type const& node) noexcept {
+    return node.second.index;
+}
+
+data_type extract_free_capacity(node_type const& node) noexcept {
+    return node.second.free_capacity;
+}
+
+data_type extract_value(node_type const& node) noexcept {
+    return node.second.weight;
+}
+
+#else
+using data_type = unsigned long;
+static constexpr data_type default_min_weight = 1000;
+static constexpr data_type default_max_weight = 100000;
+static constexpr data_type default_min_add = 10000;
+static constexpr data_type default_max_add = 12500;
+using pq_type = PQ<false, unsigned long, unsigned long>;
+using node_type = pq_type::value_type;
+
+constexpr auto to_payload(data_type upper_bound, std::size_t index, data_type free_capacity, data_type value) noexcept {
+    static_assert(sizeof(data_type) >= sizeof(std::uint64_t), "64bit data_type required");
+    assert(upper_bound <= std::numeric_limits<std::uint32_t>::max());
+    assert(index <= std::numeric_limits<std::uint32_t>::max());
+    assert(free_capacity <= std::numeric_limits<std::uint32_t>::max());
+    assert(value <= std::numeric_limits<std::uint32_t>::max());
+
+    return node_type{static_cast<std::uint64_t>(index) | (static_cast<std::uint64_t>(upper_bound) << 32),
+                     static_cast<std::uint64_t>(value) | (static_cast<std::uint64_t>(free_capacity) << 32)};
+}
+
+data_type extract_upper_bound(node_type const& node) noexcept {
+    return node.first >> 32;
+}
+
+std::size_t extract_index(node_type const& node) noexcept {
+    return node.first & ((1UL << 32) - 1);
+}
+
+data_type extract_free_capacity(node_type const& node) noexcept {
+    return node.second >> 32;
+}
+
+data_type extract_value(node_type const& node) noexcept {
+    return node.second & ((1UL << 32) - 1);
+}
+
+#endif
+
+using handle_type = pq_type::handle_type;
 
 struct Settings {
     int num_threads = 4;
-    long long n = default_n;
-    data_type a = default_a;
-    data_type b = default_b;
-    data_type l = default_l;
-    data_type u = default_u;
-    double f = default_f;
-    unsigned long s = 1;
-
-    void options(cxxopts::Options& cmd) {
-        cmd.add_options()("j,threads", "The number of threads", cxxopts::value<int>(num_threads), "NUMBER")(
-            "n,num-elements", "Number of elements", cxxopts::value<long long>(n), "NUMBER")(
-            "a,weight-min", "Min weight", cxxopts::value<data_type>(a), "NUMBER")(
-            "b,weight-max", "Max weight", cxxopts::value<data_type>(b), "NUMBER")(
-            "l,p-min", "Min add to profits", cxxopts::value<data_type>(l), "NUMBER")(
-            "u,p-max", "Max add to profits", cxxopts::value<data_type>(u), "NUMBER")(
-            "f,capacity-divide", "Fraction of weights", cxxopts::value<double>(f), "NUMBER")(
-            "s,seed", "Seed", cxxopts::value<unsigned long>(s), "NUMBER");
-    }
+    long long n = 1000;
+    data_type min_weight = default_min_weight;
+    data_type max_weight = default_max_weight;
+    data_type min_add = default_min_add;
+    data_type max_add = default_max_add;
+    double capacity_factor = 0.5;
+    unsigned int seed = 1;
+    pq_type::settings_type pq_settings{};
 };
 
-void write_settings(Settings const& settings, std::ostream& out) {
-    out << "Threads: " << settings.num_threads << '\n'
-        << "Number of items: " << settings.n << '\n'
-        << "Instance parameters: "
-        << "weight_min=" << settings.a << " weight_max=" << settings.b << " profit_add_min=" << settings.l
-        << " profit_add_max=" << settings.u << " cap_fraction=" << settings.f << '\n'
-        << "Seed: " << settings.s << '\n';
+void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+    cmd.add_options()
+        // clang-format off
+        ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
+        ("n,num-elements", "Number of elements", cxxopts::value<long long>(settings.n), "NUMBER")
+        ("a,min-weight", "Min weight", cxxopts::value<data_type>(settings.min_weight), "NUMBER")
+        ("b,max-weight", "Max weight", cxxopts::value<data_type>(settings.max_weight), "NUMBER")
+        ("l,min-add", "Min add to profits", cxxopts::value<data_type>(settings.min_add), "NUMBER")
+        ("u,max-add", "Max add to profits", cxxopts::value<data_type>(settings.max_add), "NUMBER")
+        ("f,factor", "Capacity as factor of expected total weight", cxxopts::value<double>(settings.capacity_factor), "NUMBER")
+        ("s,seed", "Seed", cxxopts::value<unsigned int>(settings.seed), "NUMBER");
+    // clang-format on
+    settings.pq_settings.register_cmd_options(cmd);
 }
 
-struct ThreadStats {
+void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+    out << "Threads: " << settings.num_threads << '\n';
+    out << "Number of items: " << settings.n << '\n';
+    out << "Weights: [" << settings.min_weight << ", " << settings.max_weight << "]\n";
+    out << "Add to profit: [" << settings.min_add << ", " << settings.max_add << "]\n";
+    out << "Capacity factor: " << settings.capacity_factor << '\n';
+    out << "Seed: " << settings.seed << '\n';
+    settings.pq_settings.write_human_readable(out);
+}
+
+void write_settings_json(Settings const& settings, std::ostream& out) {
+    out << '{';
+    out << std::quoted("num-threads") << ':' << settings.num_threads << ',';
+    out << std::quoted("num-elements") << ':' << settings.n << ',';
+    out << std::quoted("min-weight") << ':' << settings.min_weight << ',';
+    out << std::quoted("max-weight") << ':' << settings.max_weight << ',';
+    out << std::quoted("min-add") << ':' << settings.min_add << ',';
+    out << std::quoted("max-add") << ':' << settings.max_add << ',';
+    out << std::quoted("capacity-factor") << ':' << settings.capacity_factor << ',';
+    out << std::quoted("seed") << ':' << settings.seed << ',';
+    out << std::quoted("pq") << ':';
+    settings.pq_settings.write_json(out);
+    out << '}';
+}
+
+struct Counter {
     long long pushed_nodes{0};
     long long processed_nodes{0};
     long long ignored_nodes{0};
 };
 
 struct SharedData {
-    std::atomic_llong solution{0};
-    termination_detection::Data termination_detection_data{};
-
-    void update_solution(data_type& current, data_type update) noexcept {
-        while (update > current) {
-            if (solution.compare_exchange_weak(current, update, std::memory_order_relaxed)) {
-                current = update;
-            }
-        }
-    }
+    std::atomic<data_type> solution{0};
+    termination_detection::TerminationDetection termination_detection;
 };
 
-bool process_node(handle_type& handle, ThreadStats& stats, SharedData& data, KnapsackInstance<> const& instance) {
-    auto node = handle.try_pop();
-    if (!node) {
-        return false;
-    }
-    ++stats.processed_nodes;
+void process_node(node_type const& node, handle_type& handle, Counter& counter, SharedData& data,
+                  KnapsackInstance<data_type> const& instance) {
+    ++counter.processed_nodes;
     auto solution = data.solution.load(std::memory_order_relaxed);
-    auto upper_bound = static_cast<data_type>(node->first >> 32);
+    auto upper_bound = extract_upper_bound(node);
     if (upper_bound <= solution) {
-        ++stats.ignored_nodes;
-        return true;
+        ++counter.ignored_nodes;
+        return;
     }
-    auto index = static_cast<std::size_t>(node->first & ((1UL << 32) - 1));
-    auto free_capacity = static_cast<data_type>(node->second >> 32);
+    auto index = extract_index(node);
+    auto free_capacity = extract_free_capacity(node);
     assert(free_capacity <= instance.capacity());
-    auto value = static_cast<data_type>(node->second & ((1UL << 32) - 1));
+    auto value = extract_value(node);
     auto [lb, ub] = instance.compute_bounds_linear(free_capacity, index + 1);
-    data.update_solution(solution, value + lb);
+    while (value + lb > solution &&
+           !data.solution.compare_exchange_weak(solution, value + lb, std::memory_order_relaxed)) {
+    }
+    solution = std::max(solution, value + lb);
     if (index + 2 < instance.size()) {
         if (value + ub > solution) {
             handle.push(to_payload(value + ub, index + 1, free_capacity, value));
-            ++stats.pushed_nodes;
+            ++counter.pushed_nodes;
         }
         if (free_capacity >= instance.weight(index)) {
             handle.push(to_payload(upper_bound, index + 1, free_capacity - instance.weight(index),
                                    value + instance.value(index)));
-            ++stats.pushed_nodes;
+            ++counter.pushed_nodes;
         }
     }
-    return true;
 }
 
-ThreadStats benchmark_thread(task::Control tc, pq_type& pq, SharedData& data, KnapsackInstance<> const& instance) {
-    ThreadStats stats;
+Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq, SharedData& data,
+                         KnapsackInstance<data_type> const& instance) {
+    Counter counter;
     handle_type handle = pq.get_handle();
-    if (tc.id() == 0) {
+    if (thread_context.id() == 0) {
         auto [lb, ub] = instance.compute_bounds_linear(instance.capacity(), 0);
         data.solution.store(lb, std::memory_order_relaxed);
-        if (ub > lb) {
-            handle.push(to_payload(ub, 0, instance.capacity(), 0));
-            ++stats.pushed_nodes;
-        }
+        handle.push(to_payload(ub, 0, instance.capacity(), 0));
+        ++counter.pushed_nodes;
     }
-    tc.synchronize();
-    while (termination_detection::try_do(tc.num_threads(), data.termination_detection_data,
-                                         [&]() { return process_node(handle, stats, data, instance); })) {
+    std::optional<node_type> node;
+    thread_context.synchronize();
+    while (data.termination_detection.repeat([&]() {
+        node = handle.try_pop();
+        return node.has_value();
+    })) {
+        process_node(*node, handle, counter, data, instance);
     }
-    tc.synchronize();
-    return stats;
+    thread_context.synchronize();
+    return counter;
 }
 
-bool run_benchmark(Settings const& settings, pq_type& pq, KnapsackInstance<> const& instance) {
-    if (instance.size() + 1 >= (1UL << 32) || instance.capacity() >= (1LL << 32)) {
-        std::clog << "Error: Instance cannot be represented\n";
-        return false;
-    }
-    std::vector<ThreadStats> all_stats(static_cast<std::size_t>(settings.num_threads));
-    affinity::NUMA numa_affinity{cores_per_numa_node, num_numa_nodes};
-    SharedData shared_data;
+void run_benchmark(Settings const& settings) {
+    std::clog << "Generating instance...\n";
+    auto instance = KnapsackInstance<data_type>(settings.n, settings.min_weight, settings.max_weight, settings.min_add,
+                                                settings.max_add, settings.capacity_factor, settings.seed);
+    std::vector<Counter> thread_counter(static_cast<std::size_t>(settings.num_threads));
+    SharedData shared_data{0, termination_detection::TerminationDetection(settings.num_threads)};
+    auto pq = pq_type(settings.num_threads, std::size_t(10'000'000), settings.pq_settings);
     std::clog << "Working...\n";
     auto start_time = std::chrono::steady_clock::now();
-    task::Runner runner{numa_affinity, settings.num_threads, [&](auto tc) {
-                            all_stats[static_cast<std::size_t>(tc.id())] =
-                                benchmark_thread(tc, pq, shared_data, instance);
-                        }};
-    runner.wait();
+    thread_coordination::Dispatcher dispatcher{settings.num_threads, [&](auto ctx) {
+                                                   auto t_id = static_cast<std::size_t>(ctx.id());
+                                                   thread_counter[t_id] =
+                                                       benchmark_thread(ctx, pq, shared_data, instance);
+                                               }};
+    dispatcher.wait();
     auto end_time = std::chrono::steady_clock::now();
-    std::clog << "Finished\n" << std::endl;
-    auto accum_stats =
-        std::accumulate(all_stats.begin() + 1, all_stats.end(), all_stats.front(), [](auto accum, auto const& e) {
-            accum.pushed_nodes += e.pushed_nodes;
-            accum.processed_nodes += e.processed_nodes;
-            accum.ignored_nodes += e.ignored_nodes;
-            return accum;
+    std::clog << "Done\n";
+    auto total_counts =
+        std::accumulate(thread_counter.begin(), thread_counter.end(), Counter{}, [](auto sum, auto const& counter) {
+            sum.pushed_nodes += counter.pushed_nodes;
+            sum.processed_nodes += counter.processed_nodes;
+            sum.ignored_nodes += counter.ignored_nodes;
+            return sum;
         });
+    std::clog << '\n';
     std::clog << "Time (s): " << std::fixed << std::setprecision(3)
               << std::chrono::duration<double>(end_time - start_time).count() << '\n';
     std::clog << "Solution: " << shared_data.solution.load() << '\n';
-    std::clog << "Processed nodes: " << accum_stats.processed_nodes << '\n';
-    std::clog << "Ignored nodes: " << accum_stats.ignored_nodes << '\n';
-    if (accum_stats.processed_nodes != accum_stats.pushed_nodes) {
-        std::clog << "Error: Not all nodes were popped" << std::endl;
-        return false;
+    std::clog << "Processed nodes: " << total_counts.processed_nodes << '\n';
+    std::clog << "Ignored nodes: " << total_counts.ignored_nodes << '\n';
+    if (total_counts.processed_nodes != total_counts.pushed_nodes) {
+        std::cerr << "Error: Not all nodes were processed (" << total_counts.pushed_nodes - total_counts.processed_nodes
+                  << ')' << '\n';
+        std::exit(EXIT_FAILURE);
     }
-    std::cout << "time,processed,ignored,solution\n";
-    std::cout << std::chrono::duration_cast<std::chrono::milliseconds>(end_time - start_time).count() << ','
-              << accum_stats.processed_nodes << ',' << accum_stats.ignored_nodes << ',' << shared_data.solution.load()
-              << '\n';
-    return true;
+    std::cout << '{';
+    std::cout << std::quoted("settings") << ':';
+    write_settings_json(settings, std::cout);
+    std::cout << ',';
+    std::cout << std::quoted("time-ns") << ':' << std::chrono::nanoseconds{end_time - start_time}.count() << ',';
+    std::cout << std::quoted("processed-nodes") << ':' << total_counts.processed_nodes << ',';
+    std::cout << std::quoted("ignored-nodes") << ':' << total_counts.ignored_nodes << ',';
+    std::cout << std::quoted("solution") << ':' << shared_data.solution.load();
+    std::cout << '}' << '\n';
 }
 
 int main(int argc, char* argv[]) {
     write_build_info(std::clog);
-    std::clog << "\nCommand line:";
+    std::clog << '\n';
+
+    std::clog << "= Priority queue =\n";
+    pq_type::write_human_readable(std::clog);
+    std::clog << '\n';
+
+    std::clog << "= Command line =\n";
     for (int i = 0; i < argc; ++i) {
-        std::clog << ' ' << argv[i];
+        std::clog << argv[i];
+        if (i != argc - 1) {
+            std::clog << ' ';
+        }
     }
     std::clog << '\n' << '\n';
 
-    Settings settings{};
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help");
-    settings.options(cmd);
-    add_options(cmd);
+    Settings settings{};
+    register_cmd_options(settings, cmd);
 
-    auto args = cxxopts::ParseResult{};
     try {
-        args = cmd.parse(argc, argv);
+        auto args = cmd.parse(argc, argv);
         if (args.count("help") > 0) {
             std::cerr << cmd.help() << std::endl;
             return EXIT_SUCCESS;
         }
     } catch (cxxopts::OptionParseException const& e) {
-        std::cerr << "Error parsing arguments: " << e.what() << '\n';
-        std::cerr << cmd.help() << std::endl;
+        std::cerr << "Error parsing command line: " << e.what() << '\n';
+        std::cerr << "Use --help for usage information" << '\n';
         return EXIT_FAILURE;
     }
 
-    write_settings(settings, std::clog);
+    std::clog << "= Settings =\n";
+    write_settings_human_readable(settings, std::clog);
+    std::clog << '\n';
 
-    auto pq = create<false>(settings.num_threads, 1 << 24, args);
-    std::clog << "Priority queue: ";
-    describe(pq, std::clog) << '\n' << '\n';
-    std::clog << "Generating instance...\n";
-    auto instance =
-        KnapsackInstance<>(settings.n, settings.a, settings.b, settings.l, settings.u, settings.f, settings.s);
-    bool success = run_benchmark(settings, pq, instance);
-    return success ? EXIT_SUCCESS : EXIT_FAILURE;
+    std::clog << "= Running benchmark =\n";
+    run_benchmark(settings);
+    return EXIT_SUCCESS;
 }

@@ -9,7 +9,7 @@ extern "C" {
 #undef min
 #undef max
 
-#include "cxxopts.hpp"
+#include <cxxopts.hpp>
 
 #include <limits>
 #include <memory>
@@ -21,16 +21,21 @@ namespace wrapper::linden {
 
 // The queue itself only supports
 // keys >= 1, so one is added on each insert
-template <bool Min>
+//
+// Each key can only be inserted once
+template <bool Min, typename Key = unsigned long, typename T = Key>
 class Linden {
+    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
+                  "Linden only supports unsigned long as key and value type");
+
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
-    struct config_type {};
-    using handle_type = Linden&;
 
    private:
+    static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
+
     struct Deleter {
         void operator()(::pq_t* p) {
             // Avoid segfault
@@ -42,55 +47,34 @@ class Linden {
 
     alignas(64) std::unique_ptr<::pq_t, Deleter> pq_;
 
-    static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
-
    public:
-    explicit Linden() {
+    using handle_type = util::SelfHandle<Linden>;
+    using settings_type = util::EmptySettings;
+    explicit Linden(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/) {
         _init_gc_subsystem();
         pq_.reset(::pq_init(32));
     }
 
     void push(value_type const& value) {
-        if constexpr (Min) {
-            ::insert(pq_.get(), value.first + 1, value.second);
-        } else {
-            ::insert(pq_.get(), sentinel - value.first - 1, value.second);
-        }
+        ::insert(pq_.get(), Min ? value.first + 1 : sentinel - value.first - 1, value.second);
     }
+
     std::optional<value_type> try_pop() {
         unsigned long key;
         unsigned long value = ::deletemin_key(pq_.get(), &key);
         if (key == sentinel) {
             return std::nullopt;
         }
-        if constexpr (Min) {
-            --key;
-        } else {
-            key = sentinel - key - 1;
-        }
-        return value_type{key, value};
+        return value_type{Min ? key - 1 : sentinel - key - 1, value};
+    }
+
+    static void write_human_readable(std::ostream& out) {
+        out << "Linden\n";
     }
 
     handle_type get_handle() {
-        return *this;
+        return handle_type{pq_.get()};
     }
 };
-
-template <bool Min = true>
-using PQWrapper = Linden<Min>;
-
-inline void add_options(cxxopts::Options& /*options*/) {
-}
-
-template <bool Min = true>
-Linden<Min> create(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*result*/) {
-    return Linden<Min>{};
-}
-
-template <typename PQ>
-std::ostream& describe(PQ const& /*unused*/, std::ostream& out) {
-    out << "Linden";
-    return out;
-}
 
 }  // namespace wrapper::linden

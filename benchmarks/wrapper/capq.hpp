@@ -21,13 +21,15 @@ namespace wrapper::capq {
 // GC has MAX_THREADS = 128
 // (unsigned long) -1 is signaling empty
 
-template <bool Min = true>
+template <bool Min, typename Key = unsigned long, typename T = Key>
 class CAPQ {
+    static_assert(std::is_same_v<Key, unsigned long> && std::is_same_v<T, unsigned long>,
+                  "CA-PQ only supports unsigned long as key and value type");
+
    public:
     using key_type = unsigned long;
     using mapped_type = unsigned long;
     using value_type = std::pair<key_type, mapped_type>;
-    using handle_type = CAPQ&;
 
    private:
     struct Deleter {
@@ -36,21 +38,19 @@ class CAPQ {
         }
     };
     alignas(64) std::unique_ptr<::fpasl_catree_set, Deleter> pq_;
-
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
 
    public:
-    explicit CAPQ() {
+    using handle_type = SelfHandle<CAPQ>;
+    using settings_type = util::EmptySettings;
+
+    explicit CAPQ(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/) {
         ::_init_gc_subsystem();
         pq_.reset(::capq_new());
     }
 
     void push(value_type const& value) {
-        if constexpr (Min) {
-            ::capq_put_param(pq_.get(), value.first, value.second, true);
-        } else {
-            ::capq_put_param(pq_.get(), sentinel - value.first - 1, value.second, true);
-        }
+        ::capq_put_param(pq_.get(), Min ? value.first : sentinel - value.first - 1, value.second, true);
     }
     std::optional<value_type> try_pop() {
         unsigned long key;
@@ -64,26 +64,13 @@ class CAPQ {
         return value_type{key, value};
     }
 
+    static void write_human_readable(std::ostream& out) {
+        out << "CA-PQ\n";
+    }
+
     handle_type get_handle() {
-        return *this;
+        return handle_type{*this};
     }
 };
-
-template <bool Min = true>
-using PQWrapper = CAPQ<Min>;
-
-inline void add_options(cxxopts::Options& /*options*/) {
-}
-
-template <bool Min = true>
-CAPQ<Min> create(int /*num_threads*/, std::size_t /*initial_capacity*/, cxxopts::ParseResult const& /*result*/) {
-    return CAPQ<Min>{};
-}
-
-template <bool Min>
-std::ostream& describe(CAPQ<Min> const& /*unused*/, std::ostream& out) {
-    out << "CA-PQ";
-    return out;
-}
 
 }  // namespace wrapper::capq

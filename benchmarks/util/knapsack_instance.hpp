@@ -14,6 +14,9 @@
 
 template <typename WeightType = long long, typename ValueType = WeightType>
 class KnapsackInstance {
+    static_assert(std::is_arithmetic_v<WeightType> && std::is_arithmetic_v<ValueType>,
+                  "WeightType and ValueType must be arithmetic types");
+
    public:
     struct Item {
         WeightType weight;
@@ -25,15 +28,14 @@ class KnapsackInstance {
     WeightType capacity_{};
 
     void to_prefix_sum() {
-        std::sort(prefix_sum_.begin(), prefix_sum_.end(), [](auto const& lhs, auto const& rhs) {
+        std::sort(prefix_sum_.begin() + 1, prefix_sum_.end(), [](auto const& lhs, auto const& rhs) {
             return (static_cast<double>(lhs.value) / static_cast<double>(lhs.weight)) >
                 (static_cast<double>(rhs.value) / static_cast<double>(rhs.weight));
         });
-        std::inclusive_scan(prefix_sum_.begin(), prefix_sum_.end(), prefix_sum_.begin(),
+        std::inclusive_scan(prefix_sum_.begin() + 1, prefix_sum_.end(), prefix_sum_.begin() + 1,
                             [](auto const& lhs, auto const& rhs) {
                                 return Item{lhs.weight + rhs.weight, lhs.value + rhs.value};
                             });
-        prefix_sum_.insert(prefix_sum_.begin(), Item{0, 0});
     }
 
    public:
@@ -48,11 +50,12 @@ class KnapsackInstance {
         if (!in || in.eof()) {
             throw std::runtime_error{"Could not get number of items"};
         }
-        prefix_sum_.reserve(n + 1);
         in >> capacity_;
         if (!in || (n > 0 && in.eof())) {
             throw std::runtime_error{"Could not get capacity"};
         }
+        prefix_sum_.reserve(n + 1);
+        prefix_sum_.push_back(Item{0, 0});
 
         for (std::size_t i = 0; i < n; ++i) {
             if (!in || in.eof()) {
@@ -72,19 +75,21 @@ class KnapsackInstance {
         to_prefix_sum();
     }
 
-    KnapsackInstance(long long n, WeightType a, WeightType b, ValueType l, ValueType u, double f, unsigned long s)
-        : prefix_sum_(static_cast<std::size_t>(n)),
-          capacity_(static_cast<WeightType>(static_cast<double>(n) * static_cast<double>(b - a) * f)) {
-        std::default_random_engine rng(s);
-        std::generate(prefix_sum_.begin(), prefix_sum_.end(), [&rng, a, b, l, u]() {
+    KnapsackInstance(long long n, WeightType min_weight, WeightType max_weight, ValueType min_add, ValueType max_add,
+                     double capacity_factor, unsigned int seed)
+        : prefix_sum_(static_cast<std::size_t>(n + 1)),
+          capacity_(static_cast<WeightType>(static_cast<double>(n) * static_cast<double>(max_weight - min_weight) *
+                                            capacity_factor)) {
+        std::default_random_engine rng(seed);
+        std::generate(prefix_sum_.begin() + 1, prefix_sum_.end(), [&rng, min_weight, max_weight, min_add, max_add]() {
             if constexpr (std::is_floating_point_v<WeightType>) {
-                std::uniform_real_distribution<WeightType> random_weight(a, b);
-                std::uniform_real_distribution<ValueType> random_add(l, u);
+                std::uniform_real_distribution<WeightType> random_weight(min_weight, max_weight);
+                std::uniform_real_distribution<ValueType> random_add(min_add, max_add);
                 auto weight = random_weight(rng);
                 return Item{weight, static_cast<ValueType>(weight) + random_add(rng)};
             } else {
-                std::uniform_int_distribution<WeightType> random_weight(a, b);
-                std::uniform_int_distribution<ValueType> random_add(l, u);
+                std::uniform_int_distribution<WeightType> random_weight(min_weight, max_weight);
+                std::uniform_int_distribution<ValueType> random_add(min_add, max_add);
                 auto weight = random_weight(rng);
                 return Item{weight, static_cast<ValueType>(weight) + random_add(rng)};
             }

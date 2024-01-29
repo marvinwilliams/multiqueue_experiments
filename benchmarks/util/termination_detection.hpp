@@ -10,44 +10,43 @@
 
 namespace termination_detection {
 
-struct Data {
-    std::atomic_int idle_count{0};
-    std::atomic_int no_work_count{0};
-};
+class TerminationDetection {
+    int num_threads_;
+    std::atomic_int idle_count_{0};
+    std::atomic_int no_work_count_{0};
 
-namespace detail {
-
-inline bool wait_to_terminate(int num_threads, Data& data) {
-    auto idle_count = data.idle_count.fetch_add(1, std::memory_order_relaxed) + 1;
-    while (idle_count < num_threads) {
-        if (data.no_work_count.load(std::memory_order_relaxed) < num_threads) {
-            data.idle_count.fetch_sub(1, std::memory_order_relaxed);
-            return false;
+    bool should_terminate() {
+        idle_count_.fetch_add(1, std::memory_order_relaxed);
+        while (no_work_count_.load(std::memory_order_relaxed) >= num_threads_) {
+            if (idle_count_.load(std::memory_order_relaxed) >= num_threads_) {
+                return true;
+            }
+            PAUSE;
         }
-        PAUSE;
-        idle_count = data.idle_count.load(std::memory_order_relaxed);
+        idle_count_.fetch_sub(1, std::memory_order_relaxed);
+        return false;
     }
-    return true;
-}
 
-}  // namespace detail
+   public:
+    explicit TerminationDetection(int num_threads) : num_threads_{num_threads} {
+    }
 
-template <typename F>
-bool try_do(int num_threads, Data& data, F f) {
-    for (int i = 0; i < 100; ++i) {
+    template <typename F>
+    bool repeat(F&& f) {
         if (f()) {
             return true;
         }
-    }
-    auto num_no_work = data.no_work_count.fetch_add(1, std::memory_order_relaxed) + 1;
-    while (!f()) {
-        if (num_no_work >= num_threads && detail::wait_to_terminate(num_threads, data)) {
-            return false;
+        no_work_count_.fetch_add(1, std::memory_order_relaxed);
+        while (!f()) {
+            if (no_work_count_.load(std::memory_order_relaxed) >= num_threads_) {
+                if (should_terminate()) {
+                    return false;
+                }
+            }
         }
-        num_no_work = data.no_work_count.load(std::memory_order_relaxed);
+        no_work_count_.fetch_sub(1, std::memory_order_relaxed);
+        return true;
     }
-    data.no_work_count.fetch_sub(1, std::memory_order_relaxed);
-    return true;
-}
+};
 
 }  // namespace termination_detection

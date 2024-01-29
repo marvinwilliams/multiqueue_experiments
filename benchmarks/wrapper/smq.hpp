@@ -3,7 +3,7 @@
 #include "StealingMultiQueue.hpp"
 #include "util.hpp"
 
-#include "cxxopts.hpp"
+#include <cxxopts.hpp>
 
 #include <algorithm>
 #include <atomic>
@@ -17,14 +17,14 @@
 
 namespace wrapper::stealing_mq {
 
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
+template <bool Min, typename Key = unsigned long, typename T = Key>
 class StealingMQ {
    public:
     using key_type = Key;
-    using value_type = Value;
-    using key_compare = std::conditional_t<Min, std::greater<key_type>, std::less<key_type>>;
-    using value_compare = util::ValueCompare<value_type, key_compare, KeyOfValue>;
+    using mapped_type = T;
+    using value_type = std::pair<key_type, mapped_type>;
+    using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
+    using value_compare = util::ValueCompare<value_type, key_compare, util::PairFirst>;
 
 #ifdef SMQ_STEAL_PROB
     static constexpr std::size_t StealProb = SMQ_STEAL_PROB;
@@ -51,7 +51,8 @@ class StealingMQ {
 
        public:
         void push(value_type const& value) {
-            pq_->push(id_, &value, (&value) + 1);
+            value_type v_arr[1] = {value};
+            pq_->push(id_, v_arr, v_arr + 1);
         }
 
         std::optional<value_type> try_pop() {
@@ -61,38 +62,25 @@ class StealingMQ {
 
    public:
     using handle_type = Handle;
+    using settings_type = util::EmptySettings;
 
    private:
     pq_type pq_;
 
    public:
-    explicit StealingMQ(int num_threads) : pq_(num_threads) {
+    explicit StealingMQ(int num_threads, std::size_t /*unused*/, settings_type const& /*unused*/) : pq_(num_threads) {
     }
 
-    Handle get_handle() {
+    static void write_human_readable(std::ostream& out) {
+        out << "StealingMQ\n";
+        out << "  Steal probability: " << StealProb << '\n';
+        out << "  Steal batch size: " << StealBatchSize << '\n';
+    }
+
+    handle_type get_handle() {
         static std::atomic_int id{0};
         return Handle{&pq_, id.fetch_add(1)};
     }
 };
-
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
-using PQWrapper = StealingMQ<Min, Key, Value, KeyOfValue>;
-
-inline void add_options(cxxopts::Options& /*options*/) {
-}
-
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
-StealingMQ<Min, Key, Value, KeyOfValue> create(int num_threads, std::size_t /*initial_capacity*/,
-                                               cxxopts::ParseResult const& /*result*/) {
-    return StealingMQ<Min, Key, Value, KeyOfValue>{num_threads};
-}
-
-template <typename PQ>
-std::ostream& describe(PQ const& pq, std::ostream& out) {
-    out << "Stealing MultiQueue (StealProb=" << PQ::StealProb << ", StealBatchSize=" << PQ::StealBatchSize << ")";
-    return out;
-}
 
 }  // namespace wrapper::stealing_mq

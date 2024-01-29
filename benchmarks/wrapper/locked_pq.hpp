@@ -8,19 +8,35 @@
 #include <mutex>
 #include <optional>
 #include <queue>
+#include <utility>
 #include <vector>
 
 namespace wrapper::locked_pq {
 
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
+template <bool Min, typename Key = unsigned long, typename T = Key>
 class LockedPQ {
    public:
     using key_type = Key;
-    using value_type = Value;
+    using mapped_type = T;
+    using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = util::ValueCompare<value_type, key_compare, KeyOfValue>;
-    using handle_type = LockedPQ&;
+    using value_compare = util::ValueCompare<value_type, key_compare, util::PairFirst>;
+
+    struct Handle {
+        friend LockedPQ;
+        LockedPQ* pq_;
+
+        Handle(LockedPQ* pq) : pq_{pq} {
+        }
+
+        void push(value_type const& value) {
+            pq_->push(value);
+        }
+
+        std::optional<value_type> try_pop() {
+            return pq_->try_pop();
+        }
+    };
 
    private:
     using pq_type = std::priority_queue<value_type, std::vector<value_type>, value_compare>;
@@ -29,9 +45,11 @@ class LockedPQ {
     std::mutex m_;
 
    public:
-    LockedPQ(std::size_t initial_capacity) {
+    using handle_type = util::SelfHandle<LockedPQ>;
+    using settings_type = util::EmptySettings;
+    LockedPQ(int /*unused*/, std::size_t capacity, settings_type const& /*unused*/) {
         std::vector<value_type> v{};
-        v.reserve(initial_capacity);
+        v.reserve(capacity);
         pq_ = pq_type{value_compare{}, std::move(v)};
     }
 
@@ -51,28 +69,8 @@ class LockedPQ {
     }
 
     handle_type get_handle() {
-        return *this;
+        return handle_type{*this};
     }
 };
-
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
-using PQWrapper = LockedPQ<Min, Key, Value, KeyOfValue>;
-
-inline void add_options(cxxopts::Options& /*options*/) {
-}
-
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>,
-          typename KeyOfValue = util::KeyOfValue<Key, Value>>
-LockedPQ<Min, Key, Value, KeyOfValue> create(int /*num_threads*/, std::size_t initial_capacity,
-                                             cxxopts::ParseResult const& /*result*/) {
-    return LockedPQ<Min, Key, Value, KeyOfValue>{initial_capacity};
-}
-
-template <typename PQ>
-std::ostream& describe(PQ const& pq, std::ostream& out) {
-    out << "Locked std::priority_queue";
-    return out;
-}
 
 }  // namespace wrapper::locked_pq

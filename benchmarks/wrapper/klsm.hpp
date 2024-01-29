@@ -4,10 +4,11 @@
 
 #include "k_lsm/k_lsm.h"
 
-#include "cxxopts.hpp"
+#include <benchmarks/wrapper/util.hpp>
+#include <cxxopts.hpp>
 
 #include <algorithm>
-#include <cstdio>
+#include <iostream>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -29,19 +30,19 @@ class KLsm {
 #else
     static constexpr std::size_t relaxation = KLSM_K;
 #endif
-    struct config_type {};
-    using handle_type = KLsm&;
-
    private:
     using pq_type = ::kpq::k_lsm<key_type, mapped_type, relaxation>;
     static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
    public:
+    using handle_type = util::SelfHandle<KLsm>;
+    using settings_type = util::EmptySettings;
+
    private:
     pq_type pq_{};
 
    public:
-    explicit KLsm() = default;
+    explicit KLsm(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/){};
 
     void push(value_type const& value) {
         pq_.insert(Min ? value.first : sentinel_ - value.first - 1, value.second);
@@ -59,27 +60,14 @@ class KLsm {
         return value_type{key, value};
     }
 
+    static void write_human_readable(std::ostream& out) {
+        out << "k-Lsm\n";
+        out << "  k: " << relaxation << '\n';
+    }
+
     handle_type get_handle() {
-        return *this;
+        return handle_type{*this};
     }
 };
-
-template <bool Min = true, typename Key = unsigned long, typename Value = std::pair<unsigned long, unsigned long>>
-using PQWrapper = KLsm<Min, Key, T>;
-
-inline void add_options(cxxopts::Options& /*options*/) {
-}
-
-template <bool Min = true, typename Key = unsigned long, typename T = unsigned long>
-KLsm<Min, Key, T> create(int /*num_threads*/, std::size_t /*initial_capacity*/,
-                         cxxopts::ParseResult const& /*result*/) {
-    return KLsm<Min, Key, T>{};
-}
-
-template <typename PQ>
-std::ostream& describe(PQ const& /*unused*/, std::ostream& out) {
-    out << "k-LSM (k: " << PQ::relaxation << ')';
-    return out;
-}
 
 }  // namespace wrapper::klsm

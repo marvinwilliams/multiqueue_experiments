@@ -23,7 +23,6 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
-#include <memory>
 #include <new>
 #include <numeric>
 #include <random>
@@ -34,7 +33,7 @@
 using key_type = unsigned long;
 using value_type = unsigned long;
 
-using pq_type = PQ<true, key_type, std::pair<key_type, value_type>>;
+using pq_type = PQ<true, key_type, value_type>;
 using handle_type = pq_type::handle_type;
 
 struct Settings {
@@ -48,183 +47,157 @@ struct Settings {
     long long batch_size = 1 << 12;
     int seed = 1;
 #ifdef LOG_OPERATIONS
-    std::string log_file_name = "operation_log.txt";
-    std::unique_ptr<std::ofstream> log_file;
+    std::filesystem::path log_file = "operation_log.txt";
 #endif
 #ifdef WITH_PAPI
     std::vector<std::string> papi_events;
 #endif
-    pq_type::Settings pq_settings;
-
-    static void add_cmd_options(cxxopts::Options& cmd) {
-        cmd.add_options()
-            // clang-format off
-            ("j,threads", "Number of threads", cxxopts::value<int>(), "NUMBER")
-            ("p,prefill", "Prefill per thread", cxxopts::value<long long>(), "NUMBER")
-            ("n,iterations", "Number of iterations per thread", cxxopts::value<long long>(), "NUMBER")
-            ("min-prefill", "Min prefill key", cxxopts::value<key_type>(), "NUMBER")
-            ("max-prefill", "Max prefill key", cxxopts::value<key_type>(), "NUMBER")
-            ("min-update", "Min update", cxxopts::value<long>(), "NUMBER")
-            ("max-update", "Max update", cxxopts::value<long>(), "NUMBER")
-            ("batch-size", "Batch size", cxxopts::value<long long>(), "NUMBER")
-            ("s,seed", "Initial seed", cxxopts::value<int>(), "NUMBER")
-#ifdef LOG_OPERATIONS
-            ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(), "PATH")
-#endif
-#ifdef WITH_PAPI
-            ("r,count-event", "Papi event to count", cxxopts::value<std::vector<std::string>>(), "STRING")
-#endif
-            // clang-format on
-            ;
-        pq_type::Settings::add_cmd_options(cmd);
-    }
-
-    static std::optional<Settings> from_cmd(cxxopts::ParseResult const& args) {
-        Settings settings;
-        if (args.count("threads") > 0) {
-            settings.num_threads = args["threads"].as<int>();
-            if (settings.num_threads <= 0) {
-                std::cerr << "Error: Number of threads must be greater than 0\n";
-                return {};
-            }
-        }
-        if (args.count("prefill") > 0) {
-            settings.prefill_per_thread = args["prefill"].as<long long>();
-            if (settings.prefill_per_thread < 0) {
-                std::cerr << "Error: Prefill must be nonnegative\n";
-                return {};
-            }
-        }
-        if (args.count("iterations") > 0) {
-            settings.iterations_per_thread = args["iterations"].as<long long>();
-            if (settings.iterations_per_thread < 0) {
-                std::cerr << "Error: Iterations must be nonnegative\n";
-                return {};
-            }
-        }
-        if (args.count("min-prefill") > 0) {
-            settings.min_prefill = args["min-prefill"].as<key_type>();
-            if (settings.min_prefill <= 0) {
-                std::cerr << "Error: Prefill keys must be greater than 0\n";
-                return {};
-            }
-        }
-        if (args.count("max-prefill") > 0) {
-            settings.max_prefill = args["max-prefill"].as<key_type>();
-            if (settings.max_prefill < settings.min_prefill) {
-                std::cerr << "Error: Invalid prefill range\n";
-                return {};
-            }
-        }
-        if (args.count("min-update") > 0) {
-            settings.min_update = args["min-update"].as<long>();
-        }
-        if (args.count("max-update") > 0) {
-            settings.max_update = args["max-update"].as<long>();
-            if (settings.max_update < settings.min_update) {
-                std::cerr << "Error: Invalid update range\n";
-                return {};
-            }
-        }
-        if (args.count("batch-size") > 0) {
-            settings.batch_size = args["batch-size"].as<long long>();
-            if (settings.batch_size <= 0) {
-                std::cerr << "Error: batch size must be greater than 0\n";
-                return {};
-            }
-        }
-        if (args.count("seed") > 0) {
-            settings.seed = args["seed"].as<int>();
-        }
-#ifdef LOG_OPERATIONS
-        if (args.count("log-file") > 0) {
-            settings.log_file_name = args["log-file"].as<std::filesystem::path>();
-        }
-        settings.log_file = std::make_unique<std::ofstream>(settings.log_file_name);
-        if (settings.log_file->fail()) {
-                std::cerr << "Error: Could not open file '" << settings.log_file_name << "' for writing\n";
-                return {};
-            }
-#endif
-#ifdef WITH_PAPI
-        if (args.count("count-event") > 0) {
-            settings.papi_events = args["count-event"].as<std::vector<std::string>>();
-            if (!settings.papi_events.empty()) {
-                if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
-                    std::cerr << "Error: Failed to initialize PAPI library\n";
-                    return {};
-                }
-                if (int ret = PAPI_thread_init(pthread_self); ret != PAPI_OK) {
-                    std::cerr << "Error: Failed to initialize PAPI thread support\n";
-                    return {};
-                }
-                for (auto const& name : settings.papi_events) {
-                    if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
-                        std::cerr << "Error: PAPI event '" << name << "' not available\n";
-                        return {};
-                    }
-                }
-            }
-        }
-#endif
-        auto pq_settings = pq_type::Settings::from_cmd(args);
-        if (!pq_settings) {
-            return {};
-        }
-        settings.pq_settings = *pq_settings;
-        return settings;
-    }
-
-    void describe(std::ostream& out) const {
-        out << "Threads: " << num_threads << '\n';
-        out << "Prefill per thread: " << prefill_per_thread << '\n';
-        out << "Iterations per thread: " << iterations_per_thread << '\n';
-        out << "Prefill range: [" << min_prefill << ", " << max_prefill << "]\n";
-        out << "Update range: [" << min_update << ", " << max_update << "]\n";
-        out << "Batch size: " << batch_size << '\n';
-        out << "Seed: " << seed << '\n';
-#ifdef LOG_OPERATIONS
-        out << "Log file: " << log_file_name << '\n';
-#endif
-#ifdef WITH_PAPI
-        out << "PAPI events: [";
-        for (std::size_t i = 0; i < papi_events.size(); ++i) {
-            out << papi_events[i];
-            if (i != papi_events.size() - 1) {
-                out << ", ";
-            }
-        }
-        out << ']' << '\n';
-#endif
-        pq_settings.describe(out);
-    }
-
-    void write_json(std::ostream& out) const {
-        out << '{' << std::quoted("num_threads") << ':' << num_threads;
-        out << ',' << std::quoted("prefill_per_thread") << ':' << prefill_per_thread;
-        out << ',' << std::quoted("iterations_per_thread") << ':' << iterations_per_thread;
-        out << ',' << std::quoted("prefill_min") << ':' << min_prefill;
-        out << ',' << std::quoted("prefill_max") << ':' << max_prefill;
-        out << ',' << std::quoted("update_min") << ':' << min_update;
-        out << ',' << std::quoted("update_max") << ':' << max_update;
-        out << ',' << std::quoted("batch_size") << ':' << batch_size;
-        out << ',' << std::quoted("seed") << ':' << seed;
-#ifdef WITH_PAPI
-        out << ',' << std::quoted("papi_events") << ':';
-        out << '[';
-        for (std::size_t i = 0; i < papi_events.size(); ++i) {
-            out << std::quoted(papi_events[i]);
-            if (i != papi_events.size() - 1) {
-                out << ',';
-            }
-        }
-        out << ']';
-#endif
-        out << ',' << std::quoted("pq") << ':';
-        pq_settings.write_json(out);
-        out << '}';
-    }
+    pq_type::settings_type pq_settings;
 };
+
+void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+    cmd.add_options()
+        // clang-format off
+            ("j,threads", "Number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
+            ("p,prefill", "Prefill per thread", cxxopts::value<long long>(settings.prefill_per_thread), "NUMBER")
+            ("n,iterations", "Number of iterations per thread", cxxopts::value<long long>(settings.iterations_per_thread), "NUMBER")
+            ("min-prefill", "Min prefill key", cxxopts::value<key_type>(settings.min_prefill), "NUMBER")
+            ("max-prefill", "Max prefill key", cxxopts::value<key_type>(settings.max_prefill), "NUMBER")
+            ("min-update", "Min update", cxxopts::value<long>(settings.min_update), "NUMBER")
+            ("max-update", "Max update", cxxopts::value<long>(settings.max_update), "NUMBER")
+            ("batch-size", "Batch size", cxxopts::value<long long>(settings.batch_size), "NUMBER")
+            ("s,seed", "Initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
+#ifdef LOG_OPERATIONS
+            ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
+#endif
+#ifdef WITH_PAPI
+            ("r,count-event", "Papi event to count", cxxopts::value<std::vector<std::string>>(settings.papi_events), "STRING")
+#endif
+        // clang-format on
+        ;
+    settings.pq_settings.register_cmd_options(cmd);
+}
+
+bool validate_settings(Settings const& settings) {
+    if (settings.num_threads <= 0) {
+        std::cerr << "Error: Number of threads must be greater than 0\n";
+        return false;
+    }
+    if (settings.prefill_per_thread < 0) {
+        std::cerr << "Error: Prefill must be nonnegative\n";
+        return false;
+    }
+    if (settings.iterations_per_thread < 0) {
+        std::cerr << "Error: Iterations must be nonnegative\n";
+        return false;
+    }
+    if (settings.min_prefill <= 0) {
+        std::cerr << "Error: Prefill keys must be greater than 0\n";
+        return false;
+    }
+    if (settings.max_prefill < settings.min_prefill) {
+        std::cerr << "Error: Invalid prefill range\n";
+        return false;
+    }
+    if (settings.min_update < 0) {
+        std::cerr << "Error: Min update must be nonnegative\n";
+        return false;
+    }
+    if (settings.max_update < settings.min_update) {
+        std::cerr << "Error: Invalid update range\n";
+        return false;
+    }
+    if (settings.batch_size <= 0) {
+        std::cerr << "Error: batch size must be greater than 0\n";
+        return false;
+    }
+    if (settings.seed <= 0) {
+        std::cerr << "Error: Seed must be greater than 0\n";
+        return false;
+    }
+#ifdef LOG_OPERATIONS
+    if (settings.log_file.empty()) {
+        std::cerr << "Error: Log file name must not be empty\n";
+        return false;
+    }
+    auto out = std::ofstream(settings.log_file);
+    if (out.fail()) {
+        std::cerr << "Error: Could not open file " << settings.log_file << " for writing\n";
+        return false;
+    }
+    out.close();
+#endif
+#ifdef WITH_PAPI
+    if (!settings.papi_events.empty()) {
+        if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
+            std::cerr << "Error: Failed to initialize PAPI library\n";
+            return false;
+        }
+        if (int ret = PAPI_thread_init(pthread_self); ret != PAPI_OK) {
+            std::cerr << "Error: Failed to initialize PAPI thread support\n";
+            return false;
+        }
+        for (auto const& name : settings.papi_events) {
+            if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
+                std::cerr << "Error: PAPI event '" << name << "' not available\n";
+                return false;
+            }
+        }
+    }
+#endif
+    return settings.pq_settings.validate();
+}
+
+void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+    out << "Threads: " << settings.num_threads << '\n';
+    out << "Prefill per thread: " << settings.prefill_per_thread << '\n';
+    out << "Iterations per thread: " << settings.iterations_per_thread << '\n';
+    out << "Prefill range: [" << settings.min_prefill << ", " << settings.max_prefill << "]\n";
+    out << "Update range: [" << settings.min_update << ", " << settings.max_update << "]\n";
+    out << "Batch size: " << settings.batch_size << '\n';
+    out << "Seed: " << settings.seed << '\n';
+#ifdef LOG_OPERATIONS
+    out << "Log file: " << settings.log_file << '\n';
+#endif
+#ifdef WITH_PAPI
+    out << "PAPI events: [";
+    for (std::size_t i = 0; i < settings.papi_events.size(); ++i) {
+        out << settings.papi_events[i];
+        if (i != settings.papi_events.size() - 1) {
+            out << ", ";
+        }
+    }
+    out << ']' << '\n';
+#endif
+    settings.pq_settings.write_human_readable(out);
+}
+
+void write_settings_json(Settings const& settings, std::ostream& out) {
+    out << '{';
+    out << std::quoted("num-threads") << ':' << settings.num_threads << ',';
+    out << std::quoted("prefill-per-thread") << ':' << settings.prefill_per_thread << ',';
+    out << std::quoted("iterations-per-thread") << ':' << settings.iterations_per_thread << ',';
+    out << std::quoted("prefill-min") << ':' << settings.min_prefill << ',';
+    out << std::quoted("prefill-max") << ':' << settings.max_prefill << ',';
+    out << std::quoted("update-min") << ':' << settings.min_update << ',';
+    out << std::quoted("update-max") << ':' << settings.max_update << ',';
+    out << std::quoted("batch-size") << ':' << settings.batch_size << ',';
+    out << std::quoted("seed") << ':' << settings.seed << ',';
+#ifdef WITH_PAPI
+    out << std::quoted("papi-events") << ':';
+    out << '[';
+    for (std::size_t i = 0; i < settings.papi_events.size(); ++i) {
+        out << std::quoted(settings.papi_events[i]);
+        if (i != settings.papi_events.size() - 1) {
+            out << ',';
+        }
+    }
+    out << ']' << ',';
+#endif
+    out << std::quoted("pq") << ':';
+    settings.pq_settings.write_json(out);
+    out << '}';
+}
 
 struct ThreadData {
     std::chrono::high_resolution_clock::time_point start_time{};
@@ -246,26 +219,27 @@ struct ThreadData {
     std::vector<PushLog> pushes;
     std::vector<PopLog> pops;
 #endif
-
-    void write_json(std::ostream& out) const {
-        out << '{';
-        out << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{end_time - start_time}.count();
-        out << ',' << std::quoted("iterations") << ':' << iter_count;
-        out << ',' << std::quoted("failed_pops") << ':' << failed_pop_count;
-#ifdef WITH_PAPI
-        out << ',' << std::quoted("papi_event_counter") << ':';
-        out << '[';
-        for (std::size_t i = 0; i < papi_event_counter.size(); ++i) {
-            out << papi_event_counter[i];
-            if (i != papi_event_counter.size() - 1) {
-                out << ',';
-            }
-        }
-        out << ']';
-#endif
-        out << '}';
-    }
 };
+
+void write_thread_data_json(ThreadData const& data, std::ostream& out) {
+    out << '{';
+    out << std::quoted("time-ns") << ':' << std::chrono::nanoseconds{data.end_time - data.start_time}.count() << ',';
+    out << std::quoted("iterations") << ':' << data.iter_count << ',';
+    out << std::quoted("failed-pops") << ':' << data.failed_pop_count;
+#ifdef WITH_PAPI
+    out << ',';
+    out << std::quoted("papi-event-counter") << ':';
+    out << '[';
+    for (std::size_t i = 0; i < data.papi_event_counter.size(); ++i) {
+        out << data.papi_event_counter[i];
+        if (i != data.papi_event_counter.size() - 1) {
+            out << ',';
+        }
+    }
+    out << ']';
+#endif
+    out << '}';
+}
 
 class Context : public thread_coordination::Context {
     handle_type handle_;
@@ -350,18 +324,19 @@ class Task {
 void write_result_json(Settings const& settings, std::vector<ThreadData> const& data, std::ostream& out) {
     out << '{';
     out << std::quoted("settings") << ':';
-    settings.write_json(out);
+    write_settings_json(settings, out);
+    out << ',';
     auto last_end = std::max_element(data.begin(), data.end(), [](auto const& lhs, auto const& rhs) {
                         return lhs.end_time < rhs.end_time;
                     })->end_time;
     auto first_start = std::min_element(data.begin(), data.end(), [](auto const& lhs, auto const& rhs) {
                            return lhs.start_time < rhs.start_time;
                        })->start_time;
-    out << ',' << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{last_end - first_start}.count();
-    out << ',' << std::quoted("per_thread") << ':';
+    out << std::quoted("time-ns") << ':' << std::chrono::nanoseconds{last_end - first_start}.count() << ',';
+    out << std::quoted("per-thread") << ':';
     out << '[';
     for (auto it = data.begin(); it != data.end(); ++it) {
-        it->write_json(out);
+        write_thread_data_json(*it, out);
         if (it != std::prev(data.end())) {
             out << ',';
         }
@@ -500,14 +475,17 @@ void run_benchmark(Settings const& settings) {
         pq_type(settings.num_threads, static_cast<std::size_t>(settings.prefill_per_thread * settings.num_threads),
                 settings.pq_settings);
 
-    auto dispatcher = thread_coordination::Dispatcher(settings.num_threads, [&](auto t_ctx) {
-        thread_data[static_cast<std::size_t>(t_ctx.id())] = benchmark_thread(std::move(t_ctx), settings, pq, task);
+    auto dispatcher = thread_coordination::Dispatcher(settings.num_threads, [&](auto ctx) {
+        auto t_id = static_cast<std::size_t>(ctx.id());
+        thread_data[t_id] = benchmark_thread(std::move(ctx), settings, pq, task);
     });
     dispatcher.wait();
 
 #ifdef LOG_OPERATIONS
     std::clog << "Writing logs...\n";
-    write_log(thread_data, *settings.log_file);
+    std::ofstream log_out(settings.log_file);  // assumed to be valid
+    write_log(thread_data, log_out);
+    log_out.close();
 #endif
     std::clog << "Done\n";
     write_result_json(settings, thread_data, std::cout);
@@ -517,48 +495,45 @@ int main(int argc, char* argv[]) {
     write_build_info(std::clog);
     std::clog << '\n';
 
+    std::clog << "= Priority queue =\n";
+    pq_type::write_human_readable(std::clog);
+    std::clog << '\n';
+
     std::clog << "= Command line =\n";
     for (int i = 0; i < argc; ++i) {
         std::clog << argv[i];
         if (i != argc - 1) {
             std::clog << ' ';
-        } else {
-            std::clog << '\n';
         }
     }
-    std::clog << '\n';
+    std::clog << '\n' << '\n';
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help", cxxopts::value<bool>());
-    Settings::add_cmd_options(cmd);
-    cxxopts::ParseResult args;
+    Settings settings{};
+    register_cmd_options(settings, cmd);
+
     try {
-        args = cmd.parse(argc, argv);
+        auto args = cmd.parse(argc, argv);
+        if (args.count("help") > 0) {
+            std::clog << cmd.help() << '\n';
+            return EXIT_SUCCESS;
+        }
     } catch (std::exception const& e) {
         std::cerr << "Error parsing command line: " << e.what() << '\n';
         std::cerr << "Use --help for usage information" << '\n';
         return EXIT_FAILURE;
     }
 
-    if (args.count("help") > 0) {
-        std::clog << cmd.help() << '\n';
-        return EXIT_SUCCESS;
-    }
-
-    std::clog << "= Priority queue =\n";
-    pq_type::describe(std::clog);
+    std::clog << "= Settings =\n";
+    write_settings_human_readable(settings, std::clog);
     std::clog << '\n';
 
-    auto settings = Settings::from_cmd(args);
-    if (!settings) {
+    if (!validate_settings(settings)) {
         return EXIT_FAILURE;
     }
 
-    std::clog << "= Settings =\n";
-    settings->describe(std::clog);
-    std::clog << '\n';
-
     std::clog << "= Running benchmark =\n";
-    run_benchmark(*settings);
+    run_benchmark(settings);
     return EXIT_SUCCESS;
 }

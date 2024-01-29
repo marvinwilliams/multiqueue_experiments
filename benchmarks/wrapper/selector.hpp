@@ -11,19 +11,19 @@
 
 #if defined PQ_MQ
 #include "wrapper/multiqueue.hpp"
-#define PQ wrapper::MultiQueue
+#define PQ wrapper::multiqueue::MultiQueue
 #elif defined PQ_CAPQ
 #include "wrapper/capq.hpp"
-using namespace wrapper::capq;
+#define PQ wrapper::capq::CAPQ
 #elif defined PQ_KLSM
 #include "wrapper/klsm.hpp"
-using namespace wrapper::klsm;
+#define PQ wrapper::klsm::KLsm
 #elif defined PQ_LINDEN
 #include "wrapper/linden.hpp"
-using namespace wrapper::linden;
+#define PQ wrapper::linden::Linden
 #elif defined PQ_SPRAYLIST
 #include "wrapper/spraylist.hpp"
-using namespace wrapper::spraylist;
+#define PQ wrapper::spraylist::Spraylist
 #elif defined PQ_TBB_PQ
 #include "wrapper/tbb_priority_queue.hpp"
 using namespace wrapper::tbb_priority_queue;
@@ -32,7 +32,7 @@ using namespace wrapper::tbb_priority_queue;
 using namespace wrapper::tbb_queue;
 #elif defined PQ_SMQ
 #include "wrapper/smq.hpp"
-using namespace wrapper::stealing_mq;
+#define PQ wrapper::stealing_mq::StealingMQ
 #elif defined PQ_LOCKED_PQ
 #include "wrapper/locked_pq.hpp"
 using namespace wrapper::locked_pq;
