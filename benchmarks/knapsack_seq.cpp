@@ -38,8 +38,6 @@ bool operator<(Node const& lhs, Node const& rhs) noexcept {
     return lhs.upper_bound < rhs.upper_bound;
 }
 
-using pq_type = std::priority_queue<Node>;
-
 struct Settings {
     long long n = 1000;
     data_type min_weight = default_min_weight;
@@ -73,12 +71,12 @@ void write_settings_human_readable(Settings const& settings, std::ostream& out) 
 
 void write_settings_json(Settings const& settings, std::ostream& out) {
     out << '{';
-    out << std::quoted("num-elements") << ':' << settings.n << ',';
-    out << std::quoted("min-weight") << ':' << settings.min_weight << ',';
-    out << std::quoted("max-weight") << ':' << settings.max_weight << ',';
-    out << std::quoted("min-add") << ':' << settings.min_add << ',';
-    out << std::quoted("max-add") << ':' << settings.max_add << ',';
-    out << std::quoted("capacity-factor") << ':' << settings.capacity_factor << ',';
+    out << std::quoted("num_elements") << ':' << settings.n << ',';
+    out << std::quoted("min_weight") << ':' << settings.min_weight << ',';
+    out << std::quoted("max_weight") << ':' << settings.max_weight << ',';
+    out << std::quoted("min_add") << ':' << settings.min_add << ',';
+    out << std::quoted("max_add") << ':' << settings.max_add << ',';
+    out << std::quoted("capacity_factor") << ':' << settings.capacity_factor << ',';
     out << std::quoted("seed") << ':' << settings.seed;
     out << '}';
 }
@@ -89,9 +87,9 @@ void knapsack(Settings const& settings) noexcept {
     std::clog << "Generating instance...\n";
     auto instance = KnapsackInstance<data_type>(settings.n, settings.min_weight, settings.max_weight, settings.min_add,
                                                 settings.max_add, settings.capacity_factor, settings.seed);
-    pq_type::container_type container;
+    std::vector<Node> container;
     container.reserve(1 << 24);
-    pq_type pq{{}, std::move(container)};
+    std::priority_queue<Node, std::vector<Node>> pq({}, std::move(container));
     std::clog << "Working...\n";
     auto t_start = std::chrono::steady_clock::now();
     {
@@ -123,8 +121,8 @@ void knapsack(Settings const& settings) noexcept {
         }
     }
     auto t_end = std::chrono::steady_clock::now();
-    std::clog << "Done\n" << std::endl;
-
+    std::clog << "Done\n\n";
+    std::clog << "= Results =\n";
     std::clog << "Time (s): " << std::fixed << std::setprecision(3)
               << std::chrono::duration<double>(t_end - t_start).count() << '\n';
     std::clog << "Solution: " << best_value << '\n';
@@ -134,9 +132,12 @@ void knapsack(Settings const& settings) noexcept {
     std::cout << std::quoted("settings") << ':';
     write_settings_json(settings, std::cout);
     std::cout << ',';
-    std::cout << std::quoted("time-ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
-    std::cout << std::quoted("processed-nodes") << ':' << processed_nodes << ',';
+    std::cout << std::quoted("results") << ':';
+    std::cout << '{';
+    std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
+    std::cout << std::quoted("processed_nodes") << ':' << processed_nodes << ',';
     std::cout << std::quoted("solution") << ':' << best_value;
+    std::cout << '}';
     std::cout << '}' << '\n';
 }
 
@@ -161,7 +162,7 @@ int main(int argc, char* argv[]) {
     try {
         auto args = cmd.parse(argc, argv);
         if (args.count("help") > 0) {
-            std::cerr << cmd.help() << std::endl;
+            std::cerr << cmd.help() << '\n';
             return EXIT_SUCCESS;
         }
     } catch (cxxopts::OptionParseException const& e) {

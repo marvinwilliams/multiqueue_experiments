@@ -61,6 +61,7 @@ if(NOT "${PAGE_SIZE}" MATCHES "^[0-9]+")
 endif()
 
 add_subdirectory(multiqueue)
+add_subdirectory(wrapper)
 add_subdirectory(benchmarks)
 add_subdirectory(tools)
 

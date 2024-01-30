@@ -59,7 +59,8 @@ class Spraylist {
         ::sl_intset_t* pq_;
         std::unique_ptr<::thread_data_t, ThreadDataDeleter> data_;
 
-        explicit Handle(::sl_intset_t& pq, std::unique_ptr<::thread_data_t, ThreadDataDeleter> data) : pq_{&pq}, data_{std::move(data)} {
+        explicit Handle(::sl_intset_t& pq, std::unique_ptr<::thread_data_t, ThreadDataDeleter> data)
+            : pq_{&pq}, data_{std::move(data)} {
         }
 
        public:
@@ -77,10 +78,7 @@ class Spraylist {
             if (key == sentinel) {
                 return std::nullopt;
             }
-            if constexpr (!Min) {
-                key = sentinel - key - 1;
-            }
-            return value_type{key, value};
+            return value_type{Min ? key : sentinel - key - 1, value};
         };
     };
 
@@ -90,10 +88,18 @@ class Spraylist {
         ::ssalloc_init(num_threads_);
         seeds = ::seed_rand();
         auto thread_data = std::unique_ptr<::thread_data_t, ThreadDataDeleter>(new thread_data_t);
-        thread_data->seed = ::rand();
-        thread_data->seed2 = ::rand();
-        thread_data->nb_threads = num_threads_;
+        thread_data->seed = static_cast<unsigned int>(::rand());
+        thread_data->seed2 = static_cast<unsigned int>(::rand());
+        thread_data->nb_threads = static_cast<unsigned int>(num_threads_);
         return thread_data;
+    }
+
+    static unsigned int floor_log_2(unsigned long long n) {
+        unsigned int ret = 0;
+        while (n >>= 1 > 0) {
+            ++ret;
+        }
+        return ret;
     }
 
    public:
@@ -103,14 +109,13 @@ class Spraylist {
     Spraylist(int num_threads, std::size_t initial_capacity, settings_type const& /*unused*/)
         : num_threads_(num_threads) {
         ::ssalloc_init(num_threads_);
-        *::levelmax = floor_log_2(initial_capacity);
+        *::levelmax = static_cast<std::uint8_t>(floor_log_2(initial_capacity));
         pq_.reset(sl_set_new());
     }
 
     static void write_human_readable(std::ostream& out) {
         out << "Spraylist\n";
     }
-
 
     Handle get_handle() {
         return Handle{*pq_, new_thread_data()};

@@ -1,6 +1,6 @@
 #include "util/build_info.hpp"
+#include "util/selector.hpp"
 #include "util/thread_coordination.hpp"
-#include "wrapper/selector.hpp"
 #ifdef LOG_OPERATIONS
 #include "util/operation_log.hpp"
 #endif
@@ -39,7 +39,7 @@ using handle_type = pq_type::handle_type;
 struct Settings {
     int num_threads = 4;
     long long prefill_per_thread = 1 << 20;
-    long long iterations_per_thread = 1 << 22;
+    long long iterations_per_thread = 1 << 24;
     key_type min_prefill = 1;
     key_type max_prefill = 1 << 20;
     long min_update = 0;
@@ -174,17 +174,17 @@ void write_settings_human_readable(Settings const& settings, std::ostream& out) 
 
 void write_settings_json(Settings const& settings, std::ostream& out) {
     out << '{';
-    out << std::quoted("num-threads") << ':' << settings.num_threads << ',';
-    out << std::quoted("prefill-per-thread") << ':' << settings.prefill_per_thread << ',';
-    out << std::quoted("iterations-per-thread") << ':' << settings.iterations_per_thread << ',';
-    out << std::quoted("prefill-min") << ':' << settings.min_prefill << ',';
-    out << std::quoted("prefill-max") << ':' << settings.max_prefill << ',';
-    out << std::quoted("update-min") << ':' << settings.min_update << ',';
-    out << std::quoted("update-max") << ':' << settings.max_update << ',';
-    out << std::quoted("batch-size") << ':' << settings.batch_size << ',';
+    out << std::quoted("num_threads") << ':' << settings.num_threads << ',';
+    out << std::quoted("prefill_per_thread") << ':' << settings.prefill_per_thread << ',';
+    out << std::quoted("iterations_per_thread") << ':' << settings.iterations_per_thread << ',';
+    out << std::quoted("prefill_min") << ':' << settings.min_prefill << ',';
+    out << std::quoted("prefill_max") << ':' << settings.max_prefill << ',';
+    out << std::quoted("update_min") << ':' << settings.min_update << ',';
+    out << std::quoted("update_max") << ':' << settings.max_update << ',';
+    out << std::quoted("batch_size") << ':' << settings.batch_size << ',';
     out << std::quoted("seed") << ':' << settings.seed << ',';
 #ifdef WITH_PAPI
-    out << std::quoted("papi-events") << ':';
+    out << std::quoted("papi_events") << ':';
     out << '[';
     for (std::size_t i = 0; i < settings.papi_events.size(); ++i) {
         out << std::quoted(settings.papi_events[i]);
@@ -200,8 +200,6 @@ void write_settings_json(Settings const& settings, std::ostream& out) {
 }
 
 struct ThreadData {
-    std::chrono::high_resolution_clock::time_point start_time{};
-    std::chrono::high_resolution_clock::time_point end_time{};
     long long iter_count = 0;
     long long failed_pop_count = 0;
 #ifdef WITH_PAPI
@@ -223,12 +221,11 @@ struct ThreadData {
 
 void write_thread_data_json(ThreadData const& data, std::ostream& out) {
     out << '{';
-    out << std::quoted("time-ns") << ':' << std::chrono::nanoseconds{data.end_time - data.start_time}.count() << ',';
     out << std::quoted("iterations") << ':' << data.iter_count << ',';
-    out << std::quoted("failed-pops") << ':' << data.failed_pop_count;
+    out << std::quoted("failed_pops") << ':' << data.failed_pop_count;
 #ifdef WITH_PAPI
     out << ',';
-    out << std::quoted("papi-event-counter") << ':';
+    out << std::quoted("papi_event_counter") << ':';
     out << '[';
     for (std::size_t i = 0; i < data.papi_event_counter.size(); ++i) {
         out << data.papi_event_counter[i];
@@ -239,200 +236,6 @@ void write_thread_data_json(ThreadData const& data, std::ostream& out) {
     out << ']';
 #endif
     out << '}';
-}
-
-class Context : public thread_coordination::Context {
-    handle_type handle_;
-    ThreadData data_;
-
-   public:
-    explicit Context(thread_coordination::Context ctx, handle_type handle)
-        : thread_coordination::Context{std::move(ctx)}, handle_{std::move(handle)} {
-    }
-
-#ifdef LOG_OPERATIONS
-    void push(std::pair<key_type, value_type> const& e) {
-        handle_.push(e);
-        auto tick = std::chrono::high_resolution_clock::now();
-        data_.pushes.push_back({tick, e});
-    }
-
-    auto try_pop() {
-        auto tick = std::chrono::high_resolution_clock::now();
-        auto retval = handle_.try_pop();
-        if (retval) {
-            data_.pops.push_back({tick, retval->second});
-        }
-        return retval;
-    }
-#else
-    void push(std::pair<key_type, value_type> e) {
-        handle_.push(std::move(e));
-    }
-
-    auto try_pop() {
-        return handle_.try_pop();
-    }
-#endif
-
-    ThreadData& data() noexcept {
-        return data_;
-    }
-    ThreadData const& data() const noexcept {
-        return data_;
-    }
-};
-
-class Task {
-    std::vector<long long> data_;
-    std::atomic_llong counter_{0};
-
-   public:
-    explicit Task(Settings const& settings)
-        : data_(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads)) {
-    }
-
-    template <typename RNG>
-    void prepare(Settings const& settings, Context const& context, RNG&& rng) {
-        std::generate_n(data_.begin() + context.id() * settings.iterations_per_thread, settings.iterations_per_thread,
-                        [&rng, min = settings.min_update, max = settings.max_update]() {
-                            return std::uniform_int_distribution<long>(min, max)(rng);
-                        });
-    }
-
-    void work(Settings const& settings, Context& context) {
-        auto offset = static_cast<value_type>(settings.num_threads * settings.prefill_per_thread);
-        long long max = settings.iterations_per_thread * settings.num_threads;
-        for (auto from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed); from < max;
-             from = counter_.fetch_add(settings.batch_size, std::memory_order_relaxed)) {
-            auto to = std::min(from + settings.batch_size, max);
-            for (auto i = from; i < to; ++i) {
-                auto key = context.try_pop();
-                while (!key) {
-                    ++context.data().failed_pop_count;
-                    key = context.try_pop();
-                }
-                context.push(
-                    {static_cast<key_type>(static_cast<long long>(key->first) + data_[static_cast<std::size_t>(i)]),
-                     offset + static_cast<value_type>(i)});
-            }
-            context.data().iter_count += to - from;
-        }
-    }
-};
-
-void write_result_json(Settings const& settings, std::vector<ThreadData> const& data, std::ostream& out) {
-    out << '{';
-    out << std::quoted("settings") << ':';
-    write_settings_json(settings, out);
-    out << ',';
-    auto last_end = std::max_element(data.begin(), data.end(), [](auto const& lhs, auto const& rhs) {
-                        return lhs.end_time < rhs.end_time;
-                    })->end_time;
-    auto first_start = std::min_element(data.begin(), data.end(), [](auto const& lhs, auto const& rhs) {
-                           return lhs.start_time < rhs.start_time;
-                       })->start_time;
-    out << std::quoted("time-ns") << ':' << std::chrono::nanoseconds{last_end - first_start}.count() << ',';
-    out << std::quoted("per-thread") << ':';
-    out << '[';
-    for (auto it = data.begin(); it != data.end(); ++it) {
-        write_thread_data_json(*it, out);
-        if (it != std::prev(data.end())) {
-            out << ',';
-        }
-    }
-    out << ']';
-    out << '}';
-    out << '\n';
-}
-
-#ifdef WITH_PAPI
-int prepare_papi(Settings const& settings) {
-    if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
-        throw std::runtime_error{"Failed to register thread for PAPI"};
-    }
-    int event_set = PAPI_NULL;
-    if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
-        throw std::runtime_error{"Failed to create PAPI event set"};
-    }
-    for (auto const& name : settings.papi_events) {
-        auto event = PAPI_NULL;
-        if (PAPI_event_name_to_code(name.c_str(), &event) != PAPI_OK) {
-            throw std::runtime_error{"Failed to resolve PAPI event '" + name + '\''};
-        }
-        if (PAPI_add_event(event_set, event) != PAPI_OK) {
-            throw std::runtime_error{"Failed to add PAPI event '" + name + '\''};
-        }
-    }
-    return event_set;
-}
-#endif
-
-ThreadData benchmark_thread(thread_coordination::Context thread_context, Settings const& settings, pq_type& pq,
-                            Task& task) {
-    Context context{std::move(thread_context), pq.get_handle()};
-#ifdef WITH_PAPI
-    int event_set = PAPI_NULL;
-    if (!settings.papi_events.empty()) {
-        context.data().papi_event_counter.resize(settings.papi_events.size());
-        try {
-            event_set = prepare_papi(settings);
-        } catch (std::exception const& e) {
-            context.write(std::cerr) << e.what() << '\n';
-        }
-    }
-#endif
-#ifdef LOG_OPERATIONS
-    context.data().pushes.reserve(
-        static_cast<std::size_t>(settings.prefill_per_thread + 2 * settings.iterations_per_thread));
-    context.data().pops.reserve(static_cast<std::size_t>(2 * settings.iterations_per_thread));
-#endif
-
-    std::vector<key_type> prefill(static_cast<std::size_t>(settings.prefill_per_thread));
-
-    if (context.id() == 0) {
-        std::clog << "Preparing...\n";
-    }
-    std::seed_seq seed{settings.seed, context.id()};
-    std::default_random_engine rng(seed);
-    context.synchronize();
-    std::generate(prefill.begin(), prefill.end(), [&rng, min = settings.min_prefill, max = settings.max_prefill]() {
-        return std::uniform_int_distribution<key_type>(min, max)(rng);
-    });
-    context.synchronize();
-    task.prepare(settings, context, rng);
-    context.synchronize();
-    if (context.id() == 0) {
-        std::clog << "Prefilling...\n";
-    }
-    context.synchronize();
-    for (auto i = 0LL; i < settings.prefill_per_thread; ++i) {
-        context.push({prefill[static_cast<std::size_t>(i)],
-                      static_cast<value_type>(context.id() * settings.prefill_per_thread + i)});
-    }
-    context.synchronize();
-    if (context.id() == 0) {
-        std::clog << "Running...\n";
-    }
-    context.synchronize();
-#ifdef WITH_PAPI
-    if (!settings.papi_events.empty()) {
-        if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
-            context.write(std::cerr) << "Failed to start performance counters\n";
-        }
-    }
-#endif
-    context.data().start_time = std::chrono::high_resolution_clock::now();
-    task.work(settings, context);
-    context.data().end_time = std::chrono::high_resolution_clock::now();
-#ifdef WITH_PAPI
-    if (!settings.papi_events.empty()) {
-        if (int ret = PAPI_stop(event_set, context.data().papi_event_counter.data()); ret != PAPI_OK) {
-            context.write(std::cerr) << "Failed to stop performance counters\n";
-        }
-    }
-#endif
-    return std::move(context.data());
 }
 
 #ifdef LOG_OPERATIONS
@@ -468,27 +271,235 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
 }
 #endif
 
+struct SharedData {
+    std::vector<long long> updates;
+    std::atomic_llong counter{0};
+    std::chrono::high_resolution_clock::time_point start_time;
+    std::chrono::high_resolution_clock::time_point end_time;
+    std::vector<ThreadData> thread_data;
+};
+
+void write_result_json(Settings const& settings, SharedData const& data, std::ostream& out) {
+    out << '{';
+    out << std::quoted("settings") << ':';
+    write_settings_json(settings, out);
+    out << ',';
+    out << std::quoted("results") << ':';
+    out << '{';
+    out << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{data.end_time - data.start_time}.count() << ',';
+    out << std::quoted("thread_data") << ':';
+    out << '[';
+    for (auto it = data.thread_data.begin(); it != data.thread_data.end(); ++it) {
+        write_thread_data_json(*it, out);
+        if (it != std::prev(data.thread_data.end())) {
+            out << ',';
+        }
+    }
+    out << ']';
+    out << '}';
+    out << '}' << '\n';
+}
+
+class Context : public thread_coordination::Context {
+    handle_type handle_;
+    ThreadData thread_data_;
+    SharedData* shared_data_;
+    Settings const* settings_;
+
+   public:
+    explicit Context(thread_coordination::Context ctx, handle_type handle, SharedData& shared_data,
+                     Settings const& settings)
+        : thread_coordination::Context{std::move(ctx)},
+          handle_{std::move(handle)},
+          shared_data_{&shared_data},
+          settings_{&settings} {
+    }
+
+#ifdef LOG_OPERATIONS
+    void push(std::pair<key_type, value_type> const& e) {
+        handle_.push(e);
+        auto tick = std::chrono::high_resolution_clock::now();
+        thread_data_.pushes.push_back({tick, e});
+    }
+
+    auto try_pop() {
+        auto tick = std::chrono::high_resolution_clock::now();
+        auto retval = handle_.try_pop();
+        if (retval) {
+            thread_data_.pops.push_back({tick, retval->second});
+        }
+        return retval;
+    }
+#else
+    void push(std::pair<key_type, value_type> const& e) {
+        handle_.push(e);
+    }
+
+    auto try_pop() {
+        return handle_.try_pop();
+    }
+#endif
+
+    ThreadData& thread_data() noexcept {
+        return thread_data_;
+    }
+    [[nodiscard]] ThreadData const& thread_data() const noexcept {
+        return thread_data_;
+    }
+    SharedData& shared_data() noexcept {
+        return *shared_data_;
+    }
+    [[nodiscard]] SharedData const& shared_data() const noexcept {
+        return *shared_data_;
+    }
+
+    [[nodiscard]] Settings const& settings() const noexcept {
+        return *settings_;
+    }
+};
+
+void work_loop(Context& context) {
+    auto offset = static_cast<value_type>(context.settings().num_threads * context.settings().prefill_per_thread);
+    long long max = context.settings().iterations_per_thread * context.settings().num_threads;
+    for (auto from = context.shared_data().counter.fetch_add(context.settings().batch_size, std::memory_order_relaxed);
+         from < max;
+         from = context.shared_data().counter.fetch_add(context.settings().batch_size, std::memory_order_relaxed)) {
+        auto to = std::min(from + context.settings().batch_size, max);
+        for (auto i = from; i < to; ++i) {
+            auto key = context.try_pop();
+            while (!key) {
+                ++context.thread_data().failed_pop_count;
+                key = context.try_pop();
+            }
+            context.push({static_cast<key_type>(static_cast<long long>(key->first) +
+                                                context.shared_data().updates[static_cast<std::size_t>(i)]),
+                          offset + static_cast<value_type>(i)});
+        }
+        context.thread_data().iter_count += to - from;
+    }
+}
+
+#ifdef WITH_PAPI
+int prepare_papi(Settings const& settings) {
+    if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
+        throw std::runtime_error{"Failed to register thread for PAPI"};
+    }
+    int event_set = PAPI_NULL;
+    if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
+        throw std::runtime_error{"Failed to create PAPI event set"};
+    }
+    for (auto const& name : settings.papi_events) {
+        auto event = PAPI_NULL;
+        if (PAPI_event_name_to_code(name.c_str(), &event) != PAPI_OK) {
+            throw std::runtime_error{"Failed to resolve PAPI event '" + name + '\''};
+        }
+        if (PAPI_add_event(event_set, event) != PAPI_OK) {
+            throw std::runtime_error{"Failed to add PAPI event '" + name + '\''};
+        }
+    }
+    return event_set;
+}
+#endif
+
+void benchmark_thread(Context context) {
+#ifdef WITH_PAPI
+    int event_set = PAPI_NULL;
+    if (!context.settings().papi_events.empty()) {
+        context.thread_data().papi_event_counter.resize(context.settings().papi_events.size());
+        try {
+            event_set = prepare_papi(context.settings());
+        } catch (std::exception const& e) {
+            context.write(std::cerr) << e.what() << '\n';
+        }
+    }
+#endif
+#ifdef LOG_OPERATIONS
+    context.thread_data().pushes.reserve(
+        static_cast<std::size_t>(context.settings().prefill_per_thread + 2 * context.settings().iterations_per_thread));
+    context.thread_data().pops.reserve(static_cast<std::size_t>(2 * context.settings().iterations_per_thread));
+#endif
+
+    std::vector<key_type> prefill(static_cast<std::size_t>(context.settings().prefill_per_thread));
+
+    if (context.id() == 0) {
+        std::clog << "Preparing...\n";
+    }
+    std::seed_seq seed{context.settings().seed, context.id()};
+    std::default_random_engine rng(seed);
+    context.synchronize();
+    std::generate(prefill.begin(), prefill.end(),
+                  [&rng, min = context.settings().min_prefill, max = context.settings().max_prefill]() {
+                      return std::uniform_int_distribution<key_type>(min, max)(rng);
+                  });
+    std::generate_n(context.shared_data().updates.begin() + context.id() * context.settings().iterations_per_thread,
+                    context.settings().iterations_per_thread,
+                    [&rng, min = context.settings().min_update, max = context.settings().max_update]() {
+                        return std::uniform_int_distribution<long>(min, max)(rng);
+                    });
+    context.synchronize();
+    if (context.id() == 0) {
+        std::clog << "Prefilling...\n";
+    }
+    context.synchronize();
+    for (auto i = 0LL; i < context.settings().prefill_per_thread; ++i) {
+        context.push({prefill[static_cast<std::size_t>(i)],
+                      static_cast<value_type>(context.id() * context.settings().prefill_per_thread + i)});
+    }
+    context.synchronize();
+    if (context.id() == 0) {
+        std::clog << "Working...\n";
+    }
+#ifdef WITH_PAPI
+    if (!context.settings().papi_events.empty()) {
+        if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
+            context.write(std::cerr) << "Failed to start performance counters\n";
+        }
+    }
+#endif
+    if (context.id() == 0) {
+        context.shared_data().start_time = std::chrono::high_resolution_clock::now();
+    }
+    context.synchronize();
+    work_loop(context);
+    context.synchronize();
+    if (context.id() == 0) {
+        context.shared_data().end_time = std::chrono::high_resolution_clock::now();
+    }
+#ifdef WITH_PAPI
+    if (!context.settings().papi_events.empty()) {
+        if (int ret = PAPI_stop(event_set, context.thread_data().papi_event_counter.data()); ret != PAPI_OK) {
+            context.write(std::cerr) << "Failed to stop performance counters\n";
+        }
+    }
+#endif
+    context.shared_data().thread_data[static_cast<std::size_t>(context.id())] = std::move(context.thread_data());
+}
+
 void run_benchmark(Settings const& settings) {
-    Task task(settings);
-    std::vector<ThreadData> thread_data(static_cast<std::size_t>(settings.num_threads));
+    SharedData shared_data;
+    shared_data.updates.resize(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads));
+    shared_data.thread_data.resize(static_cast<std::size_t>(settings.num_threads));
     auto pq =
         pq_type(settings.num_threads, static_cast<std::size_t>(settings.prefill_per_thread * settings.num_threads),
                 settings.pq_settings);
 
     auto dispatcher = thread_coordination::Dispatcher(settings.num_threads, [&](auto ctx) {
-        auto t_id = static_cast<std::size_t>(ctx.id());
-        thread_data[t_id] = benchmark_thread(std::move(ctx), settings, pq, task);
+        benchmark_thread(Context(std::move(ctx), pq.get_handle(), shared_data, settings));
     });
     dispatcher.wait();
 
 #ifdef LOG_OPERATIONS
     std::clog << "Writing logs...\n";
     std::ofstream log_out(settings.log_file);  // assumed to be valid
-    write_log(thread_data, log_out);
+    write_log(shared_data.thread_data, log_out);
     log_out.close();
 #endif
     std::clog << "Done\n";
-    write_result_json(settings, thread_data, std::cout);
+    std::clog << '\n';
+    std::clog << "= Results =\n";
+    std::clog << "Time (s): " << std::fixed << std::setprecision(3)
+              << std::chrono::duration<double>(shared_data.end_time - shared_data.start_time).count() << '\n';
+    write_result_json(settings, shared_data, std::cout);
 }
 
 int main(int argc, char* argv[]) {

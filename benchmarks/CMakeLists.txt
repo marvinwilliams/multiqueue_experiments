@@ -1,8 +1,7 @@
-add_subdirectory(wrapper)
-
 add_library(benchmark_base INTERFACE)
-target_include_directories(benchmark_base INTERFACE ".")
-target_include_directories(benchmark_base SYSTEM INTERFACE "${CMAKE_SOURCE_DIR}/third_party")
+target_include_directories(benchmark_base INTERFACE "." "..")
+target_include_directories(benchmark_base SYSTEM
+                           INTERFACE "${CMAKE_SOURCE_DIR}/third_party")
 target_compile_definitions(benchmark_base
                            INTERFACE L1_CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGE_SIZE=${PAGE_SIZE})
@@ -27,7 +26,8 @@ target_link_libraries(knapsack_base INTERFACE benchmark_base Threads::Threads)
 
 add_library(knapsack_float_base INTERFACE)
 target_sources(knapsack_float_base INTERFACE knapsack.cpp "util/threading.cpp")
-target_link_libraries(knapsack_float_base INTERFACE benchmark_base Threads::Threads)
+target_link_libraries(knapsack_float_base INTERFACE benchmark_base
+                                                    Threads::Threads)
 target_compile_definitions(knapsack_float_base INTERFACE FLOAT_INSTANCE)
 
 if(EXP_TUNING_TARGETS)
@@ -64,9 +64,9 @@ foreach(target ${COMPETITORS})
 endforeach()
 
 foreach(target ${GENERIC_COMPETITORS})
-    add_benchmark(knapsack_float ${target})
-    add_dependencies(knapsack_float_all knapsack_float_${target})
-    add_dependencies(knapsack_float_log_all knapsack_float_log_${target})
+  add_benchmark(knapsack_float ${target})
+  add_dependencies(knapsack_float_all knapsack_float_${target})
+  add_dependencies(knapsack_float_log_all knapsack_float_log_${target})
 endforeach()
 
 if(EXP_TUNING_TARGETS)

@@ -1,7 +1,6 @@
 set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
 add_library(mq INTERFACE)
-# target_include_directories(mq INTERFACE ".")
 target_link_libraries(mq INTERFACE multiqueue::multiqueue)
 target_compile_definitions(mq INTERFACE PQ_MQ)
 
@@ -16,10 +15,6 @@ target_link_libraries(mq_random_strict INTERFACE mq)
 add_library(mq_stick_random INTERFACE)
 target_compile_definitions(mq_stick_random INTERFACE MQ_MODE_STICK_RANDOM)
 target_link_libraries(mq_stick_random INTERFACE mq)
-
-# add_library(mq_stick_random_shared INTERFACE)
-# target_compile_definitions(mq_stick_random_shared INTERFACE MQ_MODE_STICK_)
-# target_link_libraries(mq_stick_random_shared INTERFACE mq)
 
 add_library(mq_stick_swap INTERFACE)
 target_compile_definitions(mq_stick_swap INTERFACE MQ_MODE_STICK_SWAP)
@@ -131,7 +126,7 @@ target_compile_options(linden PRIVATE -w -std=gnu++17)
 target_compile_definitions(linden PUBLIC INTEL
                                          CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_include_directories(
-  linden PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
+  linden SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
                 ${KLSM_DIR}/lib/spraylist_linden/include)
 set_property(TARGET linden PROPERTY pq_name linden)
 target_compile_definitions(linden INTERFACE PQ_LINDEN)
@@ -144,7 +139,7 @@ add_library(
   ${KLSM_DIR}/lib/capq/qdlocksrc/locks/tatas_lock.c
   ${KLSM_DIR}/lib/capq/gc/gc.c
   ${KLSM_DIR}/lib/capq/gc/ptst.c)
-target_include_directories(capq PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
+target_include_directories(capq SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
                                        ${KLSM_DIR}/lib/capq/qdlocksrc)
 target_compile_options(capq PRIVATE -w -std=gnu++17)
 target_compile_definitions(capq PUBLIC INTEL
@@ -165,7 +160,7 @@ target_compile_options(spraylist PRIVATE -w -std=gnu17)
 target_compile_definitions(
   spraylist PUBLIC INTEL LOCKFREE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_include_directories(
-  spraylist PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
+  spraylist SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
                    ${KLSM_DIR}/lib/spraylist_linden/include)
 set_property(TARGET spraylist PROPERTY pq_name spraylist)
 target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)

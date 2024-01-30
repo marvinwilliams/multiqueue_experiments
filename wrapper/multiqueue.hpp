@@ -170,13 +170,14 @@ class MultiQueue {
         void register_cmd_options(cxxopts::Options &cmd) {
             cmd.add_options()("c,queue-factor", "The number of queues per thread", cxxopts::value<int>(factor),
                               "NUMBER");
+            cmd.add_options()("mq-seed", "Seed for the multiqueue", cxxopts::value<int>(config.seed), "NUMBER");
             if constexpr (has_stickiness) {
                 cmd.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(config.stickiness),
                                   "NUMBER");
             }
         }
 
-        bool validate() const {
+        [[nodiscard]] bool validate() const {
             if (factor <= 1) {
                 std::cerr << "Error: Queue factor must be at least 2\n";
                 return false;
@@ -192,6 +193,7 @@ class MultiQueue {
 
         void write_human_readable(std::ostream &out) const {
             out << "Queue factor: " << factor << '\n';
+            out << "MQ seed: " << config.seed << '\n';
             if constexpr (has_stickiness) {
                 out << "Stickiness: " << config.stickiness << '\n';
             }
@@ -199,9 +201,11 @@ class MultiQueue {
 
         void write_json(std::ostream &out) const {
             out << '{';
-            out << std::quoted("queue-factor") << ':' << factor;
+            out << std::quoted("queue_factor") << ':' << factor << ',';
+            out << std::quoted("seed") << ':' << config.seed;
             if constexpr (has_stickiness) {
-                out << ',' << std::quoted("stickiness") << ':' << config.stickiness;
+                out << ',';
+                out << std::quoted("stickiness") << ':' << config.stickiness;
             }
             out << '}';
         }

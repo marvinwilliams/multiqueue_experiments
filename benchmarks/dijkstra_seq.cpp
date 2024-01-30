@@ -1,7 +1,7 @@
-#include "build_info.hpp"
-#include "graph.hpp"
+#include "util/build_info.hpp"
+#include "util/graph.hpp"
 
-#include "cxxopts.hpp"
+#include <cxxopts.hpp>
 
 #include <chrono>
 #include <filesystem>
@@ -25,132 +25,123 @@ struct Node {
     friend bool operator>(Node const& lhs, Node const& rhs) noexcept {
         return lhs.distance > rhs.distance;
     }
-    friend bool operator<(Node const& lhs, Node const& rhs) noexcept {
-        return lhs.distance < rhs.distance;
-    }
 };
 
-#ifdef USE_FIFO
-using PriorityQueue = std::queue<Node>;
-#else
-#ifdef REVERSE_PRIORITY
-using PriorityQueue = std::priority_queue<Node, std::vector<Node>, std::less<>>;
-#else
-using PriorityQueue = std::priority_queue<Node, std::vector<Node>, std::greater<>>;
-#endif
-#endif
-
-struct Data {
-    std::vector<long long> shortest_distances;
-    long long processed_nodes{0};
-    long long ignored_nodes{0};
-
-    Data(std::size_t num_nodes) : shortest_distances(num_nodes, std::numeric_limits<long long>::max()) {
-    }
-};
-
-void dijkstra(PriorityQueue& pq, Data& data, Graph const& graph) noexcept {
-    while (!pq.empty()) {
-#ifdef USE_FIFO
-        auto node = pq.front();
-#else
-        auto node = pq.top();
-#endif
-        pq.pop();
-        // Ignore stale nodes
-        if (node.distance > data.shortest_distances[node.id]) {
-            ++data.ignored_nodes;
-            continue;
-        }
-        ++data.processed_nodes;
-        for (std::size_t i = graph.nodes[node.id]; i < graph.nodes[node.id + 1]; ++i) {
-            auto d = node.distance + graph.edges[i].weight;
-            if (d < data.shortest_distances[graph.edges[i].target]) {
-                data.shortest_distances[graph.edges[i].target] = d;
-                pq.push({d, graph.edges[i].target});
-            }
-        }
-    }
-}
-
-int main(int argc, char* argv[]) {
-    write_build_info(std::clog);
-    std::clog << "\nCommand line:";
-
-    for (int i = 0; i < argc; ++i) {
-        std::clog << ' ' << argv[i];
-    }
-    std::clog << '\n' << '\n';
-
-    std::filesystem::path graph_file;
-    std::filesystem::path distance_file;
-
-    cxxopts::Options options(argv[0]);
-    // clang-format off
-    options.add_options()
-      ("file", "The input graph", cxxopts::value<std::filesystem::path>(graph_file)->default_value("graph.gr"), "PATH")
-      ("o,distance-file", "Path to write the distances to", cxxopts::value<std::filesystem::path>(distance_file), "PATH")
-      ("h,help", "Print this help");
-    // clang-format on
-    options.parse_positional({"file"});
-
-    {
-        cxxopts::ParseResult result;
-        try {
-            result = options.parse(argc, argv);
-        } catch (cxxopts::OptionParseException const& e) {
-            std::cerr << "Error parsing arguments: " << e.what() << '\n';
-            std::cerr << options.help() << std::endl;
-            return 1;
-        }
-        if (result.count("help") > 0U) {
-            std::cerr << options.help() << std::endl;
-            return 0;
-        }
-    }
-    std::ofstream distance_out;
-    if (!distance_file.empty()) {
-        distance_out = std::ofstream(distance_file);
-        if (!distance_out) {
-            std::cerr << "Error: Could not open file " << distance_file << " for writing" << std::endl;
-            return EXIT_FAILURE;
-        }
-    }
-    std::clog << "Reading graph..." << std::endl;
+void dijkstra(std::filesystem::path const& graph_file) noexcept {
+    std::clog << "Reading graph...\n";
     Graph graph;
     try {
         graph = Graph(graph_file);
     } catch (std::runtime_error const& e) {
-        std::cerr << "\nError reading graph: " << e.what() << std::endl;
-        return 1;
+        std::clog << "Error: " << e.what() << '\n';
+        std::exit(EXIT_FAILURE);
     }
-
-    PriorityQueue pq;
-    Data data(graph.num_nodes());
-    data.shortest_distances[0] = 0;
-    pq.push({0, 0});
-
-    std::clog << "Computing shortest paths..." << std::endl;
+    std::clog << "Graph has " << graph.num_nodes() << " nodes and " << graph.num_edges() << " edges\n";
+    std::vector<long long> distances(graph.num_nodes(), std::numeric_limits<long long>::max());
+    long long processed_nodes{0};
+    long long ignored_nodes{0};
+    std::vector<Node> container;
+    container.reserve(graph.num_nodes());
+    std::priority_queue<Node, std::vector<Node>, std::greater<>> pq({}, std::move(container));
+    std::clog << "Working...\n";
     auto t_start = std::chrono::steady_clock::now();
-    dijkstra(pq, data, graph);
-    auto t_end = std::chrono::steady_clock::now();
-    auto time = std::chrono::duration<double>(t_end - t_start).count();
-
-    if (distance_out.is_open()) {
-        std::clog << "Writing distances..." << std::endl;
-        for (std::size_t i = 0; i < graph.num_nodes(); ++i) {
-            distance_out << i << ' ' << data.shortest_distances[i] << '\n';
+    distances[0] = 0;
+    pq.push({0, 0});
+    while (!pq.empty()) {
+        auto node = pq.top();
+        pq.pop();
+        // Ignore stale nodes
+        if (node.distance > distances[node.id]) {
+            ++ignored_nodes;
+            pq.pop();
+            continue;
         }
-        distance_out.close();
+        for (std::size_t i = graph.nodes[node.id]; i < graph.nodes[node.id + 1]; ++i) {
+            auto d = node.distance + graph.edges[i].weight;
+            if (d < distances[graph.edges[i].target]) {
+                distances[graph.edges[i].target] = d;
+                pq.push({d, graph.edges[i].target});
+            }
+        }
+        ++processed_nodes;
     }
-    std::clog << "Finished\n" << std::endl;
+    auto t_end = std::chrono::steady_clock::now();
+    std::clog << "Done\n\n";
+    auto longest_distance = *std::max_element(distances.begin(), distances.end(), [](auto const& a, auto const& b) {
+        if (b == std::numeric_limits<long long>::max()) {
+            return false;
+        }
+        if (a == std::numeric_limits<long long>::max()) {
+            return true;
+        }
+        return a < b;
+    });
+    std::clog << "= Results =\n";
+    std::clog << "Time (s): " << std::fixed << std::setprecision(3)
+              << std::chrono::duration<double>(t_end - t_start).count() << '\n';
+    std::clog << "Longest distance: " << longest_distance << '\n';
+    std::clog << "Processed nodes: " << processed_nodes << '\n';
+    std::clog << "Ignored nodes: " << ignored_nodes << '\n';
 
-    std::clog << "Time (s): " << std::setprecision(3) << time << '\n';
-    std::clog << "Processed nodes: " << data.processed_nodes << '\n';
-    std::clog << "Ignored nodes: " << data.ignored_nodes << '\n';
-    std::clog << "Total nodes: " << data.processed_nodes + data.ignored_nodes << '\n';
+    std::cout << '{';
+    std::cout << std::quoted("settings") << ':';
+    std::cout << '{';
+    std::cout << std::quoted("graph_file") << ':' << graph_file;
+    std::cout << '}' << ',';
+    std::cout << std::quoted("graph") << ':';
+    std::cout << '{';
+    std::cout << std::quoted("num_nodes") << ':' << graph.num_nodes() << ',';
+    std::cout << std::quoted("num_edges") << ':' << graph.num_edges();
+    std::cout << '}' << ',';
+    std::cout << std::quoted("results") << ':';
+    std::cout << '{';
+    std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
+    std::cout << std::quoted("longest_distance") << ':' << longest_distance << ',';
+    std::cout << std::quoted("processed_nodes") << ':' << processed_nodes << ',';
+    std::cout << std::quoted("ignored_nodes") << ':' << ignored_nodes;
+    std::cout << '}';
+    std::cout << '}' << '\n';
+}
 
-    std::cout << "graph,nodes,edges,time,processed_nodes,ignored_nodes\n";
-    std::cout << graph_file.string() << ',' << graph.num_nodes() << ',' << graph.num_edges() << ',' << time << ','
-              << data.processed_nodes << ',' << data.ignored_nodes << std::endl;
+int main(int argc, char* argv[]) {
+    write_build_info(std::clog);
+    std::clog << '\n';
+
+    std::clog << "= Command line =\n";
+    for (int i = 0; i < argc; ++i) {
+        std::clog << argv[i];
+        if (i != argc - 1) {
+            std::clog << ' ';
+        }
+    }
+    std::clog << '\n' << '\n';
+
+    cxxopts::Options cmd(argv[0]);
+    std::filesystem::path graph_file;
+    // clang-format off
+    cmd.add_options()
+        ("h,help", "Print this help")
+        ("graph", "The input graph", cxxopts::value<std::filesystem::path>(graph_file), "PATH");
+    // clang-format on
+    cmd.parse_positional({"graph"});
+
+    try {
+        auto args = cmd.parse(argc, argv);
+        if (args.count("help") > 0) {
+            std::cerr << cmd.help() << '\n';
+            return EXIT_SUCCESS;
+        }
+    } catch (cxxopts::OptionParseException const& e) {
+        std::cerr << "Error parsing command line: " << e.what() << '\n';
+        std::cerr << "Use --help for usage information" << '\n';
+        return EXIT_FAILURE;
+    }
+
+    std::clog << "= Settings =\n";
+    std::clog << "Graph: " << graph_file << '\n';
+    std::clog << '\n';
+
+    std::clog << "= Running benchmark =\n";
+    dijkstra(graph_file);
+    return EXIT_SUCCESS;
 }
