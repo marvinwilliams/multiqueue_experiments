@@ -8,18 +8,36 @@
     {
       "name": "base",
       "hidden": true,
-      "cacheVariables": {
-        "CMAKE_CXX_FLAGS": "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wduplicated-branches -Wduplicated-cond -Wlogical-op -Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wold-style-cast -Wformat=2 -Wundef -Wcast-align -Wcast-qual -Wdisabled-optimization -Wredundant-decls -Wunsafe-loop-optimizations -Wnoexcept -Wsuggest-final-types -Wsuggest-final-methods -Wsuggest-override"
+      "environment": {
+        "WARNINGS": "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wduplicated-branches -Wduplicated-cond -Wlogical-op -Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wold-style-cast -Wformat=2 -Wundef -Wcast-align -Wcast-qual -Wdisabled-optimization -Wredundant-decls -Wunsafe-loop-optimizations -Wnoexcept -Wsuggest-final-types -Wsuggest-final-methods -Wsuggest-override",
+        "DEFAULT_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto",
+        "RELEASE_FLAGS": "-O3 -DNDEBUG -march=native -flto=auto",
+        "DEBUG_FLAGS": "-Og -ggdb"
       }
     },
     {
-      "name": "development",
-      "displayName": "Development Preset",
+      "name": "multi",
+      "displayName": "Multi Config Preset",
       "inherits": "base",
-      "binaryDir": "build-development",
+      "binaryDir": "build_multi",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Development",
-        "CMAKE_CXX_FLAGS_DEVELOPMENT": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto"
+        "CMAKE_CONFIGURATION_TYPES": "Default;Release;Debug;ASan;UBSan;TSan",
+        "CMAKE_CXX_FLAGS": "$env{WARNINGS}",
+        "CMAKE_CXX_FLAGS_DEFAULT": "$env{DEFAULT_FLAGS}",
+        "CMAKE_CXX_FLAGS_RELEASE": "$env{RELEASE_FLAGS}",
+        "CMAKE_CXX_FLAGS_DEBUG": "$env{DEBUG_FLAGS}",
+        "CMAKE_CXX_FLAGS_ASAN": "$env{DEFAULT_FLAGS} -fsanitize=address",
+        "CMAKE_CXX_FLAGS_UBSAN": "$env{DEFAULT_FLAGS} -fsanitize=undefined",
+        "CMAKE_CXX_FLAGS_TSAN": "$env{DEFAULT_FLAGS} -fsanitize=thread"
+      }
+    },
+    {
+      "name": "default",
+      "displayName": "Default Preset",
+      "inherits": "base",
+      "binaryDir": "build",
+      "cacheVariables": {
+        "CMAKE_CXX_FLAGS": "$env{WARNINGS} $env{DEFAULT_FLAGS}"
       },
       "warnings": {
         "dev": true,
@@ -30,67 +48,53 @@
       "name": "release",
       "displayName": "Release Preset",
       "inherits": "base",
-      "binaryDir": "build-release",
+      "binaryDir": "build_release",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Release",
-        "CMAKE_CXX_FLAGS_RELEASE": "-O3 -DNDEBUG -march=native -flto=auto"
+        "CMAKE_CXX_FLAGS": "$env{WARNINGS} $env{RELEASE_FLAGS}"
       }
     },
     {
       "name": "debug",
       "displayName": "Debug Preset",
       "inherits": "base",
-      "binaryDir": "build-debug",
+      "binaryDir": "build_debug",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "Debug",
-        "CMAKE_CXX_FLAGS_DEBUG": "-Og -ggdb"
+        "CMAKE_CXX_FLAGS": "$env{WARNINGS} $env{DEBUG_FLAGS}"
       }
     },
     {
       "name": "asan",
-      "displayName": "ASAN Preset",
+      "displayName": "ASan Preset",
       "inherits": "base",
-      "binaryDir": "build-asan",
+      "binaryDir": "build_asan",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "ASan",
-        "CMAKE_CXX_FLAGS_ASAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=address"
+        "CMAKE_CXX_FLAGS": "$env{WARNINGS} $env{DEFAULT_FLAGS} -fsanitize=address"
       }
     },
     {
       "name": "ubsan",
-      "displayName": "UBSAN Preset",
+      "displayName": "UBSan Preset",
       "inherits": "base",
-      "binaryDir": "build-ubsan",
+      "binaryDir": "build_ubsan",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "UBSan",
-        "CMAKE_CXX_FLAGS_UBSAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=undefined"
+        "CMAKE_CXX_FLAGS": "$env{WARNINGS} $env{DEFAULT_FLAGS} -fsanitize=undefined"
       }
     },
     {
       "name": "tsan",
-      "displayName": "TSAN Preset",
+      "displayName": "TSan Preset",
       "inherits": "base",
-      "binaryDir": "build-tsan",
+      "binaryDir": "build_tsan",
       "cacheVariables": {
-        "CMAKE_BUILD_TYPE": "TSan",
-        "CMAKE_CXX_FLAGS_TSAN": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto -fsanitize=thread"
-      }
-    },
-    {
-      "name": "clangd",
-      "displayName": "Clangd Preset",
-      "binaryDir": "build-clangd",
-      "cacheVariables": {
-        "CMAKE_EXPORT_COMPILE_COMMANDS": "ON",
-        "CMAKE_CXX_COMPILER": "clang++"
+        "CMAKE_CXX_FLAGS": "$env{WARNINGS} $env{DEFAULT_FLAGS} -fsanitize=thread"
       }
     }
   ],
   "buildPresets": [
     {
-      "name": "development",
-      "displayName": "Development Preset",
-      "configurePreset": "development"
+      "name": "default",
+      "displayName": "Default Preset",
+      "configurePreset": "default"
     },
     {
       "name": "release",
@@ -104,17 +108,17 @@
     },
     {
       "name": "asan",
-      "displayName": "ASAN Preset",
+      "displayName": "ASan Preset",
       "configurePreset": "asan"
     },
     {
       "name": "ubsan",
-      "displayName": "UBSAN Preset",
+      "displayName": "UBSan Preset",
       "configurePreset": "ubsan"
     },
     {
       "name": "tsan",
-      "displayName": "TSAN Preset",
+      "displayName": "TSan Preset",
       "configurePreset": "tsan"
     }
   ]
