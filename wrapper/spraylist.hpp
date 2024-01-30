@@ -17,7 +17,6 @@ extern "C" {
 
 #include <cstdint>
 #include <limits>
-#include <memory>
 #include <mutex>
 #include <optional>
 #include <ostream>
@@ -38,32 +37,38 @@ class Spraylist {
     using value_type = std::pair<key_type, mapped_type>;
 
    private:
-    struct Deleter {
-        void operator()(::sl_intset_t* p) {
-            ::sl_set_delete(p);
-        }
-    };
-    alignas(64) std::unique_ptr<::sl_intset_t, Deleter> pq_;
+    // No unique_ptr because of alignment
+    ::sl_intset_t* pq_;
     int num_threads_;
 
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
 
-    struct ThreadDataDeleter {
-        void operator()(::thread_data_t* p) {
-            delete p;
-        }
-    };
-
     class Handle {
         friend Spraylist;
         ::sl_intset_t* pq_;
-        std::unique_ptr<::thread_data_t, ThreadDataDeleter> data_;
+        // No unique_ptr because of alignment
+        ::thread_data_t* data_;
 
-        explicit Handle(::sl_intset_t& pq, std::unique_ptr<::thread_data_t, ThreadDataDeleter> data)
-            : pq_{&pq}, data_{std::move(data)} {
+        explicit Handle(::sl_intset_t& pq, ::thread_data_t* data) : pq_{&pq}, data_{std::move(data)} {
         }
 
        public:
+        ~Handle() {
+            delete data_;
+        }
+
+        Handle(Handle const&) = delete;
+        Handle& operator=(Handle const&) = delete;
+        Handle(Handle&& other) noexcept {
+            pq_ = std::exchange(other.pq_, nullptr);
+            data_ = std::exchange(other.data_, nullptr);
+        }
+        Handle& operator=(Handle&& other) noexcept {
+            pq_ = std::exchange(other.pq_, nullptr);
+            data_ = std::exchange(other.data_, nullptr);
+            return *this;
+        }
+
         void push(value_type const& value) {
             ::sl_add_val(pq_, Min ? value.first : sentinel - value.first - 1, value.second, TRANSACTIONAL);
         }
@@ -73,7 +78,7 @@ class Spraylist {
             unsigned long value;
             int ret;
             do {
-                ret = ::spray_delete_min_key(pq_, &key, &value, data_.get());
+                ret = ::spray_delete_min_key(pq_, &key, &value, data_);
             } while (ret == 0 && key != sentinel);
             if (key == sentinel) {
                 return std::nullopt;
@@ -82,12 +87,12 @@ class Spraylist {
         };
     };
 
-    [[nodiscard]] std::unique_ptr<::thread_data_t, ThreadDataDeleter> new_thread_data() const {
+    [[nodiscard]] ::thread_data_t* new_thread_data() const {
         static std::mutex m;
         auto l = std::scoped_lock(m);
         ::ssalloc_init(num_threads_);
         seeds = ::seed_rand();
-        auto thread_data = std::unique_ptr<::thread_data_t, ThreadDataDeleter>(new thread_data_t);
+        auto thread_data = new thread_data_t;
         thread_data->seed = static_cast<unsigned int>(::rand());
         thread_data->seed2 = static_cast<unsigned int>(::rand());
         thread_data->nb_threads = static_cast<unsigned int>(num_threads_);
@@ -110,7 +115,20 @@ class Spraylist {
         : num_threads_(num_threads) {
         ::ssalloc_init(num_threads_);
         *::levelmax = static_cast<std::uint8_t>(floor_log_2(initial_capacity));
-        pq_.reset(sl_set_new());
+        pq_ = sl_set_new();
+    }
+    Spraylist(Spraylist const&) = delete;
+    Spraylist& operator=(Spraylist const&) = delete;
+    Spraylist(Spraylist&& other) noexcept {
+        pq_ = std::exchange(other.pq_, nullptr);
+        num_threads_ = other.num_threads_;
+    }
+    Spraylist& operator=(Spraylist&& other) noexcept {
+        pq_ = std::exchange(other.pq_, nullptr);
+        return *this;
+    }
+    ~Spraylist() {
+        ::sl_set_delete(pq_);
     }
 
     static void write_human_readable(std::ostream& out) {
