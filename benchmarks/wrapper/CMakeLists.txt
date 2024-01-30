@@ -30,14 +30,8 @@ target_compile_definitions(mq_stick_parametric
                            INTERFACE MQ_MODE_STICK_PARAMETRIC)
 target_link_libraries(mq_stick_parametric INTERFACE mq)
 
-list(
-  APPEND
-  MQ_VARIANTS
-  mq_random
-  mq_random_strict
-  mq_stick_random
-  mq_stick_swap
-  mq_stick_parametric)
+list(APPEND MQ_VARIANTS mq_random mq_random_strict mq_stick_random
+     mq_stick_swap)
 
 if(EXP_TUNING_TARGETS)
   add_library(tuning_baseline INTERFACE)

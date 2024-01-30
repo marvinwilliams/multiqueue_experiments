@@ -22,22 +22,6 @@ class LockedPQ {
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
     using value_compare = util::ValueCompare<value_type, key_compare, util::PairFirst>;
 
-    struct Handle {
-        friend LockedPQ;
-        LockedPQ* pq_;
-
-        Handle(LockedPQ* pq) : pq_{pq} {
-        }
-
-        void push(value_type const& value) {
-            pq_->push(value);
-        }
-
-        std::optional<value_type> try_pop() {
-            return pq_->try_pop();
-        }
-    };
-
    private:
     using pq_type = std::priority_queue<value_type, std::vector<value_type>, value_compare>;
 
@@ -47,9 +31,10 @@ class LockedPQ {
    public:
     using handle_type = util::SelfHandle<LockedPQ>;
     using settings_type = util::EmptySettings;
-    LockedPQ(int /*unused*/, std::size_t capacity, settings_type const& /*unused*/) {
+
+    LockedPQ(int /*unused*/, std::size_t initial_capacity, settings_type const& /*unused*/) {
         std::vector<value_type> v{};
-        v.reserve(capacity);
+        v.reserve(initial_capacity);
         pq_ = pq_type{value_compare{}, std::move(v)};
     }
 
@@ -66,6 +51,10 @@ class LockedPQ {
         auto retval = pq_.top();
         pq_.pop();
         return retval;
+    }
+
+    static void write_human_readable(std::ostream& out) {
+        out << "Locked PQ\n";
     }
 
     handle_type get_handle() {

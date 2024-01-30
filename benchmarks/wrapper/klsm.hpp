@@ -4,7 +4,8 @@
 
 #include "k_lsm/k_lsm.h"
 
-#include <benchmarks/wrapper/util.hpp>
+#include "util.hpp"
+
 #include <cxxopts.hpp>
 
 #include <algorithm>

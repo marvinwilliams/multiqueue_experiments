@@ -2,6 +2,13 @@
 
 // Adapted from klsm
 
+extern "C" {
+#include "capq/capq.h"
+#include "capq/gc/gc.h"
+}
+
+#include "util.hpp"
+
 #include "cxxopts.hpp"
 
 #include <ios>
@@ -10,11 +17,6 @@
 #include <optional>
 #include <ostream>
 #include <utility>
-
-extern "C" {
-#include "capq/capq.h"
-#include "capq/gc/gc.h"
-}
 
 namespace wrapper::capq {
 
@@ -41,7 +43,7 @@ class CAPQ {
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
 
    public:
-    using handle_type = SelfHandle<CAPQ>;
+    using handle_type = util::SelfHandle<CAPQ>;
     using settings_type = util::EmptySettings;
 
     explicit CAPQ(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/) {

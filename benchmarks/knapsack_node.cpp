@@ -25,17 +25,6 @@
 #include <utility>
 #include <vector>
 
-#ifdef CORES_PER_NUMA_NODE
-static constexpr auto cores_per_numa_node = CORES_PER_NUMA_NODE;
-#else
-static constexpr auto cores_per_numa_node = 4;
-#endif
-#ifdef NUM_NUMA_NODES
-static constexpr auto num_numa_nodes = NUM_NUMA_NODES;
-#else
-static constexpr auto num_numa_nodes = 16;
-#endif
-
 static constexpr auto default_n = 1000;
 static constexpr auto default_f = 0.5;
 #ifdef INTEGER_INSTANCE

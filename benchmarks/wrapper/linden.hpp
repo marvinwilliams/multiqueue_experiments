@@ -9,6 +9,8 @@ extern "C" {
 #undef min
 #undef max
 
+#include "util.hpp"
+
 #include <cxxopts.hpp>
 
 #include <limits>
@@ -73,7 +75,7 @@ class Linden {
     }
 
     handle_type get_handle() {
-        return handle_type{pq_.get()};
+        return handle_type{*this};
     }
 };
 

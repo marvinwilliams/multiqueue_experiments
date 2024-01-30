@@ -26,16 +26,16 @@
 #define PQ wrapper::spraylist::Spraylist
 #elif defined PQ_TBB_PQ
 #include "wrapper/tbb_priority_queue.hpp"
-using namespace wrapper::tbb_priority_queue;
+#define PQ wrapper::tbb_pq::TBBPriorityQueue
 #elif defined PQ_TBB_FIFO
 #include "wrapper/tbb_queue.hpp"
-using namespace wrapper::tbb_queue;
+#define PQ wrapper::tbb_fifo::TBBFIFO
 #elif defined PQ_SMQ
 #include "wrapper/smq.hpp"
 #define PQ wrapper::stealing_mq::StealingMQ
 #elif defined PQ_LOCKED_PQ
 #include "wrapper/locked_pq.hpp"
-using namespace wrapper::locked_pq;
+#define PQ wrapper::locked_pq::LockedPQ
 #else
 #error No valid PQ specified
 #endif
