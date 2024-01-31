@@ -19,13 +19,42 @@ namespace thread_coordination {
 
 namespace affinity {
 
-struct automatic {
+namespace detail {
+std::vector<std::array<std::size_t, 3>> get_cache_hierarchy() {
+    std::vector<std::array<std::size_t, 3>> hierarchy(std::thread::hardware_concurrency());
+    std::vector<std::size_t> l1_lookup;
+    for (std::size_t i = 0; i < hierarchy.size(); ++i) {
+        hierarchy[i][0] = i;
+        auto ss = std::ifstream("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cache/index0/id");
+        ss >> hierarchy[i][1];
+        ss = std::ifstream("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cache/index3/id");
+        ss >> hierarchy[i][2];
+    }
+    for (std::size_t l = 0; l < 2; ++l) {
+        std::vector<std::vector<std::size_t>> lookup;
+        for (auto& h : hierarchy) {
+            if (h[l + 1] >= lookup.size()) {
+                lookup.resize(h[l + 1] + 1);
+            }
+            auto it = std::find(lookup[h[l + 1]].begin(), lookup[h[l + 1]].end(), h[l]);
+            if (it == lookup[h[l + 1]].end()) {
+                lookup[h[l + 1]].push_back(h[l]);
+                it = lookup[h[l + 1]].end() - 1;
+            }
+            h[l] = std::size_t(std::distance(lookup[h[l + 1]].begin(), it));
+        }
+    }
+    return hierarchy;
+}
+}  // namespace detail
+
+struct None {
     threading::thread_config operator()(int /*unused*/) const {
         return {};
     }
 };
 
-struct distinct_cpu {
+struct ThreadId {
     std::size_t stride = 1;
     std::size_t offset = 0;
 
@@ -36,7 +65,7 @@ struct distinct_cpu {
     }
 };
 
-struct same_cpu {
+struct Same {
     std::size_t cpu = 1;
 
     threading::thread_config operator()(int /*unused*/) const {
@@ -46,22 +75,16 @@ struct same_cpu {
     }
 };
 
-struct same_caches {
+struct CloseCaches {
     std::vector<std::size_t> order;
 
-    same_caches() : order(std::thread::hardware_concurrency()) {
-        std::vector<std::array<std::size_t, 4>> caches(order.size());
-        for (std::size_t i = 0; i < caches.size(); ++i) {
-            caches[i][0] = i;
-            for (std::size_t l = 1; l < 4; ++l) {
-                auto ss = std::ifstream("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cache/index" +
-                                        std::to_string(l == 1 ? 0 : l) + "/id");
-                ss >> caches[i][l];
-            }
-        }
+    CloseCaches() {
+        auto hierarchy = detail::get_cache_hierarchy();
+        order.resize(hierarchy.size());
         std::iota(order.begin(), order.end(), 0);
-        std::sort(order.begin(), order.end(), [&caches](std::size_t a, std::size_t b) {
-            return std::lexicographical_compare(caches[a].rbegin(), caches[a].rend(), caches[b].rbegin(), caches[b].rend());
+        std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
+            return std::tie(hierarchy[a][2], hierarchy[a][1], hierarchy[a][0]) <
+                std::tie(hierarchy[b][2], hierarchy[b][1], hierarchy[b][0]);
         });
     }
 
@@ -72,37 +95,56 @@ struct same_caches {
     }
 };
 
-struct distinct_caches {
+struct FarCaches {
     std::vector<std::size_t> order;
 
-    distinct_caches() : order(std::thread::hardware_concurrency()) {
-        std::vector<std::array<std::size_t, 5>> caches(order.size());
-        for (std::size_t i = 0; i < caches.size(); ++i) {
-            caches[i][0] = i;
-            for (std::size_t l = 1; l < 4; ++l) {
-                auto ss = std::ifstream("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cache/index" +
-                                        std::to_string(l == 1 ? 0 : l) + "/id");
-                ss >> caches[i][l];
-            }
-        }
-        for (std::size_t l = 0; l < 4; ++l) {
-            std::size_t num_higher_caches =
-                (*std::max_element(caches.begin(), caches.end(),
-                                   [l](const auto& a, const auto& b) { return a[l + 1] < b[l + 1]; }))[l + 1] +
-                1;
-            std::vector<std::vector<std::size_t>> ids(num_higher_caches);
-            for (auto& cache : caches) {
-                auto it = std::find(ids[cache[l + 1]].begin(), ids[cache[l + 1]].end(), cache[l]);
-                auto new_id = std::size_t(std::distance(ids[cache[l + 1]].begin(), it));
-                if (it == ids[cache[l + 1]].end()) {
-                    ids[cache[l + 1]].push_back(cache[l]);
-                }
-                cache[l] = new_id;
-            }
-        }
+    FarCaches() {
+        auto hierarchy = detail::get_cache_hierarchy();
+        order.resize(hierarchy.size());
         std::iota(order.begin(), order.end(), 0);
-        std::sort(order.begin(), order.end(), [&caches](std::size_t a, std::size_t b) {
-            return std::lexicographical_compare(caches[a].begin(), caches[a].end(), caches[b].begin(), caches[b].end());
+        std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
+            return std::tie(hierarchy[a][0], hierarchy[a][1], hierarchy[a][2]) <
+                std::tie(hierarchy[b][0], hierarchy[b][1], hierarchy[b][2]);
+        });
+    }
+
+    threading::thread_config operator()(int id) const {
+        threading::thread_config cfg;
+        cfg.cpu_set.set(order[std::size_t(id)]);
+        return cfg;
+    }
+};
+
+struct CloseL3FarL1 {
+    std::vector<std::size_t> order;
+
+    CloseL3FarL1() {
+        auto hierarchy = detail::get_cache_hierarchy();
+        order.resize(hierarchy.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
+            return std::tie(hierarchy[a][2], hierarchy[a][0], hierarchy[a][1]) <
+                std::tie(hierarchy[b][2], hierarchy[b][0], hierarchy[b][1]);
+        });
+    }
+
+    threading::thread_config operator()(int id) const {
+        threading::thread_config cfg;
+        cfg.cpu_set.set(order[std::size_t(id)]);
+        return cfg;
+    }
+};
+
+struct FarL1CloseL3 {
+    std::vector<std::size_t> order;
+
+    FarL1CloseL3() : order(std::thread::hardware_concurrency()) {
+        auto hierarchy = detail::get_cache_hierarchy();
+        order.resize(hierarchy.size());
+        std::iota(order.begin(), order.end(), 0);
+        std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
+            return std::tie(hierarchy[a][0], hierarchy[a][2], hierarchy[a][1]) <
+                std::tie(hierarchy[b][0], hierarchy[b][2], hierarchy[b][1]);
         });
     }
 
@@ -176,7 +218,7 @@ class Dispatcher {
 
    public:
     template <typename Affinity, typename Task, typename... Args>
-    explicit Dispatcher(Affinity affinity, int num_threads, Task task, Args... args)
+    explicit Dispatcher(Affinity const& affinity, int num_threads, Task task, Args... args)
         : threads_(static_cast<std::size_t>(num_threads)), barrier_(num_threads) {
         for (int i = 0; i < num_threads; ++i) {
             threads_[static_cast<std::size_t>(i)] =
@@ -186,7 +228,7 @@ class Dispatcher {
 
     template <typename Task, typename... Args>
     explicit Dispatcher(int num_threads, Task task, Args&&... args)
-        : Dispatcher(affinity::same_caches{}, num_threads, task, std::forward<Args>(args)...) {
+        : Dispatcher(affinity::FarL1CloseL3{}, num_threads, task, std::forward<Args>(args)...) {
     }
 
     void wait() {

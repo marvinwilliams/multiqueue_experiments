@@ -46,6 +46,7 @@ struct Settings {
     long max_update = 1 << 20;
     long long batch_size = 1 << 12;
     int seed = 1;
+    int affinity = 6;
 #ifdef LOG_OPERATIONS
     std::filesystem::path log_file = "operation_log.txt";
 #endif
@@ -67,6 +68,15 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
             ("max-update", "Max update", cxxopts::value<long>(settings.max_update), "NUMBER")
             ("batch-size", "Batch size", cxxopts::value<long long>(settings.batch_size), "NUMBER")
             ("s,seed", "Initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
+            ("a,affinity", "CPU affinity ("
+                "0: None, "
+                "1: Thread Id, "
+                "2: Same, "
+                "3: Close caches, "
+                "4: Far caches, "
+                "5: Close L3 Far L1, "
+                "6: Far L1 Close L3)"
+                , cxxopts::value<int>(settings.affinity), "NUMBER")
 #ifdef LOG_OPERATIONS
             ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
 #endif
@@ -111,6 +121,10 @@ bool validate_settings(Settings const& settings) {
         std::cerr << "Error: batch size must be greater than 0\n";
         return false;
     }
+    if (settings.affinity < 0 || settings.affinity > 6) {
+        std::cerr << "Error: Invalid affinity\n";
+        return false;
+    }
     if (settings.seed <= 0) {
         std::cerr << "Error: Seed must be greater than 0\n";
         return false;
@@ -149,12 +163,33 @@ bool validate_settings(Settings const& settings) {
 }
 
 void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+    auto affinity_name = [](int a) {
+        switch (a) {
+            case 0:
+                return "None";
+            case 1:
+                return "Thread Id";
+            case 2:
+                return "Same";
+            case 3:
+                return "Close caches";
+            case 4:
+                return "Far caches";
+            case 5:
+                return "Close L3 Far L1";
+            case 6:
+                return "Far L1 Close L3";
+            default:
+                return "";
+        }
+    };
     out << "Threads: " << settings.num_threads << '\n';
     out << "Prefill per thread: " << settings.prefill_per_thread << '\n';
     out << "Iterations per thread: " << settings.iterations_per_thread << '\n';
     out << "Prefill range: [" << settings.min_prefill << ", " << settings.max_prefill << "]\n";
     out << "Update range: [" << settings.min_update << ", " << settings.max_update << "]\n";
     out << "Batch size: " << settings.batch_size << '\n';
+    out << "Affinity: " << affinity_name(settings.affinity) << '\n';
     out << "Seed: " << settings.seed << '\n';
 #ifdef LOG_OPERATIONS
     out << "Log file: " << settings.log_file << '\n';
@@ -182,6 +217,7 @@ void write_settings_json(Settings const& settings, std::ostream& out) {
     out << std::quoted("update_min") << ':' << settings.min_update << ',';
     out << std::quoted("update_max") << ':' << settings.max_update << ',';
     out << std::quoted("batch_size") << ':' << settings.batch_size << ',';
+    out << std::quoted("affinity") << ':' << settings.affinity << ',';
     out << std::quoted("seed") << ':' << settings.seed << ',';
 #ifdef WITH_PAPI
     out << std::quoted("papi_events") << ':';
@@ -483,10 +519,35 @@ void run_benchmark(Settings const& settings) {
         pq_type(settings.num_threads, static_cast<std::size_t>(settings.prefill_per_thread * settings.num_threads),
                 settings.pq_settings);
 
-    auto dispatcher = thread_coordination::Dispatcher(settings.num_threads, [&](auto ctx) {
-        benchmark_thread(Context(std::move(ctx), pq.get_handle(), shared_data, settings));
-    });
-    dispatcher.wait();
+    auto dispatch = [&](auto const& affinity) {
+        auto dispatcher = thread_coordination::Dispatcher(affinity, settings.num_threads, [&](auto ctx) {
+            benchmark_thread(Context(std::move(ctx), pq.get_handle(), shared_data, settings));
+        });
+        dispatcher.wait();
+    };
+    switch (settings.affinity) {
+        case 0:
+            dispatch(thread_coordination::affinity::None{});
+            break;
+        case 1:
+            dispatch(thread_coordination::affinity::ThreadId{});
+            break;
+        case 2:
+            dispatch(thread_coordination::affinity::Same{});
+            break;
+        case 3:
+            dispatch(thread_coordination::affinity::CloseCaches{});
+            break;
+        case 4:
+            dispatch(thread_coordination::affinity::FarCaches{});
+            break;
+        case 5:
+            dispatch(thread_coordination::affinity::CloseL3FarL1{});
+            break;
+        case 6:
+            dispatch(thread_coordination::affinity::FarL1CloseL3{});
+            break;
+    }
 
 #ifdef LOG_OPERATIONS
     std::clog << "Writing logs...\n";

@@ -55,10 +55,7 @@ class KLsm {
         if (!pq_.delete_min(key, value)) {
             return std::nullopt;
         }
-        if (!Min) {
-            key = sentinel_ - key - 1;
-        }
-        return value_type{key, value};
+        return value_type{Min ? key : sentinel_ - key - 1, value};
     }
 
     static void write_human_readable(std::ostream& out) {
