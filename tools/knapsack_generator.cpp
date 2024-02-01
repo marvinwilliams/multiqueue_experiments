@@ -10,11 +10,15 @@ void generate_uncorrelated(int n, int max_weight, double factor, unsigned long s
     std::cout << n << '\n';
     std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
               << '\n';
-    std::default_random_engine rng(seed);
+    std::seed_seq seq{seed};
+    std::mt19937 rng(seq);
+    rng.discard(700'000);
     std::uniform_int_distribution<int> weight(1, max_weight);
     std::uniform_int_distribution<int> value(0, max_weight);
     for (int i = 0; i < n; ++i) {
-        std::cout << weight(rng) << " " << value(rng) << '\n';
+        auto w = weight(rng);
+        auto v = value(rng);
+        std::cout << w << " " << v << '\n';
     }
 }
 
@@ -22,11 +26,15 @@ void generate_uncorrelated(int n, double max_weight, double factor, unsigned lon
     std::cout << n << '\n';
     std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
               << '\n';
-    std::default_random_engine rng(seed);
+    std::seed_seq seq{seed};
+    std::mt19937 rng(seq);
+    rng.discard(700'000);
     std::uniform_real_distribution<double> weight(1.0, max_weight);
     std::uniform_real_distribution<double> value(0, max_weight);
     for (int i = 0; i < n; ++i) {
-        std::cout << weight(rng) << " " << value(rng) << '\n';
+        auto w = weight(rng);
+        auto v = value(rng);
+        std::cout << w << " " << v << '\n';
     }
 }
 
@@ -34,12 +42,15 @@ void generate_correlated(int n, int max_weight, int min_add, int max_add, double
     std::cout << n << '\n';
     std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
               << '\n';
-    std::default_random_engine rng(seed);
+    std::seed_seq seq{seed};
+    std::mt19937 rng(seq);
+    rng.discard(700'000);
     std::uniform_int_distribution<int> weight(1, max_weight);
     std::uniform_int_distribution<int> add(min_add, max_add);
     for (int i = 0; i < n; ++i) {
         auto w = weight(rng);
-        std::cout << w << " " << w + add(rng) << '\n';
+        auto v = w + add(rng);
+        std::cout << w << " " << v << '\n';
     }
 }
 
@@ -48,12 +59,15 @@ void generate_correlated(int n, double max_weight, double min_add, double max_ad
     std::cout << n << '\n';
     std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
               << '\n';
-    std::default_random_engine rng(seed);
+    std::seed_seq seq{seed};
+    std::mt19937 rng(seq);
+    rng.discard(700'000);
     std::uniform_real_distribution<double> weight(1.0, max_weight);
     std::uniform_real_distribution<double> add(min_add, max_add);
     for (int i = 0; i < n; ++i) {
         auto w = weight(rng);
-        std::cout << w << " " << w + add(rng) << '\n';
+        auto v = w + add(rng);
+        std::cout << w << " " << v << '\n';
     }
 }
 
