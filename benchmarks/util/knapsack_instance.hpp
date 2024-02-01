@@ -75,28 +75,6 @@ class KnapsackInstance {
         to_prefix_sum();
     }
 
-    KnapsackInstance(long long n, WeightType min_weight, WeightType max_weight, ValueType min_add, ValueType max_add,
-                     double capacity_factor, unsigned int seed)
-        : prefix_sum_(static_cast<std::size_t>(n + 1)),
-          capacity_(static_cast<WeightType>(static_cast<double>(n) * static_cast<double>(max_weight - min_weight) *
-                                            capacity_factor)) {
-        std::default_random_engine rng(seed);
-        std::generate(prefix_sum_.begin() + 1, prefix_sum_.end(), [&rng, min_weight, max_weight, min_add, max_add]() {
-            if constexpr (std::is_floating_point_v<WeightType>) {
-                std::uniform_real_distribution<WeightType> random_weight(min_weight, max_weight);
-                std::uniform_real_distribution<ValueType> random_add(min_add, max_add);
-                auto weight = random_weight(rng);
-                return Item{weight, static_cast<ValueType>(weight) + random_add(rng)};
-            } else {
-                std::uniform_int_distribution<WeightType> random_weight(min_weight, max_weight);
-                std::uniform_int_distribution<ValueType> random_add(min_add, max_add);
-                auto weight = random_weight(rng);
-                return Item{weight, static_cast<ValueType>(weight) + random_add(rng)};
-            }
-        });
-        to_prefix_sum();
-    }
-
     [[nodiscard]] std::size_t size() const noexcept {
         return prefix_sum_.size() - 1;
     }
