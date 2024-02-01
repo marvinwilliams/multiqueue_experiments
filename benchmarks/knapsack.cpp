@@ -111,12 +111,13 @@ struct Settings {
     data_type max_add = default_max_add;
     double capacity_factor = 0.5;
     unsigned int seed = 1;
+    std::filesystem::path instance_file{};
     pq_type::settings_type pq_settings{};
 };
 
 void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+    // clang-format off
     cmd.add_options()
-        // clang-format off
         ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("n,num-elements", "Number of elements", cxxopts::value<long long>(settings.n), "NUMBER")
         ("a,min-weight", "Min weight", cxxopts::value<data_type>(settings.min_weight), "NUMBER")
@@ -124,31 +125,42 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
         ("l,min-add", "Min add to profits", cxxopts::value<data_type>(settings.min_add), "NUMBER")
         ("u,max-add", "Max add to profits", cxxopts::value<data_type>(settings.max_add), "NUMBER")
         ("f,factor", "Capacity as factor of expected total weight", cxxopts::value<double>(settings.capacity_factor), "NUMBER")
-        ("s,seed", "Seed", cxxopts::value<unsigned int>(settings.seed), "NUMBER");
+        ("s,seed", "Seed", cxxopts::value<unsigned int>(settings.seed), "NUMBER")
+        ("i,instance", "Instance file", cxxopts::value<std::filesystem::path>(settings.instance_file), "FILE");
     // clang-format on
     settings.pq_settings.register_cmd_options(cmd);
+    cmd.parse_positional({"instance"});
 }
 
 void write_settings_human_readable(Settings const& settings, std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n';
-    out << "Number of items: " << settings.n << '\n';
-    out << "Weights: [" << settings.min_weight << ", " << settings.max_weight << "]\n";
-    out << "Add to profit: [" << settings.min_add << ", " << settings.max_add << "]\n";
-    out << "Capacity factor: " << settings.capacity_factor << '\n';
-    out << "Seed: " << settings.seed << '\n';
+    if (settings.instance_file.empty()) {
+        out << "Number of items: " << settings.n << '\n';
+        out << "Weights: [" << settings.min_weight << ", " << settings.max_weight << "]\n";
+        out << "Add to profit: [" << settings.min_add << ", " << settings.max_add << "]\n";
+        out << "Capacity factor: " << settings.capacity_factor << '\n';
+        out << "Seed: " << settings.seed << '\n';
+    } else {
+        out << "Instance file: " << settings.instance_file << '\n';
+    }
     settings.pq_settings.write_human_readable(out);
 }
 
 void write_settings_json(Settings const& settings, std::ostream& out) {
     out << '{';
-    out << std::quoted("num_threads") << ':' << settings.num_threads << ',';
-    out << std::quoted("num_elements") << ':' << settings.n << ',';
-    out << std::quoted("min_weight") << ':' << settings.min_weight << ',';
-    out << std::quoted("max_weight") << ':' << settings.max_weight << ',';
-    out << std::quoted("min_add") << ':' << settings.min_add << ',';
-    out << std::quoted("max_add") << ':' << settings.max_add << ',';
-    out << std::quoted("capacity_factor") << ':' << settings.capacity_factor << ',';
-    out << std::quoted("seed") << ':' << settings.seed << ',';
+    if (settings.instance_file.empty()) {
+        out << std::quoted("instance_type") << ':' << std::quoted("generated") << ',';
+        out << std::quoted("num_elements") << ':' << settings.n << ',';
+        out << std::quoted("min_weight") << ':' << settings.min_weight << ',';
+        out << std::quoted("max_weight") << ':' << settings.max_weight << ',';
+        out << std::quoted("min_add") << ':' << settings.min_add << ',';
+        out << std::quoted("max_add") << ':' << settings.max_add << ',';
+        out << std::quoted("capacity_factor") << ':' << settings.capacity_factor << ',';
+        out << std::quoted("seed") << ':' << settings.seed << ',';
+    } else {
+        out << std::quoted("instance_type") << ':' << std::quoted("file") << ',';
+        out << std::quoted("instance_file") << ':' << settings.instance_file << ',';
+    }
     out << std::quoted("pq") << ':';
     settings.pq_settings.write_json(out);
     out << '}';
@@ -220,11 +232,21 @@ Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& 
 }
 
 void run_benchmark(Settings const& settings) {
-    std::clog << "Generating instance...\n";
-    SharedData shared_data{
-        KnapsackInstance<data_type>(settings.n, settings.min_weight, settings.max_weight, settings.min_add,
-                                    settings.max_add, settings.capacity_factor, settings.seed),
-        0, termination_detection::TerminationDetection(settings.num_threads)};
+    KnapsackInstance<data_type> instance;
+    if (settings.instance_file.empty()) {
+        std::clog << "Generating instance...\n";
+        instance = KnapsackInstance<data_type>(settings.n, settings.min_weight, settings.max_weight, settings.min_add,
+                                               settings.max_add, settings.capacity_factor, settings.seed);
+    } else {
+        std::clog << "Reading instance...\n";
+        try {
+            instance = KnapsackInstance<data_type>(settings.instance_file);
+        } catch (std::exception const& e) {
+            std::cerr << "Error reading instance file: " << e.what() << '\n';
+            std::exit(EXIT_FAILURE);
+        }
+    }
+    SharedData shared_data{std::move(instance), 0, termination_detection::TerminationDetection(settings.num_threads)};
     std::vector<Counter> thread_counter(static_cast<std::size_t>(settings.num_threads));
     auto pq = pq_type(settings.num_threads, std::size_t(10'000'000), settings.pq_settings);
     std::clog << "Working...\n";
