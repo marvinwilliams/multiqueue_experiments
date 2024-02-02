@@ -6,55 +6,41 @@
 #include <utility>
 #include <vector>
 
-void generate_uncorrelated(int n, int max_weight, double factor, unsigned long seed) {
+void generate_uncorrelated(int n, int min_weight, int max_weight, int min_value, int max_value, double factor,
+                           unsigned long seed) {
     std::cout << n << '\n';
-    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
+    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor) << '\n'
               << '\n';
     std::seed_seq seq{seed};
     std::mt19937 rng(seq);
     rng.discard(700'000);
-    std::uniform_int_distribution<int> weight(1, max_weight);
-    std::uniform_int_distribution<int> value(0, max_weight);
+    std::uniform_int_distribution<int> weight(min_weight, max_weight);
+    std::uniform_int_distribution<int> value(min_value, max_value);
     for (int i = 0; i < n; ++i) {
         auto w = weight(rng);
         auto v = value(rng);
-        std::cout << w << " " << v << '\n';
+        std::cout << v << " " << w << '\n';
     }
 }
 
-void generate_uncorrelated(int n, double max_weight, double factor, unsigned long seed) {
+void generate_uncorrelated(int n, double min_weight, double max_weight, double min_value, double max_value, double factor,
+                           unsigned long seed) {
     std::cout << n << '\n';
     std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
               << '\n';
     std::seed_seq seq{seed};
     std::mt19937 rng(seq);
     rng.discard(700'000);
-    std::uniform_real_distribution<double> weight(1.0, max_weight);
-    std::uniform_real_distribution<double> value(0, max_weight);
+    std::uniform_real_distribution<double> weight(min_weight, max_weight);
+    std::uniform_real_distribution<double> value(min_value, max_value);
     for (int i = 0; i < n; ++i) {
         auto w = weight(rng);
         auto v = value(rng);
-        std::cout << w << " " << v << '\n';
+        std::cout << v << " " << w << '\n';
     }
 }
 
-void generate_correlated(int n, int max_weight, int min_add, int max_add, double factor, unsigned long seed) {
-    std::cout << n << '\n';
-    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
-              << '\n';
-    std::seed_seq seq{seed};
-    std::mt19937 rng(seq);
-    rng.discard(700'000);
-    std::uniform_int_distribution<int> weight(1, max_weight);
-    std::uniform_int_distribution<int> add(min_add, max_add);
-    for (int i = 0; i < n; ++i) {
-        auto w = weight(rng);
-        auto v = w + add(rng);
-        std::cout << w << " " << v << '\n';
-    }
-}
-
-void generate_correlated(int n, double max_weight, double min_add, double max_add, double factor,
+void generate_correlated(int n, int min_weight, int max_weight, int min_value, int max_value, double factor,
                          unsigned long seed) {
     std::cout << n << '\n';
     std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
@@ -62,12 +48,35 @@ void generate_correlated(int n, double max_weight, double min_add, double max_ad
     std::seed_seq seq{seed};
     std::mt19937 rng(seq);
     rng.discard(700'000);
-    std::uniform_real_distribution<double> weight(1.0, max_weight);
-    std::uniform_real_distribution<double> add(min_add, max_add);
+    std::uniform_int_distribution<int> weight(min_weight, max_weight);
+    std::uniform_int_distribution<int> value(min_value, max_value);
     for (int i = 0; i < n; ++i) {
         auto w = weight(rng);
-        auto v = w + add(rng);
-        std::cout << w << " " << v << '\n';
+        int v{};
+        do {
+            v = w + value(rng);
+        } while (v < 0);
+        std::cout << v << " " << w << '\n';
+    }
+}
+
+void generate_correlated(int n, double min_weight, double max_weight, double min_value, double max_value, double factor,
+                         unsigned long seed) {
+    std::cout << n << '\n';
+    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
+              << '\n';
+    std::seed_seq seq{seed};
+    std::mt19937 rng(seq);
+    rng.discard(700'000);
+    std::uniform_real_distribution<double> weight(min_weight, max_weight);
+    std::uniform_real_distribution<double> value(min_value, max_value);
+    for (int i = 0; i < n; ++i) {
+        auto w = weight(rng);
+        double v{};
+        do {
+            v = w + value(rng);
+        } while (v < 0);
+        std::cout << v << " " << w << '\n';
     }
 }
 
@@ -75,18 +84,20 @@ int main(int argc, char* argv[]) {
     cxxopts::Options options("Knapsack generator", "Generate knapsack instances");
     int type = 0;
     int n = 1000;
-    double max = 1000;
-    double min_add = 100;
-    double max_add = 500;
+    double min_weight = 1;
+    double max_weight = 1000;
+    double min_value = 0;
+    double max_value = 100;
     double factor = 0.5;
     unsigned long seed = 1;
     // clang-format off
     options.add_options()
       ("t,type", "Type of instance (0: uncorrelated int, 1: correlated int, 2: uncorrelated real, 3: correlated real)", cxxopts::value<int>(type), "NUMBER")
       ("n,num-elements", "Number of elements", cxxopts::value<int>(n), "NUMBER")
-      ("m,max-weight", "Maximum weight and value", cxxopts::value<double>(max), "NUMBER")
-      ("l,min-add", "Minimum add to profits", cxxopts::value<double>(min_add), "NUMBER")
-      ("u,max-add", "Maximum add to profits", cxxopts::value<double>(max_add), "NUMBER")
+      ("w,min-weight", "Minimum weight", cxxopts::value<double>(min_weight), "NUMBER")
+      ("W,max-weight", "Maximum weight", cxxopts::value<double>(max_weight), "NUMBER")
+      ("v,min-value", "Minimum value to profits", cxxopts::value<double>(min_value), "NUMBER")
+      ("V,max-value", "Maximum value to profits", cxxopts::value<double>(max_value), "NUMBER")
       ("f,factor", "Capacity factor", cxxopts::value<double>(factor), "NUMBER")
       ("s,seed", "Seed", cxxopts::value<unsigned long>(seed), "NUMBER")
       ("h,help", "Print this help");
@@ -103,14 +114,15 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     if (type == 0) {
-        generate_uncorrelated(n, static_cast<int>(max), factor, seed);
+        generate_uncorrelated(n, static_cast<int>(min_weight), static_cast<int>(max_weight), static_cast<int>(min_value),
+                            static_cast<int>(max_value), factor, seed);
     } else if (type == 1) {
-        generate_correlated(n, static_cast<int>(max), static_cast<int>(min_add), static_cast<int>(max_add), factor,
-                            seed);
+        generate_correlated(n, static_cast<int>(min_weight), static_cast<int>(max_weight), static_cast<int>(min_value),
+                            static_cast<int>(max_value), factor, seed);
     } else if (type == 2) {
-        generate_uncorrelated(n, max, factor, seed);
+        generate_uncorrelated(n, min_weight, max_weight, min_value, max_value, factor, seed);
     } else if (type == 3) {
-        generate_correlated(n, max, min_add, max_add, factor, seed);
+        generate_correlated(n, min_weight, max_weight, min_value, max_value, factor, seed);
     } else {
         std::cerr << "Invalid type" << std::endl;
         return EXIT_FAILURE;

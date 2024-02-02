@@ -193,5 +193,5 @@ set(COMPETITORS
     PARENT_SCOPE)
 
 set(GENERIC_COMPETITORS
-    ${MQ_VARIANTS} smq tbb_pq locked_pq
+    ${MQ_VARIANTS} klsm4 klsm256 klsm1024 klsm4096 smq tbb_pq locked_pq
     PARENT_SCOPE)
