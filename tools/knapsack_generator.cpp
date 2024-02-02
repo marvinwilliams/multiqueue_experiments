@@ -9,7 +9,10 @@
 void generate_uncorrelated(int n, int min_weight, int max_weight, int min_value, int max_value, double factor,
                            unsigned long seed) {
     std::cout << n << '\n';
-    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor) << '\n'
+    std::cout << static_cast<int>(static_cast<double>(n) *
+                                  (static_cast<double>(min_weight) + static_cast<double>(max_weight - min_weight) / 2) *
+                                  factor)
+              << '\n'
               << '\n';
     std::seed_seq seq{seed};
     std::mt19937 rng(seq);
@@ -23,10 +26,11 @@ void generate_uncorrelated(int n, int min_weight, int max_weight, int min_value,
     }
 }
 
-void generate_uncorrelated(int n, double min_weight, double max_weight, double min_value, double max_value, double factor,
-                           unsigned long seed) {
+void generate_uncorrelated(int n, double min_weight, double max_weight, double min_value, double max_value,
+                           double factor, unsigned long seed) {
     std::cout << n << '\n';
-    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
+    std::cout << static_cast<int>(static_cast<double>(n) * (min_weight + (max_weight - min_weight) / 2) * factor)
+              << '\n'
               << '\n';
     std::seed_seq seq{seed};
     std::mt19937 rng(seq);
@@ -43,7 +47,10 @@ void generate_uncorrelated(int n, double min_weight, double max_weight, double m
 void generate_correlated(int n, int min_weight, int max_weight, int min_value, int max_value, double factor,
                          unsigned long seed) {
     std::cout << n << '\n';
-    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
+    std::cout << static_cast<int>(static_cast<double>(n) *
+                                  (static_cast<double>(min_weight) + static_cast<double>(max_weight - min_weight) / 2) *
+                                  factor)
+              << '\n'
               << '\n';
     std::seed_seq seq{seed};
     std::mt19937 rng(seq);
@@ -63,7 +70,8 @@ void generate_correlated(int n, int min_weight, int max_weight, int min_value, i
 void generate_correlated(int n, double min_weight, double max_weight, double min_value, double max_value, double factor,
                          unsigned long seed) {
     std::cout << n << '\n';
-    std::cout << static_cast<int>(static_cast<double>(n) * (static_cast<double>(max_weight) / 2 + 0.5) * factor)
+    std::cout << static_cast<int>(static_cast<double>(n) * (min_weight + (max_weight - min_weight) / 2) * factor)
+              << '\n'
               << '\n';
     std::seed_seq seq{seed};
     std::mt19937 rng(seq);
@@ -114,8 +122,8 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     if (type == 0) {
-        generate_uncorrelated(n, static_cast<int>(min_weight), static_cast<int>(max_weight), static_cast<int>(min_value),
-                            static_cast<int>(max_value), factor, seed);
+        generate_uncorrelated(n, static_cast<int>(min_weight), static_cast<int>(max_weight),
+                              static_cast<int>(min_value), static_cast<int>(max_value), factor, seed);
     } else if (type == 1) {
         generate_correlated(n, static_cast<int>(min_weight), static_cast<int>(max_weight), static_cast<int>(min_value),
                             static_cast<int>(max_value), factor, seed);

@@ -61,7 +61,8 @@ void knapsack(Settings const& settings) noexcept {
         std::cerr << "Error reading instance file: " << e.what() << '\n';
         std::exit(EXIT_FAILURE);
     }
-    std::clog << "Instance has " << instance.size() << " items and " << std::fixed << instance.capacity() << " capacity\n";
+    std::clog << "Instance has " << instance.size() << " items and " << std::fixed << instance.capacity()
+              << " capacity\n";
     std::vector<Node> container;
     container.reserve(1 << 24);
     std::priority_queue<Node, std::vector<Node>> pq({}, std::move(container));
