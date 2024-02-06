@@ -29,13 +29,6 @@ list(APPEND MQ_VARIANTS mq_random mq_random_strict mq_stick_random
      mq_stick_swap)
 
 if(EXP_TUNING_TARGETS)
-  add_library(tuning_baseline INTERFACE)
-  target_compile_definitions(
-    tuning_baseline
-    INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=0
-              MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=2)
-  target_link_libraries(tuning_baseline INTERFACE mq)
-
   foreach(i ${EXP_TUNING_POP_PQS})
     add_library(mq_tuning_pop_${i} INTERFACE)
     target_link_libraries(mq_tuning_pop_${i} INTERFACE mq)
@@ -69,8 +62,10 @@ if(EXP_TUNING_TARGETS)
     endforeach()
   endforeach()
   add_library(mq_tuning_btree INTERFACE)
-  target_link_libraries(mq_tuning_btree INTERFACE tuning_baseline)
-  target_compile_definitions(mq_tuning_btree INTERFACE MQ_USE_BTREE)
+  target_link_libraries(mq_tuning_btree INTERFACE mq)
+  target_compile_definitions(
+    mq_tuning_btree
+    INTERFACE MQ_USE_BTREE MQ_MODE_RANDOM MQ_NUM_POP_PQS=2)
   list(APPEND TUNING_TARGETS mq_tuning_btree)
 
   set(TUNING_TARGETS
@@ -126,8 +121,9 @@ target_compile_options(linden PRIVATE -w -std=gnu++17)
 target_compile_definitions(linden PUBLIC INTEL
                                          CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_include_directories(
-  linden SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
-                ${KLSM_DIR}/lib/spraylist_linden/include)
+  linden SYSTEM
+  PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
+         ${KLSM_DIR}/lib/spraylist_linden/include)
 set_property(TARGET linden PROPERTY pq_name linden)
 target_compile_definitions(linden INTERFACE PQ_LINDEN)
 
@@ -139,8 +135,9 @@ add_library(
   ${KLSM_DIR}/lib/capq/qdlocksrc/locks/tatas_lock.c
   ${KLSM_DIR}/lib/capq/gc/gc.c
   ${KLSM_DIR}/lib/capq/gc/ptst.c)
-target_include_directories(capq SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
-                                       ${KLSM_DIR}/lib/capq/qdlocksrc)
+target_include_directories(
+  capq SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
+                     ${KLSM_DIR}/lib/capq/qdlocksrc)
 target_compile_options(capq PRIVATE -w -std=gnu++17)
 target_compile_definitions(capq PUBLIC INTEL
                                        CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
@@ -160,8 +157,9 @@ target_compile_options(spraylist PRIVATE -w -std=gnu17)
 target_compile_definitions(
   spraylist PUBLIC INTEL LOCKFREE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_include_directories(
-  spraylist SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
-                   ${KLSM_DIR}/lib/spraylist_linden/include)
+  spraylist SYSTEM
+  PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
+         ${KLSM_DIR}/lib/spraylist_linden/include)
 set_property(TARGET spraylist PROPERTY pq_name spraylist)
 target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
 
@@ -193,5 +191,12 @@ set(COMPETITORS
     PARENT_SCOPE)
 
 set(GENERIC_COMPETITORS
-    ${MQ_VARIANTS} klsm4 klsm256 klsm1024 klsm4096 smq tbb_pq locked_pq
+    ${MQ_VARIANTS}
+    klsm4
+    klsm256
+    klsm1024
+    klsm4096
+    smq
+    tbb_pq
+    locked_pq
     PARENT_SCOPE)

@@ -32,8 +32,8 @@
 
 namespace wrapper::multiqueue {
 
-#ifdef MQ_NUM_POP_CANDIDATES
-static constexpr unsigned int num_pop_candidates = MQ_NUM_POP_CANDIDATES;
+#ifdef MQ_NUM_POP_PQS
+static constexpr unsigned int num_pop_candidates = MQ_NUM_POP_PQS;
 #else
 static constexpr unsigned int num_pop_candidates = 2;
 #endif
