@@ -53,7 +53,7 @@ static constexpr std::size_t deletion_buffer_size = 16;
 #ifdef MQ_HEAP_ARITY
 static constexpr unsigned int heap_arity = MQ_HEAP_ARITY;
 #else
-static constexpr unsigned int heap_arity = 8;
+static constexpr unsigned int heap_arity = 4;
 #endif
 
 #if defined MQ_MODE_RANDOM
