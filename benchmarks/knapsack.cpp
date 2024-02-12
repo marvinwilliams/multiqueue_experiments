@@ -168,7 +168,8 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     ++counter.processed_nodes;
 }
 
-Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq, SharedData& data) {
+[[gnu::noinline]] Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq,
+                                           SharedData& data) {
     Counter counter;
     handle_type handle = pq.get_handle();
     if (thread_context.id() == 0) {
@@ -198,7 +199,8 @@ void run_benchmark(Settings const& settings) {
         std::cerr << "Error reading instance file: " << e.what() << '\n';
         std::exit(EXIT_FAILURE);
     }
-    std::clog << "Instance has " << instance.size() << " items and " << std::fixed << instance.capacity() << " capacity\n";
+    std::clog << "Instance has " << instance.size() << " items and " << std::fixed << instance.capacity()
+              << " capacity\n";
     SharedData shared_data{std::move(instance), 0, termination_detection::TerminationDetection(settings.num_threads)};
     std::vector<Counter> thread_counter(static_cast<std::size_t>(settings.num_threads));
     auto pq = pq_type(settings.num_threads, std::size_t(10'000'000), settings.pq_settings);

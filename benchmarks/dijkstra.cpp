@@ -105,7 +105,8 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     ++counter.processed_nodes;
 }
 
-Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq, SharedData& data) {
+[[gnu::noinline]] Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq,
+                                           SharedData& data) {
     Counter counter;
     auto handle = pq.get_handle();
     if (thread_context.id() == 0) {
