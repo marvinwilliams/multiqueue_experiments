@@ -394,7 +394,7 @@ class Context : public thread_coordination::Context {
     }
 };
 
-void work_loop(Context& context) {
+[[gnu::noinline]] void work_loop(Context& context) {
     auto offset = static_cast<value_type>(context.settings().num_threads * context.settings().prefill_per_thread);
     long long max = context.settings().iterations_per_thread * context.settings().num_threads;
     for (auto from = context.shared_data().counter.fetch_add(context.settings().batch_size, std::memory_order_relaxed);
@@ -402,14 +402,15 @@ void work_loop(Context& context) {
          from = context.shared_data().counter.fetch_add(context.settings().batch_size, std::memory_order_relaxed)) {
         auto to = std::min(from + context.settings().batch_size, max);
         for (auto i = from; i < to; ++i) {
-            auto key = context.try_pop();
-            while (!key) {
+            while (true) {
+                if (auto e = context.try_pop(); e) {
+                    context.push({static_cast<key_type>(static_cast<long long>(e->first) +
+                                                        context.shared_data().updates[static_cast<std::size_t>(i)]),
+                                  offset + static_cast<value_type>(i)});
+                    break;
+                }
                 ++context.thread_data().failed_pop_count;
-                key = context.try_pop();
             }
-            context.push({static_cast<key_type>(static_cast<long long>(key->first) +
-                                                context.shared_data().updates[static_cast<std::size_t>(i)]),
-                          offset + static_cast<value_type>(i)});
         }
         context.thread_data().iter_count += to - from;
     }
