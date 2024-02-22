@@ -47,6 +47,7 @@ struct Settings {
     long long batch_size = 1 << 12;
     int seed = 1;
     int affinity = 6;
+    int timeout_s = 0;
 #ifdef LOG_OPERATIONS
     std::filesystem::path log_file = "operation_log.txt";
 #endif
@@ -77,6 +78,7 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
                 "5: Close L3 Far L1, "
                 "6: Far L1 Close L3)"
                 , cxxopts::value<int>(settings.affinity), "NUMBER")
+            ("t,timeout", "Timeout in seconds", cxxopts::value<int>(settings.timeout_s), "NUMBER")
 #ifdef LOG_OPERATIONS
             ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
 #endif
@@ -190,6 +192,12 @@ void write_settings_human_readable(Settings const& settings, std::ostream& out) 
     out << "Update range: [" << settings.min_update << ", " << settings.max_update << "]\n";
     out << "Batch size: " << settings.batch_size << '\n';
     out << "Affinity: " << affinity_name(settings.affinity) << '\n';
+    out << "Timeout: ";
+    if (settings.timeout_s == 0) {
+        out << "None\n";
+    } else {
+        out << settings.timeout_s << "s\n";
+    }
     out << "Seed: " << settings.seed << '\n';
 #ifdef LOG_OPERATIONS
     out << "Log file: " << settings.log_file << '\n';
@@ -218,6 +226,7 @@ void write_settings_json(Settings const& settings, std::ostream& out) {
     out << std::quoted("update_max") << ':' << settings.max_update << ',';
     out << std::quoted("batch_size") << ':' << settings.batch_size << ',';
     out << std::quoted("affinity") << ':' << settings.affinity << ',';
+    out << std::quoted("timeout_s") << ':' << settings.timeout_s << ',';
     out << std::quoted("seed") << ':' << settings.seed << ',';
 #ifdef WITH_PAPI
     out << std::quoted("papi_events") << ':';
@@ -413,6 +422,11 @@ class Context : public thread_coordination::Context {
             }
         }
         context.thread_data().iter_count += to - from;
+        if (context.settings().timeout_s != 0 &&
+            std::chrono::high_resolution_clock::now() >
+                context.shared_data().start_time + std::chrono::seconds{context.settings().timeout_s}) {
+            break;
+        }
     }
 }
 
