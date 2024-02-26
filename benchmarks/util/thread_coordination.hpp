@@ -20,8 +20,8 @@ namespace thread_coordination {
 namespace affinity {
 
 namespace detail {
-std::vector<std::array<std::size_t, 3>> get_cache_hierarchy() {
-    std::vector<std::array<std::size_t, 3>> hierarchy(std::thread::hardware_concurrency());
+std::vector<std::array<std::size_t, 4>> get_cache_hierarchy() {
+    std::vector<std::array<std::size_t, 4>> hierarchy(std::thread::hardware_concurrency());
     std::vector<std::size_t> l1_lookup;
     for (std::size_t i = 0; i < hierarchy.size(); ++i) {
         hierarchy[i][0] = i;
@@ -29,8 +29,10 @@ std::vector<std::array<std::size_t, 3>> get_cache_hierarchy() {
         ss >> hierarchy[i][1];
         ss = std::ifstream("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/cache/index3/id");
         ss >> hierarchy[i][2];
+        ss = std::ifstream("/sys/devices/system/cpu/cpu" + std::to_string(i) + "/topology/physical_package_id");
+        ss >> hierarchy[i][3];
     }
-    for (std::size_t l = 0; l < 2; ++l) {
+    for (std::size_t l = 0; l < 3; ++l) {
         std::vector<std::vector<std::size_t>> lookup;
         for (auto& h : hierarchy) {
             if (h[l + 1] >= lookup.size()) {
@@ -83,8 +85,8 @@ struct CloseCaches {
         order.resize(hierarchy.size());
         std::iota(order.begin(), order.end(), 0);
         std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
-            return std::tie(hierarchy[a][2], hierarchy[a][1], hierarchy[a][0]) <
-                std::tie(hierarchy[b][2], hierarchy[b][1], hierarchy[b][0]);
+            return std::tie(hierarchy[a][3], hierarchy[a][2], hierarchy[a][1], hierarchy[a][0]) <
+                std::tie(hierarchy[b][3], hierarchy[b][2], hierarchy[b][1], hierarchy[b][0]);
         });
     }
 
@@ -103,8 +105,8 @@ struct FarCaches {
         order.resize(hierarchy.size());
         std::iota(order.begin(), order.end(), 0);
         std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
-            return std::tie(hierarchy[a][0], hierarchy[a][1], hierarchy[a][2]) <
-                std::tie(hierarchy[b][0], hierarchy[b][1], hierarchy[b][2]);
+            return std::tie(hierarchy[a][3], hierarchy[a][0], hierarchy[a][1], hierarchy[a][2]) <
+                std::tie(hierarchy[b][3], hierarchy[b][0], hierarchy[b][1], hierarchy[b][2]);
         });
     }
 
@@ -123,8 +125,8 @@ struct CloseL3FarL1 {
         order.resize(hierarchy.size());
         std::iota(order.begin(), order.end(), 0);
         std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
-            return std::tie(hierarchy[a][2], hierarchy[a][0], hierarchy[a][1]) <
-                std::tie(hierarchy[b][2], hierarchy[b][0], hierarchy[b][1]);
+            return std::tie(hierarchy[a][3], hierarchy[a][2], hierarchy[a][0], hierarchy[a][1]) <
+                std::tie(hierarchy[b][3], hierarchy[b][2], hierarchy[b][0], hierarchy[b][1]);
         });
     }
 
@@ -143,8 +145,8 @@ struct FarL1CloseL3 {
         order.resize(hierarchy.size());
         std::iota(order.begin(), order.end(), 0);
         std::sort(order.begin(), order.end(), [&hierarchy](std::size_t a, std::size_t b) {
-            return std::tie(hierarchy[a][0], hierarchy[a][2], hierarchy[a][1]) <
-                std::tie(hierarchy[b][0], hierarchy[b][2], hierarchy[b][1]);
+            return std::tie(hierarchy[a][3], hierarchy[a][0], hierarchy[a][2], hierarchy[a][1]) <
+                std::tie(hierarchy[b][3], hierarchy[b][0], hierarchy[b][2], hierarchy[b][1]);
         });
     }
 
