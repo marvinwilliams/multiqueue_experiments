@@ -53,7 +53,6 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
         // Ignore stale nodes
         if (node.distance > distances[node.id]) {
             ++ignored_nodes;
-            pq.pop();
             continue;
         }
         for (std::size_t i = graph.nodes[node.id]; i < graph.nodes[node.id + 1]; ++i) {
