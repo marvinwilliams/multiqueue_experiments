@@ -5,7 +5,6 @@
 
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <functional>
 #include <iomanip>
 #include <iostream>
@@ -40,6 +39,8 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     std::vector<long long> distances(graph.num_nodes(), std::numeric_limits<long long>::max());
     long long processed_nodes{0};
     long long ignored_nodes{0};
+    std::size_t sum_sizes{0};
+    std::size_t max_size{0};
     std::vector<Node> container;
     container.reserve(graph.num_nodes());
     std::priority_queue<Node, std::vector<Node>, std::greater<>> pq({}, std::move(container));
@@ -48,6 +49,8 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     distances[0] = 0;
     pq.push({0, 0});
     while (!pq.empty()) {
+        sum_sizes += pq.size();
+        max_size = std::max(max_size, pq.size());
         auto node = pq.top();
         pq.pop();
         // Ignore stale nodes
@@ -81,6 +84,8 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     std::clog << "Longest distance: " << longest_distance << '\n';
     std::clog << "Processed nodes: " << processed_nodes << '\n';
     std::clog << "Ignored nodes: " << ignored_nodes << '\n';
+    std::clog << "Average PQ size: " << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes) << '\n';
+    std::clog << "Max PQ size: " << max_size << '\n';
 
     std::cout << '{';
     std::cout << std::quoted("settings") << ':';
@@ -97,7 +102,10 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
     std::cout << std::quoted("longest_distance") << ':' << longest_distance << ',';
     std::cout << std::quoted("processed_nodes") << ':' << processed_nodes << ',';
-    std::cout << std::quoted("ignored_nodes") << ':' << ignored_nodes;
+    std::cout << std::quoted("ignored_nodes") << ':' << ignored_nodes << ',';
+    std::cout << std::quoted("average_pq_size") << ':'
+              << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes) << ',';
+    std::cout << std::quoted("max_pq_size") << ':' << max_size;
     std::cout << '}';
     std::cout << '}' << '\n';
 }

@@ -12,23 +12,23 @@
 #include <pthread.h>
 #endif
 #include <atomic>
-#include <cassert>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
-#include <filesystem>
-#include <fstream>
-#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
-#include <limits>
-#include <new>
-#include <numeric>
 #include <random>
 #include <type_traits>
 #include <utility>
 #include <vector>
+
+#ifdef __SSE2__
+#include <emmintrin.h>
+#define PAUSE _mm_pause()
+#else
+#define PAUSE void(0)
+#endif
 
 using key_type = unsigned long;
 using value_type = unsigned long;
@@ -48,6 +48,7 @@ struct Settings {
     int seed = 1;
     int affinity = 6;
     int timeout_s = 0;
+    int sleep_us = 0;
 #ifdef LOG_OPERATIONS
     std::filesystem::path log_file = "operation_log.txt";
 #endif
@@ -79,6 +80,7 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
                 "6: Far L1 Close L3)"
                 , cxxopts::value<int>(settings.affinity), "NUMBER")
             ("t,timeout", "Timeout in seconds", cxxopts::value<int>(settings.timeout_s), "NUMBER")
+            ("l,sleep", "Time in microseconds to wait between operations", cxxopts::value<int>(settings.sleep_us), "NUMBER")
 #ifdef LOG_OPERATIONS
             ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
 #endif
@@ -125,6 +127,14 @@ bool validate_settings(Settings const& settings) {
     }
     if (settings.affinity < 0 || settings.affinity > 6) {
         std::cerr << "Error: Invalid affinity\n";
+        return false;
+    }
+    if (settings.timeout_s < 0) {
+        std::cerr << "Error: Timeout must be nonnegative\n";
+        return false;
+    }
+    if (settings.sleep_us < 0) {
+        std::cerr << "Error: Sleep must be nonnegative\n";
         return false;
     }
     if (settings.seed <= 0) {
@@ -196,7 +206,13 @@ void write_settings_human_readable(Settings const& settings, std::ostream& out) 
     if (settings.timeout_s == 0) {
         out << "None\n";
     } else {
-        out << settings.timeout_s << "s\n";
+        out << settings.timeout_s << " s\n";
+    }
+    out << "Sleep: ";
+    if (settings.sleep_us == 0) {
+        out << "None\n";
+    } else {
+        out << settings.sleep_us << " us\n";
     }
     out << "Seed: " << settings.seed << '\n';
 #ifdef LOG_OPERATIONS
@@ -227,6 +243,7 @@ void write_settings_json(Settings const& settings, std::ostream& out) {
     out << std::quoted("batch_size") << ':' << settings.batch_size << ',';
     out << std::quoted("affinity") << ':' << settings.affinity << ',';
     out << std::quoted("timeout_s") << ':' << settings.timeout_s << ',';
+    out << std::quoted("sleep_us") << ':' << settings.sleep_us << ',';
     out << std::quoted("seed") << ':' << settings.seed << ',';
 #ifdef WITH_PAPI
     out << std::quoted("papi_events") << ':';
@@ -413,6 +430,13 @@ class Context : public thread_coordination::Context {
         for (auto i = from; i < to; ++i) {
             while (true) {
                 if (auto e = context.try_pop(); e) {
+                    if (context.settings().sleep_us != 0) {
+                        auto sleep_until = std::chrono::high_resolution_clock::now() +
+                            std::chrono::microseconds{context.settings().sleep_us};
+                        while (std::chrono::high_resolution_clock::now() < sleep_until) {
+                            PAUSE;
+                        }
+                    }
                     context.push({static_cast<key_type>(static_cast<long long>(e->first) +
                                                         context.shared_data().updates[static_cast<std::size_t>(i)]),
                                   offset + static_cast<value_type>(i)});

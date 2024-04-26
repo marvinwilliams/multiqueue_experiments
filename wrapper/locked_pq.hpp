@@ -2,8 +2,6 @@
 
 #include "util.hpp"
 
-#include "cxxopts.hpp"
-
 #include <cstddef>
 #include <mutex>
 #include <optional>

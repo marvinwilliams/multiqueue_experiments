@@ -3,13 +3,10 @@
 
 #include "cxxopts.hpp"
 
-#include <algorithm>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
-#include <iterator>
 #include <queue>
 #include <vector>
 
@@ -53,6 +50,8 @@ void write_settings_json(Settings const& settings, std::ostream& out) {
 void knapsack(Settings const& settings) noexcept {
     data_type best_value{0};
     long long processed_nodes{0};
+    std::size_t sum_sizes{0};
+    std::size_t max_size{0};
     KnapsackInstance<data_type> instance;
     std::clog << "Reading instance...\n";
     try {
@@ -75,8 +74,8 @@ void knapsack(Settings const& settings) noexcept {
     }
     while (!pq.empty()) {
         auto node = pq.top();
+        sum_sizes += pq.size();
         pq.pop();
-        ++processed_nodes;
         if (node.upper_bound <= best_value) {
             break;
         }
@@ -95,6 +94,8 @@ void knapsack(Settings const& settings) noexcept {
                 pq.push(node);
             }
         }
+        max_size = std::max(max_size, pq.size());
+        ++processed_nodes;
     }
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "Done\n\n";
@@ -103,6 +104,8 @@ void knapsack(Settings const& settings) noexcept {
               << std::chrono::duration<double>(t_end - t_start).count() << '\n';
     std::clog << "Solution: " << best_value << '\n';
     std::clog << "Processed nodes: " << processed_nodes << '\n';
+    std::clog << "Average PQ size: " << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes) << '\n';
+    std::clog << "Max PQ size: " << max_size << '\n';
 
     std::cout << '{';
     std::cout << std::quoted("settings") << ':';
@@ -117,7 +120,10 @@ void knapsack(Settings const& settings) noexcept {
     std::cout << '{';
     std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
     std::cout << std::quoted("processed_nodes") << ':' << processed_nodes << ',';
-    std::cout << std::quoted("solution") << ':' << best_value;
+    std::cout << std::quoted("solution") << ':' << best_value << ',';
+    std::cout << std::quoted("average_pq_size") << ':'
+              << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes) << ',';
+    std::cout << std::quoted("max_pq_size") << ':' << max_size;
     std::cout << '}';
     std::cout << '}' << '\n';
 }

@@ -17,6 +17,8 @@
 #include "multiqueue/modes/stick_random.hpp"
 #elif defined MQ_MODE_STICK_SWAP
 #include "multiqueue/modes/stick_swap.hpp"
+#elif defined MQ_MODE_STICK_MARK
+#include "multiqueue/modes/stick_mark.hpp"
 #elif defined MQ_MODE_STICK_PARAMETRIC
 #include "multiqueue/modes/stick_parametric.hpp"
 #else
@@ -27,7 +29,6 @@
 
 #include <iomanip>
 #include <ostream>
-#include <sstream>
 #include <utility>
 
 namespace wrapper::multiqueue {
@@ -71,6 +72,10 @@ static constexpr bool has_stickiness = true;
 #elif defined MQ_MODE_STICK_SWAP
 using mode_type = ::multiqueue::mode::StickSwap<num_pop_candidates>;
 static constexpr auto mode_name = "stick_swap";
+static constexpr bool has_stickiness = true;
+#elif defined MQ_MODE_STICK_MARK
+using mode_type = ::multiqueue::mode::StickMark<num_pop_candidates>;
+static constexpr auto mode_name = "stick_mark";
 static constexpr bool has_stickiness = true;
 #elif defined MQ_MODE_STICK_PARAMETRIC
 using mode_type = ::multiqueue::mode::StickParametric<num_pop_candidates>;

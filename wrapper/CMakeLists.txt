@@ -20,13 +20,17 @@ add_library(mq_stick_swap INTERFACE)
 target_compile_definitions(mq_stick_swap INTERFACE MQ_MODE_STICK_SWAP)
 target_link_libraries(mq_stick_swap INTERFACE mq)
 
+add_library(mq_stick_mark INTERFACE)
+target_compile_definitions(mq_stick_mark INTERFACE MQ_MODE_STICK_MARK)
+target_link_libraries(mq_stick_mark INTERFACE mq)
+
 add_library(mq_stick_parametric INTERFACE)
 target_compile_definitions(mq_stick_parametric
                            INTERFACE MQ_MODE_STICK_PARAMETRIC)
 target_link_libraries(mq_stick_parametric INTERFACE mq)
 
 list(APPEND MQ_VARIANTS mq_random mq_random_strict mq_stick_random
-     mq_stick_swap)
+     mq_stick_swap mq_stick_mark)
 
 if(EXP_TUNING_TARGETS)
   foreach(i ${EXP_TUNING_POP_PQS})
