@@ -379,8 +379,8 @@ class Context : public thread_coordination::Context {
 
 #ifdef LOG_OPERATIONS
     void push(std::pair<key_type, value_type> const& e) {
-        handle_.push(e);
         auto tick = std::chrono::high_resolution_clock::now();
+        handle_.push(e);
         thread_data_.pushes.push_back({tick, e});
     }
 
