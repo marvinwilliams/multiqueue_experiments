@@ -80,7 +80,7 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
                 "6: Far L1 Close L3)"
                 , cxxopts::value<int>(settings.affinity), "NUMBER")
             ("t,timeout", "Timeout in seconds", cxxopts::value<int>(settings.timeout_s), "NUMBER")
-            ("l,sleep", "Time in microseconds to wait between operations", cxxopts::value<int>(settings.sleep_us), "NUMBER")
+            ("q,sleep", "Time in microseconds to wait between operations", cxxopts::value<int>(settings.sleep_us), "NUMBER")
 #ifdef LOG_OPERATIONS
             ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(settings.log_file), "PATH")
 #endif
