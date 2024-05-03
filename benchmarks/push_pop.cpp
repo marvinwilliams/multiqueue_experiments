@@ -332,6 +332,7 @@ class Context : public thread_coordination::Context {
         if (context.id() == 0) {
             auto end = std::chrono::high_resolution_clock::now();
             context.shared_data().push_times[step] = end - context.shared_data().start_time;
+            std::clog << "Step " << step << " done\n";
         }
 #ifdef WITH_PAPI
         if (!context.settings().papi_events.empty()) {
@@ -382,6 +383,7 @@ class Context : public thread_coordination::Context {
         if (context.id() == 0) {
             auto end = std::chrono::high_resolution_clock::now();
             context.shared_data().pop_times[step] = end - context.shared_data().start_time;
+            std::clog << "Step " << step << " done\n";
         }
 #ifdef WITH_PAPI
         if (!context.settings().papi_events.empty()) {
