@@ -349,7 +349,7 @@ class Context : public thread_coordination::Context {
 [[gnu::noinline]] void pop(Context& context) {
     // Don't measure the last step
     auto steps = static_cast<std::size_t>(context.settings().elements / context.settings().step_size);
-    for (std::size_t step = 0; step < steps; ++step) {
+    for (std::size_t step = 0; step + 1 < steps; ++step) {
         context.synchronize();
 #ifdef WITH_PAPI
         if (!context.settings().papi_events.empty()) {
@@ -426,7 +426,7 @@ void benchmark_thread(Context context) {
         context.thread_data().push_papi_event_counter.resize(
             steps, std::vector<long long>(context.settings().papi_events.size()));
         context.thread_data().pop_papi_event_counter.resize(
-            steps, std::vector<long long>(context.settings().papi_events.size()));
+            steps - 1, std::vector<long long>(context.settings().papi_events.size()));
         try {
             context.thread_data().event_set = prepare_papi(context.settings());
         } catch (std::exception const& e) {
