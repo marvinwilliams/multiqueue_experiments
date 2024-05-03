@@ -345,55 +345,10 @@ class Context : public thread_coordination::Context {
     }
 }
 
-void pop_last(Context& context) {
-    context.synchronize();
-    auto remaining = context.shared_data().counter.load(std::memory_order_relaxed);
-#ifdef WITH_PAPI
-    if (!context.settings().papi_events.empty()) {
-        if (int ret = PAPI_start(context.thread_data().event_set); ret != PAPI_OK) {
-            context.write(std::cerr) << "Failed to start performance counters\n";
-        }
-        context.synchronize();
-    }
-#endif
-    if (context.id() == 0) {
-        context.shared_data().start_time = std::chrono::high_resolution_clock::now();
-    }
-    context.synchronize();
-    while (remaining > 0) {
-        long long pops = 0;
-        while (context.try_pop()) {
-            ++pops;
-        }
-        if (pops > 0) {
-            remaining = context.shared_data().counter.fetch_sub(pops, std::memory_order_relaxed) - pops;
-            context.thread_data().pop_count.back() += pops;
-        } else {
-            remaining = context.shared_data().counter.load(std::memory_order_relaxed);
-        }
-        ++context.thread_data().failed_pop_count.back();
-    }
-    context.synchronize();
-    if (context.id() == 0) {
-        auto end = std::chrono::high_resolution_clock::now();
-        context.shared_data().pop_times.back() = (end - context.shared_data().start_time);
-    }
-#ifdef WITH_PAPI
-    if (!context.settings().papi_events.empty()) {
-        if (int ret =
-                PAPI_stop(context.thread_data().event_set, context.thread_data().push_papi_event_counter.back().data());
-            ret != PAPI_OK) {
-            context.write(std::cerr) << "Failed to stop performance counters\n";
-        }
-    }
-#endif
-}
-
 [[gnu::noinline]] void pop(Context& context) {
-    // Handle the last `step` elements differently due to some PQs require certain elements to be popped by specific
-    // threads
+    // Don't measure the last step
     auto steps = static_cast<std::size_t>(context.settings().elements / context.settings().step_size);
-    for (std::size_t step = 0; step + 1 < steps; ++step) {
+    for (std::size_t step = 0; step < steps; ++step) {
         context.synchronize();
 #ifdef WITH_PAPI
         if (!context.settings().papi_events.empty()) {
@@ -438,7 +393,6 @@ void pop_last(Context& context) {
         }
 #endif
     }
-    pop_last(context);
 }
 
 #ifdef WITH_PAPI
@@ -479,8 +433,8 @@ void benchmark_thread(Context context) {
     }
 #endif
     context.thread_data().push_count.resize(steps);
-    context.thread_data().pop_count.resize(steps);
-    context.thread_data().failed_pop_count.resize(steps);
+    context.thread_data().pop_count.resize(steps - 1);
+    context.thread_data().failed_pop_count.resize(steps - 1);
     if (context.id() == 0) {
         std::clog << "Preparing...\n";
     }
@@ -510,7 +464,7 @@ void run_benchmark(Settings const& settings) {
     shared_data.keys.resize(static_cast<std::size_t>(settings.elements));
     shared_data.thread_data.resize(static_cast<std::size_t>(settings.num_threads));
     shared_data.push_times.resize(static_cast<std::size_t>(settings.elements / settings.step_size));
-    shared_data.pop_times.resize(static_cast<std::size_t>(settings.elements / settings.step_size));
+    shared_data.pop_times.resize(static_cast<std::size_t>(settings.elements / settings.step_size - 1));
 
     auto pq = pq_type(settings.num_threads, static_cast<std::size_t>(settings.elements), settings.pq_settings);
 
