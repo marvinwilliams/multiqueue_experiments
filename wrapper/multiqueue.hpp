@@ -150,7 +150,6 @@ class MultiQueue {
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
     using value_compare = ::multiqueue::utils::ValueCompare<value_type, ::multiqueue::utils::PairFirst, key_compare>;
 
-   private:
 #ifdef MQ_USE_BTREE
     using pq_type = BTreeWrapper<key_type, value_type, KeyOfValue, key_compare>;
 #else
@@ -166,6 +165,7 @@ class MultiQueue {
 
     using multiqueue_type = ::multiqueue::KeyValueMultiQueue<key_type, mapped_type, key_compare, Policy, pq_type>;
 
+   private:
     multiqueue_type mq_;
 
     struct Settings {

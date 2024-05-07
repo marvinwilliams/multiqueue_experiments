@@ -36,6 +36,9 @@
 #elif defined PQ_LOCKED_PQ
 #include "wrapper/locked_pq.hpp"
 #define PQ wrapper::locked_pq::LockedPQ
+#elif defined PQ_MQ_PQ
+#include "wrapper/mq_pq.hpp"
+#define PQ wrapper::mq_pq::MultiQueuePQ
 #else
 #error No valid PQ specified
 #endif
