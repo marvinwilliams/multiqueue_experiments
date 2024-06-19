@@ -128,6 +128,8 @@ struct Counter {
     long long pushed_nodes{0};
     long long processed_nodes{0};
     long long ignored_nodes{0};
+    std::chrono::nanoseconds total_time{0};
+    std::chrono::nanoseconds pq_time{0};
 };
 
 struct SharedData {
@@ -156,12 +158,16 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     }
     if (index + 2 < data.instance.size()) {
         if (value + ub > solution) {
+            auto now = std::chrono::steady_clock::now();
             handle.push(to_payload(value + ub, index + 1, free_capacity, value));
+            counter.pq_time += std::chrono::steady_clock::now() - now;
             ++counter.pushed_nodes;
         }
         if (free_capacity >= data.instance.weight(index)) {
+            auto now = std::chrono::steady_clock::now();
             handle.push(to_payload(upper_bound, index + 1, free_capacity - data.instance.weight(index),
                                    value + data.instance.value(index)));
+            counter.pq_time += std::chrono::steady_clock::now() - now;
             ++counter.pushed_nodes;
         }
     }
@@ -181,7 +187,12 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     std::optional<node_type> node;
     thread_context.synchronize();
     while (data.termination_detection.repeat([&]() {
+        auto start = std::chrono::steady_clock::now();
         node = handle.try_pop();
+        auto now = std::chrono::steady_clock::now();
+        if (node.has_value()) {
+            counter.pq_time += now - start;
+        }
         return node.has_value();
     })) {
         process_node(*node, handle, counter, data);
@@ -227,6 +238,27 @@ void run_benchmark(Settings const& settings) {
     std::clog << "Solution: " << shared_data.solution.load() << '\n';
     std::clog << "Processed nodes: " << total_counts.processed_nodes << '\n';
     std::clog << "Ignored nodes: " << total_counts.ignored_nodes << '\n';
+    std::clog << "Time in priority queue:";
+    for (auto const& counter : thread_counter) {
+        std::clog << ' ' << std::chrono::duration<double>(counter.pq_time).count();
+    }
+    std::clog << '\n';
+    std::clog << "Total time in priority queue: " << std::chrono::duration<double>(total_counts.pq_time).count()
+              << '\n';
+    std::clog << "Total time per thread:";
+    for (auto const& counter : thread_counter) {
+        std::clog << ' ' << std::chrono::duration<double>(counter.total_time).count();
+    }
+    std::clog << '\n';
+    std::clog << "Total time: " << std::chrono::duration<double>(total_counts.total_time).count() << '\n';
+    std::clog << "Percentage in priority queue:";
+    for (auto const& counter : thread_counter) {
+        std::clog << ' ' << std::fixed << std::setprecision(2)
+                  << 100.0 * counter.pq_time.count() / counter.total_time.count();
+    }
+    std::clog << '\n';
+    std::clog << "Average percentage in priority queue: " << std::fixed << std::setprecision(2)
+              << 100.0 * total_counts.pq_time.count() / total_counts.total_time.count() << '\n';
     if (total_counts.processed_nodes + total_counts.ignored_nodes != total_counts.pushed_nodes) {
         std::cerr << "Warning: Not all nodes were popped\n";
         std::cerr << "Probably the priority queue discards duplicate keys\n";

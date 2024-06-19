@@ -72,6 +72,8 @@ struct Counter {
     long long pushed_nodes{0};
     long long ignored_nodes{0};
     long long processed_nodes{0};
+    std::chrono::nanoseconds total_time{0};
+    std::chrono::nanoseconds pq_time{0};
 };
 
 struct alignas(L1_CACHE_LINE_SIZE) AtomicDistance {
@@ -96,7 +98,9 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
         auto old_d = data.distances[target].value.load(std::memory_order_relaxed);
         while (d < old_d) {
             if (data.distances[target].value.compare_exchange_weak(old_d, d, std::memory_order_relaxed)) {
+                auto now = std::chrono::steady_clock::now();
                 handle.push({d, target});
+                counter.pq_time += std::chrono::steady_clock::now() - now;
                 ++counter.pushed_nodes;
                 break;
             }
@@ -116,12 +120,19 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     }
     thread_context.synchronize();
     std::optional<node_type> node;
+    auto start_time = std::chrono::steady_clock::now();
     while (data.termination_detection.repeat([&]() {
+        auto start = std::chrono::steady_clock::now();
         node = handle.try_pop();
+        auto now = std::chrono::steady_clock::now();
+        if (node.has_value()) {
+            counter.pq_time += now - start;
+        }
         return node.has_value();
     })) {
         process_node(*node, handle, counter, data);
     }
+    counter.total_time = std::chrono::steady_clock::now() - start_time;
     thread_context.synchronize();
     return counter;
 }
@@ -156,6 +167,8 @@ void run_benchmark(Settings const& settings) {
             sum.pushed_nodes += counter.pushed_nodes;
             sum.processed_nodes += counter.processed_nodes;
             sum.ignored_nodes += counter.ignored_nodes;
+            sum.total_time += counter.total_time;
+            sum.pq_time += counter.pq_time;
             return sum;
         });
     std::clog << '\n';
@@ -181,6 +194,27 @@ void run_benchmark(Settings const& settings) {
         std::cerr << "Warning: Not all nodes were popped\n";
         std::cerr << "Probably the priority queue discards duplicate keys\n";
     }
+    std::clog << "Time in priority queue:";
+    for (auto const& counter : thread_counter) {
+        std::clog << ' ' << std::chrono::duration<double>(counter.pq_time).count();
+    }
+    std::clog << '\n';
+    std::clog << "Total time in priority queue: " << std::chrono::duration<double>(total_counts.pq_time).count()
+              << '\n';
+    std::clog << "Total time per thread:";
+    for (auto const& counter : thread_counter) {
+        std::clog << ' ' << std::chrono::duration<double>(counter.total_time).count();
+    }
+    std::clog << '\n';
+    std::clog << "Total time: " << std::chrono::duration<double>(total_counts.total_time).count() << '\n';
+    std::clog << "Percentage in priority queue:";
+    for (auto const& counter : thread_counter) {
+        std::clog << ' ' << std::fixed << std::setprecision(2)
+                  << 100.0 * counter.pq_time.count() / counter.total_time.count();
+    }
+    std::clog << '\n';
+    std::clog << "Average percentage in priority queue: " << std::fixed << std::setprecision(2)
+              << 100.0 * total_counts.pq_time.count() / total_counts.total_time.count() << '\n';
     std::cout << '{';
     std::cout << std::quoted("settings") << ':';
     write_settings_json(settings, std::cout);
