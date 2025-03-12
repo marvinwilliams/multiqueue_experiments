@@ -8,10 +8,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <functional>
-#include <istream>
 #include <limits>
 #include <memory>
-#include <ostream>
 #include <utility>
 
 // *** Debugging Macros

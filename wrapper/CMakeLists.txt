@@ -123,7 +123,7 @@ add_library(
   ${KLSM_DIR}/lib/spraylist_linden/gc/ptst.c)
 target_compile_options(linden PRIVATE -w -std=gnu++17)
 target_compile_definitions(linden PUBLIC INTEL
-                                         CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
+                                         CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE} _GNU_SOURCE)
 target_include_directories(
   linden SYSTEM
   PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
@@ -142,9 +142,9 @@ add_library(
 target_include_directories(
   capq SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
                      ${KLSM_DIR}/lib/capq/qdlocksrc)
-target_compile_options(capq PRIVATE -w -std=gnu++17)
+target_compile_options(capq PRIVATE -w -std=gnu11)
 target_compile_definitions(capq PUBLIC INTEL
-                                       CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
+                                        CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_compile_definitions(capq INTERFACE PQ_CAPQ)
 
 add_library(
@@ -159,7 +159,7 @@ add_library(
   ${KLSM_DIR}/lib/spraylist_linden/ssalloc.c)
 target_compile_options(spraylist PRIVATE -w -std=gnu17)
 target_compile_definitions(
-  spraylist PUBLIC INTEL LOCKFREE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
+  spraylist PUBLIC INTEL LOCKFREE _GNU_SOURCE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_include_directories(
   spraylist SYSTEM
   PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops

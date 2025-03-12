@@ -11,24 +11,16 @@
 #include <sys/stat.h>
 #include <unistd.h>
 #include <x86intrin.h>
-#include <array>
 #include <atomic>
 #include <cassert>
-#include <charconv>
 #include <chrono>
-#include <condition_variable>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <new>
 #include <numeric>
-#include <random>
-#include <thread>
 #include <type_traits>
-#include <utility>
 #include <vector>
 
 using pq_type = PQ<true, unsigned long, unsigned long>;
@@ -42,7 +34,9 @@ struct Settings {
     pq_type::settings_type pq_settings{};
 };
 
-void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+Settings settings{};
+
+void register_cmd_options(cxxopts::Options& cmd) {
     // clang-format off
     cmd.add_options()
         ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
@@ -52,13 +46,13 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
     cmd.parse_positional({"graph"});
 }
 
-void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+void write_settings_human_readable(std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n';
     out << "Graph: " << settings.graph_file << '\n';
     settings.pq_settings.write_human_readable(out);
 }
 
-void write_settings_json(Settings const& settings, std::ostream& out) {
+void write_settings_json(std::ostream& out) {
     out << '{';
     out << std::quoted("num_threads") << ':' << settings.num_threads << ',';
     out << std::quoted("graph_file") << ':' << settings.graph_file << ',';
@@ -72,8 +66,6 @@ struct Counter {
     long long pushed_nodes{0};
     long long ignored_nodes{0};
     long long processed_nodes{0};
-    std::chrono::nanoseconds total_time{0};
-    std::chrono::nanoseconds pq_time{0};
 };
 
 struct alignas(L1_CACHE_LINE_SIZE) AtomicDistance {
@@ -84,6 +76,7 @@ struct SharedData {
     Graph graph;
     std::vector<AtomicDistance> distances;
     termination_detection::TerminationDetection termination_detection;
+    std::atomic_llong missing_nodes{0};
 };
 
 void process_node(node_type const& node, handle_type& handle, Counter& counter, SharedData& data) {
@@ -98,9 +91,7 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
         auto old_d = data.distances[target].value.load(std::memory_order_relaxed);
         while (d < old_d) {
             if (data.distances[target].value.compare_exchange_weak(old_d, d, std::memory_order_relaxed)) {
-                auto now = std::chrono::steady_clock::now();
                 handle.push({d, target});
-                counter.pq_time += std::chrono::steady_clock::now() - now;
                 ++counter.pushed_nodes;
                 break;
             }
@@ -119,25 +110,32 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
         ++counter.pushed_nodes;
     }
     thread_context.synchronize();
-    std::optional<node_type> node;
-    auto start_time = std::chrono::steady_clock::now();
-    while (data.termination_detection.repeat([&]() {
-        auto start = std::chrono::steady_clock::now();
-        node = handle.try_pop();
-        auto now = std::chrono::steady_clock::now();
-        if (node.has_value()) {
-            counter.pq_time += now - start;
+    while (true) {
+        std::optional<node_type> node;
+        while (data.termination_detection.repeat([&]() {
+            node = handle.try_pop();
+            return node.has_value();
+        })) {
+            process_node(*node, handle, counter, data);
         }
-        return node.has_value();
-    })) {
-        process_node(*node, handle, counter, data);
+        data.missing_nodes.fetch_add(counter.pushed_nodes - counter.processed_nodes - counter.ignored_nodes,
+                                     std::memory_order_relaxed);
+        thread_context.synchronize();
+        if (data.missing_nodes.load(std::memory_order_relaxed) == 0) {
+            break;
+        }
+        thread_context.synchronize();
+        if (thread_context.id() == 0) {
+            std::clog << "Missing nodes: " << data.missing_nodes.load(std::memory_order_relaxed) << '\n';
+            data.missing_nodes.store(0, std::memory_order_relaxed);
+            data.termination_detection.reset();
+        }
+        thread_context.synchronize();
     }
-    counter.total_time = std::chrono::steady_clock::now() - start_time;
-    thread_context.synchronize();
     return counter;
 }
 
-void run_benchmark(Settings const& settings) {
+void run_benchmark() {
     std::clog << "Reading graph...\n";
     SharedData shared_data{{}, {}, termination_detection::TerminationDetection(settings.num_threads)};
     try {
@@ -167,12 +165,10 @@ void run_benchmark(Settings const& settings) {
             sum.pushed_nodes += counter.pushed_nodes;
             sum.processed_nodes += counter.processed_nodes;
             sum.ignored_nodes += counter.ignored_nodes;
-            sum.total_time += counter.total_time;
-            sum.pq_time += counter.pq_time;
             return sum;
         });
     std::clog << '\n';
-    auto longest_distance =
+    auto furthest_node =
         std::max_element(shared_data.distances.begin(), shared_data.distances.end(), [](auto const& a, auto const& b) {
             auto a_val = a.value.load(std::memory_order_relaxed);
             auto b_val = b.value.load(std::memory_order_relaxed);
@@ -183,41 +179,21 @@ void run_benchmark(Settings const& settings) {
                 return true;
             }
             return a_val < b_val;
-        })->value.load();
+        });
     std::clog << "= Results =\n";
     std::clog << "Time (s): " << std::fixed << std::setprecision(3)
               << std::chrono::duration<double>(end_time - start_time).count() << '\n';
-    std::clog << "Longest distance: " << longest_distance << '\n';
+    std::clog << "Furthest node: " << furthest_node - shared_data.distances.begin() << '\n';
+    std::clog << "Longest distance: " << furthest_node->value.load(std::memory_order_relaxed) << '\n';
     std::clog << "Processed nodes: " << total_counts.processed_nodes << '\n';
     std::clog << "Ignored nodes: " << total_counts.ignored_nodes << '\n';
     if (total_counts.processed_nodes + total_counts.ignored_nodes != total_counts.pushed_nodes) {
         std::cerr << "Warning: Not all nodes were popped\n";
         std::cerr << "Probably the priority queue discards duplicate keys\n";
     }
-    std::clog << "Time in priority queue:";
-    for (auto const& counter : thread_counter) {
-        std::clog << ' ' << std::chrono::duration<double>(counter.pq_time).count();
-    }
-    std::clog << '\n';
-    std::clog << "Total time in priority queue: " << std::chrono::duration<double>(total_counts.pq_time).count()
-              << '\n';
-    std::clog << "Total time per thread:";
-    for (auto const& counter : thread_counter) {
-        std::clog << ' ' << std::chrono::duration<double>(counter.total_time).count();
-    }
-    std::clog << '\n';
-    std::clog << "Total time: " << std::chrono::duration<double>(total_counts.total_time).count() << '\n';
-    std::clog << "Percentage in priority queue:";
-    for (auto const& counter : thread_counter) {
-        std::clog << ' ' << std::fixed << std::setprecision(2)
-                  << 100.0 * counter.pq_time.count() / counter.total_time.count();
-    }
-    std::clog << '\n';
-    std::clog << "Average percentage in priority queue: " << std::fixed << std::setprecision(2)
-              << 100.0 * total_counts.pq_time.count() / total_counts.total_time.count() << '\n';
     std::cout << '{';
     std::cout << std::quoted("settings") << ':';
-    write_settings_json(settings, std::cout);
+    write_settings_json(std::cout);
     std::cout << ',';
     std::cout << std::quoted("graph") << ':';
     std::cout << '{';
@@ -227,7 +203,8 @@ void run_benchmark(Settings const& settings) {
     std::cout << std::quoted("results") << ':';
     std::cout << '{';
     std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{end_time - start_time}.count() << ',';
-    std::cout << std::quoted("longest_distance") << ':' << longest_distance << ',';
+    std::cout << std::quoted("furthest_node") << ':' << furthest_node - shared_data.distances.begin() << ',';
+    std::cout << std::quoted("longest_distance") << ':' << furthest_node->value.load(std::memory_order_relaxed) << ',';
     std::cout << std::quoted("processed_nodes") << ':' << total_counts.processed_nodes << ',';
     std::cout << std::quoted("ignored_nodes") << ':' << total_counts.ignored_nodes;
     std::cout << '}';
@@ -253,8 +230,7 @@ int main(int argc, char* argv[]) {
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help");
-    Settings settings{};
-    register_cmd_options(settings, cmd);
+    register_cmd_options(cmd);
 
     try {
         auto args = cmd.parse(argc, argv);
@@ -269,10 +245,10 @@ int main(int argc, char* argv[]) {
     }
 
     std::clog << "= Settings =\n";
-    write_settings_human_readable(settings, std::clog);
+    write_settings_human_readable(std::clog);
     std::clog << '\n';
 
     std::clog << "= Running benchmark =\n";
-    run_benchmark(settings);
+    run_benchmark();
     return EXIT_SUCCESS;
 }

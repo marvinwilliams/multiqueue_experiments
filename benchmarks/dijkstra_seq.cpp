@@ -69,7 +69,7 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     }
     auto t_end = std::chrono::steady_clock::now();
     std::clog << "Done\n\n";
-    auto longest_distance = *std::max_element(distances.begin(), distances.end(), [](auto const& a, auto const& b) {
+    auto furthest_node = std::max_element(distances.begin(), distances.end(), [](auto const& a, auto const& b) {
         if (b == std::numeric_limits<long long>::max()) {
             return false;
         }
@@ -81,7 +81,8 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     std::clog << "= Results =\n";
     std::clog << "Time (s): " << std::fixed << std::setprecision(3)
               << std::chrono::duration<double>(t_end - t_start).count() << '\n';
-    std::clog << "Longest distance: " << longest_distance << '\n';
+    std::clog << "Furthest node: " << furthest_node - distances.begin() << '\n';
+    std::clog << "Longest distance: " << *furthest_node << '\n';
     std::clog << "Processed nodes: " << processed_nodes << '\n';
     std::clog << "Ignored nodes: " << ignored_nodes << '\n';
     std::clog << "Average PQ size: " << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes) << '\n';
@@ -100,7 +101,8 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     std::cout << std::quoted("results") << ':';
     std::cout << '{';
     std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
-    std::cout << std::quoted("longest_distance") << ':' << longest_distance << ',';
+    std::cout << std::quoted("furthest_node") << ':' << furthest_node - distances.begin() << ',';
+    std::cout << std::quoted("longest_distance") << ':' << *furthest_node << ',';
     std::cout << std::quoted("processed_nodes") << ':' << processed_nodes << ',';
     std::cout << std::quoted("ignored_nodes") << ':' << ignored_nodes << ',';
     std::cout << std::quoted("average_pq_size") << ':'
