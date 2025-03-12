@@ -31,6 +31,11 @@ class TerminationDetection {
     explicit TerminationDetection(int num_threads) : num_threads_{num_threads} {
     }
 
+    void reset() {
+        idle_count_.store(0, std::memory_order_relaxed);
+        no_work_count_.store(0, std::memory_order_relaxed);
+    }
+
     template <typename F>
     bool repeat(F&& f) {
         if (f()) {

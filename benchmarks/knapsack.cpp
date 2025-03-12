@@ -6,21 +6,15 @@
 
 #include <cxxopts.hpp>
 
-#include <algorithm>
-#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
 #include <filesystem>
-#include <fstream>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <new>
 #include <numeric>
-#include <random>
-#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -100,7 +94,9 @@ struct Settings {
     pq_type::settings_type pq_settings{};
 };
 
-void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+Settings settings{};
+
+void register_cmd_options(cxxopts::Options& cmd) {
     // clang-format off
     cmd.add_options()
         ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
@@ -110,13 +106,13 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
     cmd.parse_positional({"instance"});
 }
 
-void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+void write_settings_human_readable(std::ostream& out) {
     out << "Threads: " << settings.num_threads << '\n';
     out << "Instance file: " << settings.instance_file << '\n';
     settings.pq_settings.write_human_readable(out);
 }
 
-void write_settings_json(Settings const& settings, std::ostream& out) {
+void write_settings_json(std::ostream& out) {
     out << '{';
     out << std::quoted("instance_file") << ':' << settings.instance_file << ',';
     out << std::quoted("pq") << ':';
@@ -128,14 +124,13 @@ struct Counter {
     long long pushed_nodes{0};
     long long processed_nodes{0};
     long long ignored_nodes{0};
-    std::chrono::nanoseconds total_time{0};
-    std::chrono::nanoseconds pq_time{0};
 };
 
 struct SharedData {
     KnapsackInstance<data_type> instance;
     std::atomic<data_type> solution{0};
     termination_detection::TerminationDetection termination_detection;
+    std::atomic_llong missing_nodes{0};
 };
 
 void process_node(node_type const& node, handle_type& handle, Counter& counter, SharedData& data) {
@@ -158,16 +153,12 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     }
     if (index + 2 < data.instance.size()) {
         if (value + ub > solution) {
-            auto now = std::chrono::steady_clock::now();
             handle.push(to_payload(value + ub, index + 1, free_capacity, value));
-            counter.pq_time += std::chrono::steady_clock::now() - now;
             ++counter.pushed_nodes;
         }
         if (free_capacity >= data.instance.weight(index)) {
-            auto now = std::chrono::steady_clock::now();
             handle.push(to_payload(upper_bound, index + 1, free_capacity - data.instance.weight(index),
                                    value + data.instance.value(index)));
-            counter.pq_time += std::chrono::steady_clock::now() - now;
             ++counter.pushed_nodes;
         }
     }
@@ -184,24 +175,34 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
         handle.push(to_payload(ub, 0, data.instance.capacity(), 0));
         ++counter.pushed_nodes;
     }
-    std::optional<node_type> node;
     thread_context.synchronize();
-    while (data.termination_detection.repeat([&]() {
-        auto start = std::chrono::steady_clock::now();
-        node = handle.try_pop();
-        auto now = std::chrono::steady_clock::now();
-        if (node.has_value()) {
-            counter.pq_time += now - start;
+    while (true) {
+        std::optional<node_type> node;
+        while (data.termination_detection.repeat([&]() {
+            node = handle.try_pop();
+            return node.has_value();
+        })) {
+            process_node(*node, handle, counter, data);
         }
-        return node.has_value();
-    })) {
-        process_node(*node, handle, counter, data);
+        data.missing_nodes.fetch_add(counter.pushed_nodes - counter.processed_nodes - counter.ignored_nodes,
+                                     std::memory_order_relaxed);
+        thread_context.synchronize();
+        if (data.missing_nodes.load(std::memory_order_relaxed) == 0) {
+            break;
+        }
+        thread_context.synchronize();
+        if (thread_context.id() == 0) {
+            std::clog << "Missing nodes: " << data.missing_nodes.load(std::memory_order_relaxed) << '\n';
+            data.missing_nodes.store(0, std::memory_order_relaxed);
+            data.termination_detection.reset();
+        }
+        thread_context.synchronize();
     }
     thread_context.synchronize();
     return counter;
 }
 
-void run_benchmark(Settings const& settings) {
+void run_benchmark() {
     KnapsackInstance<data_type> instance;
     std::clog << "Reading instance...\n";
     try {
@@ -238,34 +239,13 @@ void run_benchmark(Settings const& settings) {
     std::clog << "Solution: " << shared_data.solution.load() << '\n';
     std::clog << "Processed nodes: " << total_counts.processed_nodes << '\n';
     std::clog << "Ignored nodes: " << total_counts.ignored_nodes << '\n';
-    std::clog << "Time in priority queue:";
-    for (auto const& counter : thread_counter) {
-        std::clog << ' ' << std::chrono::duration<double>(counter.pq_time).count();
-    }
-    std::clog << '\n';
-    std::clog << "Total time in priority queue: " << std::chrono::duration<double>(total_counts.pq_time).count()
-              << '\n';
-    std::clog << "Total time per thread:";
-    for (auto const& counter : thread_counter) {
-        std::clog << ' ' << std::chrono::duration<double>(counter.total_time).count();
-    }
-    std::clog << '\n';
-    std::clog << "Total time: " << std::chrono::duration<double>(total_counts.total_time).count() << '\n';
-    std::clog << "Percentage in priority queue:";
-    for (auto const& counter : thread_counter) {
-        std::clog << ' ' << std::fixed << std::setprecision(2)
-                  << 100.0 * counter.pq_time.count() / counter.total_time.count();
-    }
-    std::clog << '\n';
-    std::clog << "Average percentage in priority queue: " << std::fixed << std::setprecision(2)
-              << 100.0 * total_counts.pq_time.count() / total_counts.total_time.count() << '\n';
     if (total_counts.processed_nodes + total_counts.ignored_nodes != total_counts.pushed_nodes) {
         std::cerr << "Warning: Not all nodes were popped\n";
         std::cerr << "Probably the priority queue discards duplicate keys\n";
     }
     std::cout << '{';
     std::cout << std::quoted("settings") << ':';
-    write_settings_json(settings, std::cout);
+    write_settings_json(std::cout);
     std::cout << ',';
     std::cout << std::quoted("instance") << ':';
     std::cout << '{';
@@ -301,8 +281,7 @@ int main(int argc, char* argv[]) {
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help");
-    Settings settings{};
-    register_cmd_options(settings, cmd);
+    register_cmd_options(cmd);
 
     try {
         auto args = cmd.parse(argc, argv);
@@ -317,7 +296,7 @@ int main(int argc, char* argv[]) {
     }
 
     std::clog << "= Settings =\n";
-    write_settings_human_readable(settings, std::clog);
+    write_settings_human_readable(std::clog);
     std::clog << '\n';
     if (settings.instance_file.empty()) {
         std::cerr << "Error: No instance file specified" << '\n';
@@ -325,6 +304,6 @@ int main(int argc, char* argv[]) {
         return EXIT_FAILURE;
     }
     std::clog << "= Running benchmark =\n";
-    run_benchmark(settings);
+    run_benchmark();
     return EXIT_SUCCESS;
 }
