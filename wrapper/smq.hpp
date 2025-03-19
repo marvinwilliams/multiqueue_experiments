@@ -45,9 +45,10 @@ class StealingMQ {
         }
 
        public:
-        void push(value_type const& value) {
+        bool push(value_type const& value) {
             value_type v_arr[1] = {value};
             pq_->push(id_, v_arr, v_arr + 1);
+            return true;
         }
 
         std::optional<value_type> try_pop() {

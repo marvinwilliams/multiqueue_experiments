@@ -1,3 +1,8 @@
+add_library(threading STATIC util/threading.cpp)
+target_include_directories(threading PUBLIC "${CMAKE_SOURCE_DIR}/util")
+target_link_libraries(threading PUBLIC Threads::Threads)
+target_compile_features(threading PUBLIC cxx_std_17)
+
 add_library(benchmark_base INTERFACE)
 target_include_directories(benchmark_base INTERFACE "." "..")
 target_include_directories(benchmark_base SYSTEM
@@ -6,33 +11,31 @@ target_compile_definitions(benchmark_base
                            INTERFACE L1_CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGE_SIZE=${PAGE_SIZE})
 target_compile_features(benchmark_base INTERFACE cxx_std_17)
+target_link_libraries(benchmark_base INTERFACE threading)
 if(PAPI_FOUND)
   target_link_libraries(benchmark_base INTERFACE PAPI::PAPI)
   target_compile_definitions(benchmark_base INTERFACE WITH_PAPI)
 endif()
 
 add_library(monotonic_base INTERFACE)
-target_sources(monotonic_base INTERFACE monotonic.cpp "util/threading.cpp")
-target_link_libraries(monotonic_base INTERFACE benchmark_base
-                                                 Threads::Threads)
+target_sources(monotonic_base INTERFACE monotonic.cpp)
+target_link_libraries(monotonic_base INTERFACE benchmark_base)
 
 add_library(push_pop_base INTERFACE)
-target_sources(push_pop_base INTERFACE push_pop.cpp "util/threading.cpp")
-target_link_libraries(push_pop_base INTERFACE benchmark_base
-                                                 Threads::Threads)
+target_sources(push_pop_base INTERFACE push_pop.cpp)
+target_link_libraries(push_pop_base INTERFACE benchmark_base)
 
 add_library(dijkstra_base INTERFACE)
-target_sources(dijkstra_base INTERFACE dijkstra.cpp "util/threading.cpp")
-target_link_libraries(dijkstra_base INTERFACE benchmark_base Threads::Threads)
+target_sources(dijkstra_base INTERFACE dijkstra.cpp)
+target_link_libraries(dijkstra_base INTERFACE benchmark_base)
 
 add_library(knapsack_base INTERFACE)
-target_sources(knapsack_base INTERFACE knapsack.cpp "util/threading.cpp")
-target_link_libraries(knapsack_base INTERFACE benchmark_base Threads::Threads)
+target_sources(knapsack_base INTERFACE knapsack.cpp)
+target_link_libraries(knapsack_base INTERFACE benchmark_base)
 
 add_library(knapsack_float_base INTERFACE)
-target_sources(knapsack_float_base INTERFACE knapsack.cpp "util/threading.cpp")
-target_link_libraries(knapsack_float_base INTERFACE benchmark_base
-                                                    Threads::Threads)
+target_sources(knapsack_float_base INTERFACE knapsack.cpp)
+target_link_libraries(knapsack_float_base INTERFACE benchmark_base)
 target_compile_definitions(knapsack_float_base INTERFACE FLOAT_INSTANCE)
 
 if(EXP_TUNING_TARGETS)

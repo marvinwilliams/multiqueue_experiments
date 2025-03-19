@@ -34,8 +34,9 @@ class SelfHandle {
     }
 
    public:
-    void push(typename PQ::value_type const& value) {
+    bool push(typename PQ::value_type const& value) {
         pq_->push(value);
+        return true;
     }
     std::optional<typename PQ::value_type> try_pop() {
         return pq_->try_pop();

@@ -153,13 +153,15 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     }
     if (index + 2 < data.instance.size()) {
         if (value + ub > solution) {
-            handle.push(to_payload(value + ub, index + 1, free_capacity, value));
-            ++counter.pushed_nodes;
+            if (handle.push(to_payload(value + ub, index + 1, free_capacity, value))) {
+                ++counter.pushed_nodes;
+            }
         }
         if (free_capacity >= data.instance.weight(index)) {
-            handle.push(to_payload(upper_bound, index + 1, free_capacity - data.instance.weight(index),
-                                   value + data.instance.value(index)));
-            ++counter.pushed_nodes;
+            if (handle.push(to_payload(upper_bound, index + 1, free_capacity - data.instance.weight(index),
+                                       value + data.instance.value(index)))) {
+                ++counter.pushed_nodes;
+            }
         }
     }
     ++counter.processed_nodes;
@@ -192,13 +194,11 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
         }
         thread_context.synchronize();
         if (thread_context.id() == 0) {
-            std::clog << "Missing nodes: " << data.missing_nodes.load(std::memory_order_relaxed) << '\n';
             data.missing_nodes.store(0, std::memory_order_relaxed);
             data.termination_detection.reset();
         }
         thread_context.synchronize();
     }
-    thread_context.synchronize();
     return counter;
 }
 

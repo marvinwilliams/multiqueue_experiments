@@ -54,6 +54,7 @@ class CAPQ {
     void push(value_type const& value) {
         ::capq_put_param(pq_.get(), Min ? value.first : sentinel - value.first - 1, value.second, true);
     }
+
     std::optional<value_type> try_pop() {
         unsigned long key;
         unsigned long value = ::capq_remove_min_param(pq_.get(), &key, true, true, true);
