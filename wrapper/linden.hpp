@@ -49,16 +49,34 @@ class Linden {
 
     alignas(64) std::unique_ptr<::pq_t, Deleter> pq_;
 
+    class Handle {
+        friend Linden;
+        Linden* pq_;
+
+        explicit Handle(Linden& pq) : pq_{&pq} {
+        }
+
+       public:
+        bool push(typename Linden::value_type const& value) {
+            return pq_->push(value);
+        }
+
+        std::optional<typename Linden::value_type> try_pop() {
+            return pq_->try_pop();
+        }
+    };
+
    public:
-    using handle_type = util::SelfHandle<Linden>;
+    using handle_type = Handle;
     using settings_type = util::EmptySettings;
     explicit Linden(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/) {
         _init_gc_subsystem();
         pq_.reset(::pq_init(32));
     }
 
-    void push(value_type const& value) {
-        ::insert(pq_.get(), Min ? value.first + 1 : sentinel - value.first - 1, value.second);
+    bool push(value_type const& value) {
+        auto ret = ::insert(pq_.get(), Min ? value.first + 1 : sentinel - value.first - 1, value.second);
+        return ret == 1;
     }
 
     std::optional<value_type> try_pop() {

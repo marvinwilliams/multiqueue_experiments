@@ -216,8 +216,24 @@ class MultiQueue {
         }
     };
 
+    class Handle : public multiqueue_type::handle_type {
+        friend MultiQueue;
+        explicit Handle(multiqueue_type &pq) : multiqueue_type::handle_type{pq.get_handle()} {
+        }
+
+       public:
+        bool push(typename multiqueue_type::value_type const &value) {
+            multiqueue_type::handle_type::push(value);
+            return true;
+        }
+
+        std::optional<typename multiqueue_type::value_type> try_pop() {
+            return multiqueue_type::handle_type::try_pop();
+        }
+    };
+
    public:
-    using handle_type = typename multiqueue_type::handle_type;
+    using handle_type = Handle;
     using settings_type = Settings;
 
     explicit MultiQueue(int num_threads, std::size_t initial_capacity, Settings const &settings)
@@ -243,7 +259,7 @@ class MultiQueue {
     }
 
     auto get_handle() {
-        return mq_.get_handle();
+        return Handle{mq_};
     }
 };
 

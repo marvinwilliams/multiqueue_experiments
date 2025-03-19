@@ -3,10 +3,8 @@
 #include "barrier.hpp"
 #include "threading.hpp"
 
-#include <atomic>
-#include <chrono>
+#include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <fstream>
 #include <mutex>
 #include <numeric>
@@ -20,7 +18,7 @@ namespace thread_coordination {
 namespace affinity {
 
 namespace detail {
-std::vector<std::array<std::size_t, 4>> get_cache_hierarchy() {
+inline std::vector<std::array<std::size_t, 4>> get_cache_hierarchy() {
     std::vector<std::array<std::size_t, 4>> hierarchy(std::thread::hardware_concurrency());
     std::vector<std::size_t> l1_lookup;
     for (std::size_t i = 0; i < hierarchy.size(); ++i) {

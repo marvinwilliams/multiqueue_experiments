@@ -43,7 +43,7 @@ class KLsm {
     pq_type pq_{};
 
    public:
-    explicit KLsm(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/){};
+    explicit KLsm(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/) {};
 
     void push(value_type const& value) {
         pq_.insert(Min ? value.first : sentinel_ - value.first - 1, value.second);

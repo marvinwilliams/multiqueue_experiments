@@ -91,8 +91,9 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
         auto old_d = data.distances[target].value.load(std::memory_order_relaxed);
         while (d < old_d) {
             if (data.distances[target].value.compare_exchange_weak(old_d, d, std::memory_order_relaxed)) {
-                handle.push({d, target});
-                ++counter.pushed_nodes;
+                if (handle.push({d, target})) {
+                    ++counter.pushed_nodes;
+                }
                 break;
             }
         }
@@ -126,7 +127,6 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
         }
         thread_context.synchronize();
         if (thread_context.id() == 0) {
-            std::clog << "Missing nodes: " << data.missing_nodes.load(std::memory_order_relaxed) << '\n';
             data.missing_nodes.store(0, std::memory_order_relaxed);
             data.termination_detection.reset();
         }

@@ -39,8 +39,8 @@ class MultiQueuePQ {
     }
 
     void push(value_type const& value) {
-        std::scoped_lock<std::mutex> guard(lock_);
-        pq_.push(value);
+            std::scoped_lock<std::mutex> guard(lock_);
+            pq_.push(value);
     }
 
     std::optional<value_type> try_pop() {
