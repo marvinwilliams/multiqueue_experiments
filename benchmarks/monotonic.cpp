@@ -306,7 +306,7 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
     pushes.reserve(std::accumulate(thread_data.begin(), thread_data.end(), 0UL,
                                    [](std::size_t sum, auto const& e) { return sum + e.pushes.size(); }));
     std::vector<ThreadData::PopLog> pops;
-    pushes.reserve(std::accumulate(thread_data.begin(), thread_data.end(), 0UL,
+    pops.reserve(std::accumulate(thread_data.begin(), thread_data.end(), 0UL,
                                    [](std::size_t sum, auto const& e) { return sum + e.pops.size(); }));
     for (auto const& e : thread_data) {
         pushes.insert(pushes.end(), e.pushes.begin(), e.pushes.end());
@@ -328,7 +328,7 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
         out << '-' << push_index[static_cast<std::size_t>(pop.val)] << '\n';
     }
     for (; i < pushes.size(); ++i) {
-        out << i << ' ' << pushes[i].element.first << '\n';
+        out << '+' << pushes[i].element.first << '\n';
     }
 }
 #endif
