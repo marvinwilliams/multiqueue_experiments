@@ -60,6 +60,8 @@ if(NOT "${PAGE_SIZE}" MATCHES "^[0-9]+")
   message(SEND_ERROR "Invalid page size")
 endif()
 
+set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
+
 add_subdirectory(multiqueue)
 add_subdirectory(wrapper)
 add_subdirectory(benchmarks)

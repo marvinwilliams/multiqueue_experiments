@@ -10,8 +10,8 @@
       "hidden": true,
       "environment": {
         "WARNINGS": "-Wall -Wextra -Wpedantic -Wconversion -Wsign-conversion -Wshadow -Wduplicated-branches -Wduplicated-cond -Wlogical-op -Wnull-dereference -Wuseless-cast -Wdouble-promotion -Wold-style-cast -Wformat=2 -Wundef -Wcast-align -Wcast-qual -Wdisabled-optimization -Wredundant-decls -Wunsafe-loop-optimizations -Wnoexcept -Wsuggest-final-types -Wsuggest-final-methods -Wsuggest-override",
-        "DEFAULT_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native -flto=auto",
-        "RELEASE_FLAGS": "-O3 -DNDEBUG -march=native -flto=auto",
+        "DEFAULT_FLAGS": "-O2 -g -fno-omit-frame-pointer -march=native",
+        "RELEASE_FLAGS": "-O3 -DNDEBUG -march=native",
         "DEBUG_FLAGS": "-Og -ggdb"
       }
     },
