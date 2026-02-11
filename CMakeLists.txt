@@ -60,7 +60,7 @@ if(NOT "${PAGE_SIZE}" MATCHES "^[0-9]+")
   message(SEND_ERROR "Invalid page size")
 endif()
 
-add_subdirectory(multiqueue)
+add_subdirectory(multiqueue_live)
 add_subdirectory(wrapper)
 add_subdirectory(benchmarks)
 add_subdirectory(tools)
