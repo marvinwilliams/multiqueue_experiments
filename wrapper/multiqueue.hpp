@@ -177,8 +177,10 @@ class MultiQueue {
                               "NUMBER");
             cmd.add_options()("mq-seed", "Seed for the multiqueue", cxxopts::value<int>(config.seed), "NUMBER");
             if constexpr (has_stickiness) {
-                cmd.add_options()("k,stickiness", "The stickiness period", cxxopts::value<int>(config.stickiness),
-                                  "NUMBER");
+                cmd.add_options()("k,stickiness",
+                                  "Additional operations the selected queues are used for (0 reselects every "
+                                  "operation)",
+                                  cxxopts::value<int>(config.stickiness), "NUMBER");
             }
         }
 
@@ -188,8 +190,10 @@ class MultiQueue {
                 return false;
             }
             if constexpr (has_stickiness) {
-                if (config.stickiness <= 0) {
-                    std::cerr << "Error: Stickiness must be at least 1\n";
+                // A stickiness of n uses the selected queues for n additional
+                // operations, so 0 (reselect every operation) is a valid setting
+                if (config.stickiness < 0) {
+                    std::cerr << "Error: Stickiness must not be negative\n";
                     return false;
                 }
             }
