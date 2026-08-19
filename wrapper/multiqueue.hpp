@@ -13,8 +13,12 @@
 
 #if defined MQ_MODE_RANDOM || defined MQ_MODE_RANDOM_STRICT
 #include "multiqueue/modes/random.hpp"
+#elif defined MQ_MODE_RANDOM_WORSE
+#include "multiqueue/modes/random_move_worse.hpp"
 #elif defined MQ_MODE_STICK_RANDOM
 #include "multiqueue/modes/stick_random.hpp"
+#elif defined MQ_MODE_STICK_RANDOM_WORSE
+#include "multiqueue/modes/stick_random_move_to_worse.hpp"
 #elif defined MQ_MODE_STICK_SWAP
 #include "multiqueue/modes/stick_swap.hpp"
 #elif defined MQ_MODE_STICK_MARK
@@ -61,6 +65,14 @@ static constexpr unsigned int heap_arity = 8;
 using mode_type = ::multiqueue::mode::Random<num_pop_candidates, true>;
 static constexpr auto mode_name = "random";
 static constexpr bool has_stickiness = false;
+#elif defined MQ_MODE_RANDOM_WORSE
+using mode_type = ::multiqueue::mode::RandomMoveWorse<num_pop_candidates, false>;
+static constexpr auto mode_name = "random_worse";
+static constexpr bool has_stickiness = false;
+#elif defined MQ_MODE_STICK_RANDOM_WORSE
+using mode_type = ::multiqueue::mode::StickRandomMTW<num_pop_candidates>;
+static constexpr auto mode_name = "stick_random_worse";
+static constexpr bool has_stickiness = true;
 #elif defined MQ_MODE_RANDOM_STRICT
 using mode_type = ::multiqueue::mode::Random<num_pop_candidates, false>;
 static constexpr auto mode_name = "random_strict";
