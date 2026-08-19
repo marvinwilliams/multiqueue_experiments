@@ -1,9 +1,6 @@
-#include "util/build_info.hpp"
+#include "util/benchmark.hpp"
 #include "util/selector.hpp"
 #include "util/thread_coordination.hpp"
-#ifdef LOG_OPERATIONS
-#include "util/operation_log.hpp"
-#endif
 
 #include <cxxopts.hpp>
 
@@ -11,10 +8,14 @@
 #include <papi.h>
 #include <pthread.h>
 #endif
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
+#include <numeric>
 #include <iomanip>
 #include <iostream>
 #include <iterator>
@@ -36,8 +37,7 @@ using value_type = unsigned long;
 using pq_type = PQ<true, key_type, value_type>;
 using handle_type = pq_type::handle_type;
 
-struct Settings {
-    int num_threads = 4;
+struct Settings : benchmark::CommonSettings {
     long long prefill_per_thread = 1 << 20;
     long long iterations_per_thread = 1 << 24;
     key_type min_prefill = 1;
@@ -46,7 +46,6 @@ struct Settings {
     long max_update = 1 << 20;
     long long batch_size = 1 << 12;
     int seed = 1;
-    int affinity = 6;
     int timeout_s = 0;
     int sleep_us = 0;
 #ifdef LOG_OPERATIONS
@@ -59,9 +58,9 @@ struct Settings {
 };
 
 void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+    settings.CommonSettings::register_cmd_options(cmd);
     cmd.add_options()
         // clang-format off
-            ("j,threads", "Number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
             ("p,prefill", "Prefill per thread", cxxopts::value<long long>(settings.prefill_per_thread), "NUMBER")
             ("n,iterations", "Number of iterations per thread", cxxopts::value<long long>(settings.iterations_per_thread), "NUMBER")
             ("min-prefill", "Min prefill key", cxxopts::value<key_type>(settings.min_prefill), "NUMBER")
@@ -70,15 +69,6 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
             ("max-update", "Max update", cxxopts::value<long>(settings.max_update), "NUMBER")
             ("batch-size", "Batch size", cxxopts::value<long long>(settings.batch_size), "NUMBER")
             ("s,seed", "Initial seed", cxxopts::value<int>(settings.seed), "NUMBER")
-            ("a,affinity", "CPU affinity ("
-                "0: None, "
-                "1: Thread Id, "
-                "2: Same, "
-                "3: Close caches, "
-                "4: Far caches, "
-                "5: Close L3 Far L1, "
-                "6: Far L1 Close L3)"
-                , cxxopts::value<int>(settings.affinity), "NUMBER")
             ("t,timeout", "Timeout in seconds", cxxopts::value<int>(settings.timeout_s), "NUMBER")
             ("q,sleep", "Time in microseconds to wait between operations", cxxopts::value<int>(settings.sleep_us), "NUMBER")
 #ifdef LOG_OPERATIONS
@@ -93,8 +83,7 @@ void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
 }
 
 bool validate_settings(Settings const& settings) {
-    if (settings.num_threads <= 0) {
-        std::cerr << "Error: Number of threads must be greater than 0\n";
+    if (!settings.CommonSettings::validate()) {
         return false;
     }
     if (settings.prefill_per_thread < 0) {
@@ -103,6 +92,10 @@ bool validate_settings(Settings const& settings) {
     }
     if (settings.iterations_per_thread < 0) {
         std::cerr << "Error: Iterations must be nonnegative\n";
+        return false;
+    }
+    if (settings.iterations_per_thread > 0 && settings.prefill_per_thread <= 0) {
+        std::cerr << "Error: Prefill must be at least 1 per thread to perform iterations\n";
         return false;
     }
     if (settings.min_prefill <= 0) {
@@ -123,10 +116,6 @@ bool validate_settings(Settings const& settings) {
     }
     if (settings.batch_size <= 0) {
         std::cerr << "Error: batch size must be greater than 0\n";
-        return false;
-    }
-    if (settings.affinity < 0 || settings.affinity > 6) {
-        std::cerr << "Error: Invalid affinity\n";
         return false;
     }
     if (settings.timeout_s < 0) {
@@ -175,33 +164,12 @@ bool validate_settings(Settings const& settings) {
 }
 
 void write_settings_human_readable(Settings const& settings, std::ostream& out) {
-    auto affinity_name = [](int a) {
-        switch (a) {
-            case 0:
-                return "None";
-            case 1:
-                return "Thread Id";
-            case 2:
-                return "Same";
-            case 3:
-                return "Close caches";
-            case 4:
-                return "Far caches";
-            case 5:
-                return "Close L3 Far L1";
-            case 6:
-                return "Far L1 Close L3";
-            default:
-                return "";
-        }
-    };
-    out << "Threads: " << settings.num_threads << '\n';
+    settings.CommonSettings::write_human_readable(out);
     out << "Prefill per thread: " << settings.prefill_per_thread << '\n';
     out << "Iterations per thread: " << settings.iterations_per_thread << '\n';
     out << "Prefill range: [" << settings.min_prefill << ", " << settings.max_prefill << "]\n";
     out << "Update range: [" << settings.min_update << ", " << settings.max_update << "]\n";
     out << "Batch size: " << settings.batch_size << '\n';
-    out << "Affinity: " << affinity_name(settings.affinity) << '\n';
     out << "Timeout: ";
     if (settings.timeout_s == 0) {
         out << "None\n";
@@ -231,34 +199,22 @@ void write_settings_human_readable(Settings const& settings, std::ostream& out) 
     settings.pq_settings.write_human_readable(out);
 }
 
-void write_settings_json(Settings const& settings, std::ostream& out) {
-    out << '{';
-    out << std::quoted("num_threads") << ':' << settings.num_threads << ',';
-    out << std::quoted("prefill_per_thread") << ':' << settings.prefill_per_thread << ',';
-    out << std::quoted("iterations_per_thread") << ':' << settings.iterations_per_thread << ',';
-    out << std::quoted("prefill_min") << ':' << settings.min_prefill << ',';
-    out << std::quoted("prefill_max") << ':' << settings.max_prefill << ',';
-    out << std::quoted("update_min") << ':' << settings.min_update << ',';
-    out << std::quoted("update_max") << ':' << settings.max_update << ',';
-    out << std::quoted("batch_size") << ':' << settings.batch_size << ',';
-    out << std::quoted("affinity") << ':' << settings.affinity << ',';
-    out << std::quoted("timeout_s") << ':' << settings.timeout_s << ',';
-    out << std::quoted("sleep_us") << ':' << settings.sleep_us << ',';
-    out << std::quoted("seed") << ':' << settings.seed << ',';
+void write_settings_json(Settings const& settings, json::Object& obj) {
+    settings.CommonSettings::write_json(obj);
+    obj.entry("prefill_per_thread", settings.prefill_per_thread);
+    obj.entry("iterations_per_thread", settings.iterations_per_thread);
+    obj.entry("prefill_min", settings.min_prefill);
+    obj.entry("prefill_max", settings.max_prefill);
+    obj.entry("update_min", settings.min_update);
+    obj.entry("update_max", settings.max_update);
+    obj.entry("batch_size", settings.batch_size);
+    obj.entry("timeout_s", settings.timeout_s);
+    obj.entry("sleep_us", settings.sleep_us);
+    obj.entry("seed", settings.seed);
 #ifdef WITH_PAPI
-    out << std::quoted("papi_events") << ':';
-    out << '[';
-    for (std::size_t i = 0; i < settings.papi_events.size(); ++i) {
-        out << std::quoted(settings.papi_events[i]);
-        if (i != settings.papi_events.size() - 1) {
-            out << ',';
-        }
-    }
-    out << ']' << ',';
+    obj.array("papi_events", settings.papi_events);
 #endif
-    out << std::quoted("pq") << ':';
-    settings.pq_settings.write_json(out);
-    out << '}';
+    obj.raw("pq", [&settings](std::ostream& out) { settings.pq_settings.write_json(out); });
 }
 
 struct ThreadData {
@@ -281,23 +237,12 @@ struct ThreadData {
 #endif
 };
 
-void write_thread_data_json(ThreadData const& data, std::ostream& out) {
-    out << '{';
-    out << std::quoted("iterations") << ':' << data.iter_count << ',';
-    out << std::quoted("failed_pops") << ':' << data.failed_pop_count;
+void write_thread_data_json(ThreadData const& data, json::Object& obj) {
+    obj.entry("iterations", data.iter_count);
+    obj.entry("failed_pops", data.failed_pop_count);
 #ifdef WITH_PAPI
-    out << ',';
-    out << std::quoted("papi_event_counter") << ':';
-    out << '[';
-    for (std::size_t i = 0; i < data.papi_event_counter.size(); ++i) {
-        out << data.papi_event_counter[i];
-        if (i != data.papi_event_counter.size() - 1) {
-            out << ',';
-        }
-    }
-    out << ']';
+    obj.array("papi_event_counter", data.papi_event_counter);
 #endif
-    out << '}';
 }
 
 #ifdef LOG_OPERATIONS
@@ -342,24 +287,19 @@ struct SharedData {
 };
 
 void write_result_json(Settings const& settings, SharedData const& data, std::ostream& out) {
-    out << '{';
-    out << std::quoted("settings") << ':';
-    write_settings_json(settings, out);
-    out << ',';
-    out << std::quoted("results") << ':';
-    out << '{';
-    out << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{data.end_time - data.start_time}.count() << ',';
-    out << std::quoted("thread_data") << ':';
-    out << '[';
-    for (auto it = data.thread_data.begin(); it != data.thread_data.end(); ++it) {
-        write_thread_data_json(*it, out);
-        if (it != std::prev(data.thread_data.end())) {
-            out << ',';
-        }
+    {
+        json::Object root{out};
+        root.object("settings", [&settings](json::Object& obj) { write_settings_json(settings, obj); });
+        root.object("results", [&data](json::Object& results) {
+            results.entry("time_ns", std::chrono::nanoseconds{data.end_time - data.start_time}.count());
+            results.array("thread_data", data.thread_data.begin(), data.thread_data.end(),
+                          [](std::ostream& out, ThreadData const& thread_data) {
+                              json::Object obj{out};
+                              write_thread_data_json(thread_data, obj);
+                          });
+        });
     }
-    out << ']';
-    out << '}';
-    out << '}' << '\n';
+    out << '\n';
 }
 
 class Context : public thread_coordination::Context {
@@ -420,6 +360,12 @@ class Context : public thread_coordination::Context {
     }
 };
 
+[[nodiscard]] bool timed_out(Context const& context) noexcept {
+    return context.settings().timeout_s != 0 &&
+        std::chrono::high_resolution_clock::now() >
+        context.shared_data().start_time + std::chrono::seconds{context.settings().timeout_s};
+}
+
 [[gnu::noinline]] void work_loop(Context& context) {
     auto offset = static_cast<value_type>(context.settings().num_threads * context.settings().prefill_per_thread);
     long long max = context.settings().iterations_per_thread * context.settings().num_threads;
@@ -427,28 +373,34 @@ class Context : public thread_coordination::Context {
          from < max;
          from = context.shared_data().counter.fetch_add(context.settings().batch_size, std::memory_order_relaxed)) {
         auto to = std::min(from + context.settings().batch_size, max);
-        for (auto i = from; i < to; ++i) {
-            while (true) {
-                if (auto e = context.try_pop(); e) {
-                    if (context.settings().sleep_us != 0) {
-                        auto sleep_until = std::chrono::high_resolution_clock::now() +
-                            std::chrono::microseconds{context.settings().sleep_us};
-                        while (std::chrono::high_resolution_clock::now() < sleep_until) {
-                            PAUSE;
-                        }
-                    }
-                    context.push({static_cast<key_type>(static_cast<long long>(e->first) +
-                                                        context.shared_data().updates[static_cast<std::size_t>(i)]),
-                                  offset + static_cast<value_type>(i)});
-                    break;
-                }
+        auto i = from;
+        for (; i < to; ++i) {
+            auto e = context.try_pop();
+            while (!e) {
                 ++context.thread_data().failed_pop_count;
+                // The queue is relaxed, so this retry loop is unbounded: a thread can
+                // spin here while every element is held by another thread, or forever
+                // if the queue really is empty. The timeout has to be able to interrupt
+                // here, not just between batches.
+                if (timed_out(context)) {
+                    context.thread_data().iter_count += i - from;
+                    return;
+                }
+                e = context.try_pop();
             }
+            if (context.settings().sleep_us != 0) {
+                auto sleep_until =
+                    std::chrono::high_resolution_clock::now() + std::chrono::microseconds{context.settings().sleep_us};
+                while (std::chrono::high_resolution_clock::now() < sleep_until) {
+                    PAUSE;
+                }
+            }
+            context.push({static_cast<key_type>(static_cast<long long>(e->first) +
+                                                context.shared_data().updates[static_cast<std::size_t>(i)]),
+                          offset + static_cast<value_type>(i)});
         }
         context.thread_data().iter_count += to - from;
-        if (context.settings().timeout_s != 0 &&
-            std::chrono::high_resolution_clock::now() >
-                context.shared_data().start_time + std::chrono::seconds{context.settings().timeout_s}) {
+        if (timed_out(context)) {
             break;
         }
     }
@@ -558,35 +510,9 @@ void run_benchmark(Settings const& settings) {
         pq_type(settings.num_threads, static_cast<std::size_t>(settings.prefill_per_thread * settings.num_threads),
                 settings.pq_settings);
 
-    auto dispatch = [&](auto const& affinity) {
-        auto dispatcher = thread_coordination::Dispatcher(affinity, settings.num_threads, [&](auto ctx) {
-            benchmark_thread(Context(std::move(ctx), pq.get_handle(), shared_data, settings));
-        });
-        dispatcher.wait();
-    };
-    switch (settings.affinity) {
-        case 0:
-            dispatch(thread_coordination::affinity::None{});
-            break;
-        case 1:
-            dispatch(thread_coordination::affinity::ThreadId{});
-            break;
-        case 2:
-            dispatch(thread_coordination::affinity::Same{});
-            break;
-        case 3:
-            dispatch(thread_coordination::affinity::CloseCaches{});
-            break;
-        case 4:
-            dispatch(thread_coordination::affinity::FarCaches{});
-            break;
-        case 5:
-            dispatch(thread_coordination::affinity::CloseL3FarL1{});
-            break;
-        case 6:
-            dispatch(thread_coordination::affinity::FarL1CloseL3{});
-            break;
-    }
+    thread_coordination::dispatch(settings.affinity, settings.num_threads, [&](auto ctx) {
+        benchmark_thread(Context(std::move(ctx), pq.get_handle(), shared_data, settings));
+    });
 
 #ifdef LOG_OPERATIONS
     std::clog << "Writing logs...\n";
@@ -603,21 +529,7 @@ void run_benchmark(Settings const& settings) {
 }
 
 int main(int argc, char* argv[]) {
-    write_build_info(std::clog);
-    std::clog << '\n';
-
-    std::clog << "= Priority queue =\n";
-    pq_type::write_human_readable(std::clog);
-    std::clog << '\n';
-
-    std::clog << "= Command line =\n";
-    for (int i = 0; i < argc; ++i) {
-        std::clog << argv[i];
-        if (i != argc - 1) {
-            std::clog << ' ';
-        }
-    }
-    std::clog << '\n' << '\n';
+    benchmark::write_run_header<pq_type>(argc, argv, std::clog);
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help", cxxopts::value<bool>());

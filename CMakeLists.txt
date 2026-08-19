@@ -43,6 +43,11 @@ if(EXP_TUNING_TARGETS)
       CACHE
         STRING
         "Generate tuning targets for the specified list of number of pop pqs")
+  set(EXP_TUNING_POP_TRIES
+      "1;2;4"
+      CACHE
+        STRING
+        "Generate tuning targets for the specified list of pop tries before scanning")
   set(EXP_TUNING_BUFFER_SIZES
       "0;4;16;64;256;1024"
       CACHE STRING
@@ -62,7 +67,21 @@ endif()
 
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
-add_subdirectory(multiqueue)
+# The library is co-developed with these experiments: prefer the live working
+# tree (the multiqueue_live symlink) when it is present, fall back to the
+# pinned submodule otherwise.
+if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/multiqueue_live/CMakeLists.txt")
+  message(STATUS "Using live multiqueue via multiqueue_live")
+  add_subdirectory(multiqueue_live)
+elseif(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/multiqueue/CMakeLists.txt")
+  message(STATUS "Using pinned multiqueue submodule")
+  add_subdirectory(multiqueue)
+else()
+  message(
+    FATAL_ERROR
+      "multiqueue not found. Run `git submodule update --init multiqueue`, or symlink a working tree to multiqueue_live."
+  )
+endif()
 add_subdirectory(wrapper)
 add_subdirectory(benchmarks)
 add_subdirectory(tools)

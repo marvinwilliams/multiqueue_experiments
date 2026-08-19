@@ -4,6 +4,8 @@
 #include "multiqueue/multiqueue.hpp"
 #include "multiqueue/utils.hpp"
 
+#include "util.hpp"
+
 #ifdef MQ_USE_STD_PQ
 #include <queue>
 #include <vector>
@@ -61,6 +63,16 @@ static constexpr unsigned int heap_arity = MQ_HEAP_ARITY;
 static constexpr unsigned int heap_arity = 8;
 #endif
 
+// Number of times the mode's pop is attempted before falling back to a linear
+// scan over all queues. Each failed attempt costs a top-key comparison and a
+// failed lock; each scan costs a lock attempt on every queue.
+#ifdef MQ_POP_TRIES
+static constexpr int pop_tries = MQ_POP_TRIES;
+#else
+static constexpr int pop_tries = 1;
+#endif
+static_assert(pop_tries > 0, "MQ_POP_TRIES must be at least 1");
+
 #if defined MQ_MODE_RANDOM
 using mode_type = ::multiqueue::mode::Random<num_pop_candidates, true>;
 static constexpr auto mode_name = "random";
@@ -97,7 +109,7 @@ static constexpr bool has_stickiness = true;
 
 struct Policy {
     using mode_type = ::wrapper::multiqueue::mode_type;
-    static constexpr int pop_tries = 1;
+    static constexpr int pop_tries = ::wrapper::multiqueue::pop_tries;
     static constexpr bool scan = true;
 };
 
@@ -107,18 +119,18 @@ class BTreeWrapper {
     using btree_type = tlx::BTree<Key, Value, KeyOfValue, Compare, tlx::btree_default_traits<Key, Value>, true>;
 
    public:
-    using key_type = btree_type::key_type;
-    using value_type = btree_type::value_type;
-    using size_type = btree_type::size_type;
-    using key_compare = btree_type::key_compare;
-    using value_compare = btree_type::value_compare;
+    using key_type = typename btree_type::key_type;
+    using value_type = typename btree_type::value_type;
+    using size_type = typename btree_type::size_type;
+    using key_compare = typename btree_type::key_compare;
+    using value_compare = typename btree_type::value_compare;
 
    private:
     btree_type btree_;
 
    public:
-    BTreePQWrapper() = default;
-    explicit BTreePQWrapper(key_compare const &comp) : btree_(comp) {
+    BTreeWrapper() = default;
+    explicit BTreeWrapper(key_compare const &comp) : btree_(comp) {
     }
 
     void push(value_type const &value) {
@@ -160,10 +172,10 @@ class MultiQueue {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = ::multiqueue::utils::ValueCompare<value_type, ::multiqueue::utils::PairFirst, key_compare>;
+    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
 
 #ifdef MQ_USE_BTREE
-    using pq_type = BTreeWrapper<key_type, value_type, KeyOfValue, key_compare>;
+    using pq_type = BTreeWrapper<key_type, value_type, util::PairFirst, key_compare>;
 #else
     using pq_type = ::multiqueue::BufferedPQ<
 #ifdef MQ_USE_STD_PQ
@@ -260,6 +272,7 @@ class MultiQueue {
         out << "MultiQueue\n";
         out << "  Mode: " << mode_name << '\n';
         out << "  Pop candidates: " << num_pop_candidates << '\n';
+        out << "  Pop tries: " << pop_tries << '\n';
 #ifdef MQ_USE_BTREE
         out << "  PQ: tlx::btree" << '\n';
 #else

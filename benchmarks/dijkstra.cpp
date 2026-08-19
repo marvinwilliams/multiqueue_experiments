@@ -1,4 +1,4 @@
-#include "util/build_info.hpp"
+#include "util/benchmark.hpp"
 #include "util/graph.hpp"
 #include "util/selector.hpp"
 #include "util/termination_detection.hpp"
@@ -27,39 +27,42 @@ using pq_type = PQ<true, unsigned long, unsigned long>;
 using handle_type = pq_type::handle_type;
 using node_type = pq_type::value_type;
 
-struct Settings {
-    int num_threads = 4;
+struct Settings : benchmark::CommonSettings {
     std::filesystem::path graph_file;
-    unsigned int seed = 1;
     pq_type::settings_type pq_settings{};
 };
 
-Settings settings{};
-
-void register_cmd_options(cxxopts::Options& cmd) {
+void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+    settings.CommonSettings::register_cmd_options(cmd);
     // clang-format off
     cmd.add_options()
-        ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("graph", "The input graph", cxxopts::value<std::filesystem::path>(settings.graph_file), "PATH");
     // clang-format on
     settings.pq_settings.register_cmd_options(cmd);
     cmd.parse_positional({"graph"});
 }
 
-void write_settings_human_readable(std::ostream& out) {
-    out << "Threads: " << settings.num_threads << '\n';
+bool validate_settings(Settings const& settings) {
+    if (!settings.CommonSettings::validate()) {
+        return false;
+    }
+    if (settings.graph_file.empty()) {
+        std::cerr << "Error: No graph file specified\n";
+        return false;
+    }
+    return settings.pq_settings.validate();
+}
+
+void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+    settings.CommonSettings::write_human_readable(out);
     out << "Graph: " << settings.graph_file << '\n';
     settings.pq_settings.write_human_readable(out);
 }
 
-void write_settings_json(std::ostream& out) {
-    out << '{';
-    out << std::quoted("num_threads") << ':' << settings.num_threads << ',';
-    out << std::quoted("graph_file") << ':' << settings.graph_file << ',';
-    out << std::quoted("seed") << ':' << settings.seed << ',';
-    out << std::quoted("pq") << ':';
-    settings.pq_settings.write_json(out);
-    out << '}';
+void write_settings_json(Settings const& settings, json::Object& obj) {
+    settings.CommonSettings::write_json(obj);
+    obj.entry("graph_file", settings.graph_file);
+    obj.raw("pq", [&settings](std::ostream& out) { settings.pq_settings.write_json(out); });
 }
 
 struct Counter {
@@ -135,7 +138,7 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     return counter;
 }
 
-void run_benchmark() {
+void run_benchmark(Settings const& settings) {
     std::clog << "Reading graph...\n";
     SharedData shared_data{{}, {}, termination_detection::TerminationDetection(settings.num_threads)};
     try {
@@ -152,11 +155,10 @@ void run_benchmark() {
     auto pq = pq_type(settings.num_threads, shared_data.graph.num_nodes(), settings.pq_settings);
     std::clog << "Working...\n";
     auto start_time = std::chrono::steady_clock::now();
-    thread_coordination::Dispatcher dispatcher{settings.num_threads, [&](auto ctx) {
-                                                   auto t_id = static_cast<std::size_t>(ctx.id());
-                                                   thread_counter[t_id] = benchmark_thread(ctx, pq, shared_data);
-                                               }};
-    dispatcher.wait();
+    thread_coordination::dispatch(settings.affinity, settings.num_threads, [&](auto ctx) {
+        auto t_id = static_cast<std::size_t>(ctx.id());
+        thread_counter[t_id] = benchmark_thread(ctx, pq, shared_data);
+    });
     auto end_time = std::chrono::steady_clock::now();
 
     std::clog << "Done\n";
@@ -191,46 +193,31 @@ void run_benchmark() {
         std::cerr << "Warning: Not all nodes were popped\n";
         std::cerr << "Probably the priority queue discards duplicate keys\n";
     }
-    std::cout << '{';
-    std::cout << std::quoted("settings") << ':';
-    write_settings_json(std::cout);
-    std::cout << ',';
-    std::cout << std::quoted("graph") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("num_nodes") << ':' << shared_data.graph.num_nodes() << ',';
-    std::cout << std::quoted("num_edges") << ':' << shared_data.graph.num_edges();
-    std::cout << '}' << ',';
-    std::cout << std::quoted("results") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{end_time - start_time}.count() << ',';
-    std::cout << std::quoted("furthest_node") << ':' << furthest_node - shared_data.distances.begin() << ',';
-    std::cout << std::quoted("longest_distance") << ':' << furthest_node->value.load(std::memory_order_relaxed) << ',';
-    std::cout << std::quoted("processed_nodes") << ':' << total_counts.processed_nodes << ',';
-    std::cout << std::quoted("ignored_nodes") << ':' << total_counts.ignored_nodes;
-    std::cout << '}';
-    std::cout << '}' << '\n';
+    {
+        json::Object root{std::cout};
+        root.object("settings", [&settings](json::Object& obj) { write_settings_json(settings, obj); });
+        root.object("graph", [&shared_data](json::Object& graph) {
+            graph.entry("num_nodes", shared_data.graph.num_nodes());
+            graph.entry("num_edges", shared_data.graph.num_edges());
+        });
+        root.object("results", [&](json::Object& results) {
+            results.entry("time_ns", std::chrono::nanoseconds{end_time - start_time}.count());
+            results.entry("furthest_node", furthest_node - shared_data.distances.begin());
+            results.entry("longest_distance", furthest_node->value.load(std::memory_order_relaxed));
+            results.entry("processed_nodes", total_counts.processed_nodes);
+            results.entry("ignored_nodes", total_counts.ignored_nodes);
+        });
+    }
+    std::cout << '\n';
 }
 
 int main(int argc, char* argv[]) {
-    write_build_info(std::clog);
-    std::clog << '\n';
-
-    std::clog << "= Priority queue =\n";
-    pq_type::write_human_readable(std::clog);
-    std::clog << '\n';
-
-    std::clog << "= Command line =\n";
-    for (int i = 0; i < argc; ++i) {
-        std::clog << argv[i];
-        if (i != argc - 1) {
-            std::clog << ' ';
-        }
-    }
-    std::clog << '\n' << '\n';
+    benchmark::write_run_header<pq_type>(argc, argv, std::clog);
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help");
-    register_cmd_options(cmd);
+    Settings settings{};
+    register_cmd_options(settings, cmd);
 
     try {
         auto args = cmd.parse(argc, argv);
@@ -245,10 +232,14 @@ int main(int argc, char* argv[]) {
     }
 
     std::clog << "= Settings =\n";
-    write_settings_human_readable(std::clog);
+    write_settings_human_readable(settings, std::clog);
     std::clog << '\n';
 
+    if (!validate_settings(settings)) {
+        return EXIT_FAILURE;
+    }
+
     std::clog << "= Running benchmark =\n";
-    run_benchmark();
+    run_benchmark(settings);
     return EXIT_SUCCESS;
 }

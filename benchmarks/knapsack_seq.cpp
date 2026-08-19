@@ -1,4 +1,5 @@
 #include "util/build_info.hpp"
+#include "util/json.hpp"
 #include "util/knapsack_instance.hpp"
 
 #include "cxxopts.hpp"
@@ -41,10 +42,8 @@ void write_settings_human_readable(Settings const& settings, std::ostream& out) 
     out << "Instance file: " << settings.instance_file << '\n';
 }
 
-void write_settings_json(Settings const& settings, std::ostream& out) {
-    out << '{';
-    out << std::quoted("instance_file") << ':' << settings.instance_file;
-    out << '}';
+void write_settings_json(Settings const& settings, json::Object& obj) {
+    obj.entry("instance_file", settings.instance_file);
 }
 
 void knapsack(Settings const& settings) noexcept {
@@ -107,25 +106,23 @@ void knapsack(Settings const& settings) noexcept {
     std::clog << "Average PQ size: " << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes) << '\n';
     std::clog << "Max PQ size: " << max_size << '\n';
 
-    std::cout << '{';
-    std::cout << std::quoted("settings") << ':';
-    write_settings_json(settings, std::cout);
-    std::cout << ',';
-    std::cout << std::quoted("instance") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("num_items") << ':' << instance.size() << ',';
-    std::cout << std::quoted("capacity") << ':' << std::fixed << instance.capacity();
-    std::cout << '}' << ',';
-    std::cout << std::quoted("results") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
-    std::cout << std::quoted("processed_nodes") << ':' << processed_nodes << ',';
-    std::cout << std::quoted("solution") << ':' << best_value << ',';
-    std::cout << std::quoted("average_pq_size") << ':'
-              << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes) << ',';
-    std::cout << std::quoted("max_pq_size") << ':' << max_size;
-    std::cout << '}';
-    std::cout << '}' << '\n';
+    std::cout << std::fixed;
+    {
+        json::Object root{std::cout};
+        root.object("settings", [&settings](json::Object& obj) { write_settings_json(settings, obj); });
+        root.object("instance", [&instance](json::Object& obj) {
+            obj.entry("num_items", instance.size());
+            obj.entry("capacity", instance.capacity());
+        });
+        root.object("results", [&](json::Object& results) {
+            results.entry("time_ns", std::chrono::nanoseconds{t_end - t_start}.count());
+            results.entry("processed_nodes", processed_nodes);
+            results.entry("solution", best_value);
+            results.entry("average_pq_size", static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes));
+            results.entry("max_pq_size", max_size);
+        });
+    }
+    std::cout << '\n';
 }
 
 int main(int argc, char* argv[]) {

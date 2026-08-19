@@ -1,5 +1,6 @@
 #include "util/build_info.hpp"
 #include "util/graph.hpp"
+#include "util/json.hpp"
 
 #include <cxxopts.hpp>
 
@@ -88,28 +89,25 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     std::clog << "Average PQ size: " << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes) << '\n';
     std::clog << "Max PQ size: " << max_size << '\n';
 
-    std::cout << '{';
-    std::cout << std::quoted("settings") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("graph_file") << ':' << graph_file;
-    std::cout << '}' << ',';
-    std::cout << std::quoted("graph") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("num_nodes") << ':' << graph.num_nodes() << ',';
-    std::cout << std::quoted("num_edges") << ':' << graph.num_edges();
-    std::cout << '}' << ',';
-    std::cout << std::quoted("results") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{t_end - t_start}.count() << ',';
-    std::cout << std::quoted("furthest_node") << ':' << furthest_node - distances.begin() << ',';
-    std::cout << std::quoted("longest_distance") << ':' << *furthest_node << ',';
-    std::cout << std::quoted("processed_nodes") << ':' << processed_nodes << ',';
-    std::cout << std::quoted("ignored_nodes") << ':' << ignored_nodes << ',';
-    std::cout << std::quoted("average_pq_size") << ':'
-              << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes) << ',';
-    std::cout << std::quoted("max_pq_size") << ':' << max_size;
-    std::cout << '}';
-    std::cout << '}' << '\n';
+    {
+        json::Object root{std::cout};
+        root.object("settings", [&graph_file](json::Object& obj) { obj.entry("graph_file", graph_file); });
+        root.object("graph", [&graph](json::Object& obj) {
+            obj.entry("num_nodes", graph.num_nodes());
+            obj.entry("num_edges", graph.num_edges());
+        });
+        root.object("results", [&](json::Object& results) {
+            results.entry("time_ns", std::chrono::nanoseconds{t_end - t_start}.count());
+            results.entry("furthest_node", furthest_node - distances.begin());
+            results.entry("longest_distance", *furthest_node);
+            results.entry("processed_nodes", processed_nodes);
+            results.entry("ignored_nodes", ignored_nodes);
+            results.entry("average_pq_size",
+                          static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes));
+            results.entry("max_pq_size", max_size);
+        });
+    }
+    std::cout << '\n';
 }
 
 int main(int argc, char* argv[]) {

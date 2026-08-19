@@ -1,4 +1,4 @@
-#include "util/build_info.hpp"
+#include "util/benchmark.hpp"
 #include "util/knapsack_instance.hpp"
 #include "util/selector.hpp"
 #include "util/termination_detection.hpp"
@@ -88,36 +88,42 @@ data_type extract_value(node_type const& node) noexcept {
 
 using handle_type = pq_type::handle_type;
 
-struct Settings {
-    int num_threads = 4;
+struct Settings : benchmark::CommonSettings {
     std::filesystem::path instance_file{};
     pq_type::settings_type pq_settings{};
 };
 
-Settings settings{};
-
-void register_cmd_options(cxxopts::Options& cmd) {
+void register_cmd_options(Settings& settings, cxxopts::Options& cmd) {
+    settings.CommonSettings::register_cmd_options(cmd);
     // clang-format off
     cmd.add_options()
-        ("j,threads", "The number of threads", cxxopts::value<int>(settings.num_threads), "NUMBER")
         ("instance", "Instance file", cxxopts::value<std::filesystem::path>(settings.instance_file), "FILE");
     // clang-format on
     settings.pq_settings.register_cmd_options(cmd);
     cmd.parse_positional({"instance"});
 }
 
-void write_settings_human_readable(std::ostream& out) {
-    out << "Threads: " << settings.num_threads << '\n';
+bool validate_settings(Settings const& settings) {
+    if (!settings.CommonSettings::validate()) {
+        return false;
+    }
+    if (settings.instance_file.empty()) {
+        std::cerr << "Error: No instance file specified\n";
+        return false;
+    }
+    return settings.pq_settings.validate();
+}
+
+void write_settings_human_readable(Settings const& settings, std::ostream& out) {
+    settings.CommonSettings::write_human_readable(out);
     out << "Instance file: " << settings.instance_file << '\n';
     settings.pq_settings.write_human_readable(out);
 }
 
-void write_settings_json(std::ostream& out) {
-    out << '{';
-    out << std::quoted("instance_file") << ':' << settings.instance_file << ',';
-    out << std::quoted("pq") << ':';
-    settings.pq_settings.write_json(out);
-    out << '}';
+void write_settings_json(Settings const& settings, json::Object& obj) {
+    settings.CommonSettings::write_json(obj);
+    obj.entry("instance_file", settings.instance_file);
+    obj.raw("pq", [&settings](std::ostream& out) { settings.pq_settings.write_json(out); });
 }
 
 struct Counter {
@@ -202,7 +208,7 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     return counter;
 }
 
-void run_benchmark() {
+void run_benchmark(Settings const& settings) {
     KnapsackInstance<data_type> instance;
     std::clog << "Reading instance...\n";
     try {
@@ -218,11 +224,10 @@ void run_benchmark() {
     auto pq = pq_type(settings.num_threads, std::size_t(10'000'000), settings.pq_settings);
     std::clog << "Working...\n";
     auto start_time = std::chrono::steady_clock::now();
-    thread_coordination::Dispatcher dispatcher{settings.num_threads, [&](auto ctx) {
-                                                   auto t_id = static_cast<std::size_t>(ctx.id());
-                                                   thread_counter[t_id] = benchmark_thread(ctx, pq, shared_data);
-                                               }};
-    dispatcher.wait();
+    thread_coordination::dispatch(settings.affinity, settings.num_threads, [&](auto ctx) {
+        auto t_id = static_cast<std::size_t>(ctx.id());
+        thread_counter[t_id] = benchmark_thread(ctx, pq, shared_data);
+    });
     auto end_time = std::chrono::steady_clock::now();
     std::clog << "Done\n";
     auto total_counts =
@@ -243,45 +248,33 @@ void run_benchmark() {
         std::cerr << "Warning: Not all nodes were popped\n";
         std::cerr << "Probably the priority queue discards duplicate keys\n";
     }
-    std::cout << '{';
-    std::cout << std::quoted("settings") << ':';
-    write_settings_json(std::cout);
-    std::cout << ',';
-    std::cout << std::quoted("instance") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("num_items") << ':' << shared_data.instance.size() << ',';
-    std::cout << std::quoted("capacity") << ':' << std::fixed << shared_data.instance.capacity();
-    std::cout << '}' << ',';
-    std::cout << std::quoted("results") << ':';
-    std::cout << '{';
-    std::cout << std::quoted("time_ns") << ':' << std::chrono::nanoseconds{end_time - start_time}.count() << ',';
-    std::cout << std::quoted("processed_nodes") << ':' << total_counts.processed_nodes << ',';
-    std::cout << std::quoted("ignored_nodes") << ':' << total_counts.ignored_nodes << ',';
-    std::cout << std::quoted("solution") << ':' << shared_data.solution.load();
-    std::cout << '}';
-    std::cout << '}' << '\n';
+    // std::fixed matters for the floating point instance type; the integral
+    // fields written before it are unaffected
+    std::cout << std::fixed;
+    {
+        json::Object root{std::cout};
+        root.object("settings", [&settings](json::Object& obj) { write_settings_json(settings, obj); });
+        root.object("instance", [&shared_data](json::Object& instance) {
+            instance.entry("num_items", shared_data.instance.size());
+            instance.entry("capacity", shared_data.instance.capacity());
+        });
+        root.object("results", [&](json::Object& results) {
+            results.entry("time_ns", std::chrono::nanoseconds{end_time - start_time}.count());
+            results.entry("processed_nodes", total_counts.processed_nodes);
+            results.entry("ignored_nodes", total_counts.ignored_nodes);
+            results.entry("solution", shared_data.solution.load());
+        });
+    }
+    std::cout << '\n';
 }
 
 int main(int argc, char* argv[]) {
-    write_build_info(std::clog);
-    std::clog << '\n';
-
-    std::clog << "= Priority queue =\n";
-    pq_type::write_human_readable(std::clog);
-    std::clog << '\n';
-
-    std::clog << "= Command line =\n";
-    for (int i = 0; i < argc; ++i) {
-        std::clog << argv[i];
-        if (i != argc - 1) {
-            std::clog << ' ';
-        }
-    }
-    std::clog << '\n' << '\n';
+    benchmark::write_run_header<pq_type>(argc, argv, std::clog);
 
     cxxopts::Options cmd(argv[0]);
     cmd.add_options()("h,help", "Print this help");
-    register_cmd_options(cmd);
+    Settings settings{};
+    register_cmd_options(settings, cmd);
 
     try {
         auto args = cmd.parse(argc, argv);
@@ -296,14 +289,14 @@ int main(int argc, char* argv[]) {
     }
 
     std::clog << "= Settings =\n";
-    write_settings_human_readable(std::clog);
+    write_settings_human_readable(settings, std::clog);
     std::clog << '\n';
-    if (settings.instance_file.empty()) {
-        std::cerr << "Error: No instance file specified" << '\n';
-        std::cerr << "Use --help for usage information" << '\n';
+
+    if (!validate_settings(settings)) {
         return EXIT_FAILURE;
     }
+
     std::clog << "= Running benchmark =\n";
-    run_benchmark();
+    run_benchmark(settings);
     return EXIT_SUCCESS;
 }

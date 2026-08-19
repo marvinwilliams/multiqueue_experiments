@@ -52,6 +52,16 @@ if(EXP_TUNING_TARGETS)
                 MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=${i})
     list(APPEND TUNING_TARGETS mq_tuning_pop_${i})
   endforeach()
+  foreach(i ${EXP_TUNING_POP_TRIES})
+    add_library(mq_tuning_tries_${i} INTERFACE)
+    target_link_libraries(mq_tuning_tries_${i} INTERFACE mq)
+    target_compile_definitions(
+      mq_tuning_tries_${i}
+      INTERFACE MQ_MODE_RANDOM MQ_INSERTION_BUFFER_SIZE=0
+                MQ_DELETION_BUFFER_SIZE=0 MQ_HEAP_ARITY=2 MQ_NUM_POP_PQS=2
+                MQ_POP_TRIES=${i})
+    list(APPEND TUNING_TARGETS mq_tuning_tries_${i})
+  endforeach()
   foreach(ibs ${EXP_TUNING_BUFFER_SIZES})
     foreach(dbs ${EXP_TUNING_BUFFER_SIZES})
       foreach(d ${EXP_TUNING_HEAP_ARITIES})

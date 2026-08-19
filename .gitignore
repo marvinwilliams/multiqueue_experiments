@@ -1,2 +1,18 @@
 /build/
 /data/
+/build*/
+/compile_commands/
+/compile_commands.json
+/CMakeUserPresets.json
+/multiqueue_live
+# benchmark output and profiles
+/operation*.txt
+/operation*.dat
+/operations*.dat
+/perf.data*
+# editors / tooling
+.idea/
+.vscode/
+.codechecker/
+.#*
+#*#

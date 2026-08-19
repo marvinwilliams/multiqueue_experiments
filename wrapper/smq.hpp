@@ -19,7 +19,7 @@ class StealingMQ {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = util::ValueCompare<value_type, key_compare, util::PairFirst>;
+    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
 
 #ifdef SMQ_STEAL_PROB
     static constexpr std::size_t StealProb = SMQ_STEAL_PROB;

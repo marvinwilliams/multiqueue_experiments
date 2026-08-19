@@ -155,6 +155,30 @@ struct FarL1CloseL3 {
     }
 };
 
+//! Highest id accepted by dispatch()
+inline constexpr int max_id = 6;
+
+inline char const* name(int id) noexcept {
+    switch (id) {
+        case 0:
+            return "None";
+        case 1:
+            return "Thread Id";
+        case 2:
+            return "Same";
+        case 3:
+            return "Close caches";
+        case 4:
+            return "Far caches";
+        case 5:
+            return "Close L3 Far L1";
+        case 6:
+            return "Far L1 Close L3";
+        default:
+            return "";
+    }
+}
+
 }  // namespace affinity
 
 class Context {
@@ -237,5 +261,38 @@ class Dispatcher {
         }
     }
 };
+
+//! Runs task on num_threads threads using the affinity policy selected by id
+//! (see affinity::name) and returns once all of them have finished.
+template <typename Task, typename... Args>
+void dispatch(int affinity_id, int num_threads, Task task, Args... args) {
+    auto run = [&](auto const& policy) {
+        Dispatcher dispatcher(policy, num_threads, task, args...);
+        dispatcher.wait();
+    };
+    switch (affinity_id) {
+        case 0:
+            run(affinity::None{});
+            break;
+        case 1:
+            run(affinity::ThreadId{});
+            break;
+        case 2:
+            run(affinity::Same{});
+            break;
+        case 3:
+            run(affinity::CloseCaches{});
+            break;
+        case 4:
+            run(affinity::FarCaches{});
+            break;
+        case 5:
+            run(affinity::CloseL3FarL1{});
+            break;
+        default:
+            run(affinity::FarL1CloseL3{});
+            break;
+    }
+}
 
 }  // namespace thread_coordination
