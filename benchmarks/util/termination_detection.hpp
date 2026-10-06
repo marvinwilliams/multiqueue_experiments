@@ -11,7 +11,7 @@
 namespace termination_detection {
 
 class TerminationDetection {
-    int num_threads_;
+    int num_threads_{0};
     std::atomic_int idle_count_{0};
     std::atomic_int no_work_count_{0};
 

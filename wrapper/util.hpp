@@ -12,12 +12,12 @@ struct PairFirst {
     }
 };
 
-template <typename Value, typename KeyCompare, typename KeyOfValue>
+template <typename Value, typename KeyOfValue, typename Compare>
 class ValueCompare {
-    [[no_unique_address]] KeyCompare comp;
+    [[no_unique_address]] Compare comp;
 
    public:
-    explicit ValueCompare(KeyCompare const& compare = KeyCompare{}) : comp{compare} {
+    explicit ValueCompare(Compare const& compare = Compare{}) : comp{compare} {
     }
 
     constexpr bool operator()(Value const& lhs, Value const& rhs) const noexcept {

@@ -238,4 +238,35 @@ class Dispatcher {
     }
 };
 
+template <typename Task, typename... Args>
+void dispatch(int affinity_id, int num_threads, Task task, Args... args) {
+    auto run = [&](auto const& policy) {
+        Dispatcher dispatcher(policy, num_threads, task, args...);
+        dispatcher.wait();
+    };
+    switch (affinity_id) {
+        case 0:
+            run(affinity::None{});
+            break;
+        case 1:
+            run(affinity::ThreadId{});
+            break;
+        case 2:
+            run(affinity::Same{});
+            break;
+        case 3:
+            run(affinity::CloseCaches{});
+            break;
+        case 4:
+            run(affinity::FarCaches{});
+            break;
+        case 5:
+            run(affinity::CloseL3FarL1{});
+            break;
+        default:
+            run(affinity::FarL1CloseL3{});
+            break;
+    }
+}
+
 }  // namespace thread_coordination

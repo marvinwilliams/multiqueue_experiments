@@ -4,6 +4,8 @@
 #include "multiqueue/multiqueue.hpp"
 #include "multiqueue/utils.hpp"
 
+#include "util.hpp"
+
 #ifdef MQ_USE_STD_PQ
 #include <queue>
 #include <vector>
@@ -107,18 +109,18 @@ class BTreeWrapper {
     using btree_type = tlx::BTree<Key, Value, KeyOfValue, Compare, tlx::btree_default_traits<Key, Value>, true>;
 
    public:
-    using key_type = btree_type::key_type;
-    using value_type = btree_type::value_type;
-    using size_type = btree_type::size_type;
-    using key_compare = btree_type::key_compare;
-    using value_compare = btree_type::value_compare;
+    using key_type = typename btree_type::key_type;
+    using value_type = typename btree_type::value_type;
+    using size_type = typename btree_type::size_type;
+    using key_compare = typename btree_type::key_compare;
+    using value_compare = typename btree_type::value_compare;
 
    private:
     btree_type btree_;
 
    public:
-    BTreePQWrapper() = default;
-    explicit BTreePQWrapper(key_compare const &comp) : btree_(comp) {
+    BTreeWrapper() = default;
+    explicit BTreeWrapper(key_compare const &comp) : btree_(comp) {
     }
 
     void push(value_type const &value) {
@@ -160,10 +162,10 @@ class MultiQueue {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = ::multiqueue::utils::ValueCompare<value_type, ::multiqueue::utils::PairFirst, key_compare>;
+    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
 
 #ifdef MQ_USE_BTREE
-    using pq_type = BTreeWrapper<key_type, value_type, KeyOfValue, key_compare>;
+    using pq_type = BTreeWrapper<key_type, value_type, util::PairFirst, key_compare>;
 #else
     using pq_type = ::multiqueue::BufferedPQ<
 #ifdef MQ_USE_STD_PQ
