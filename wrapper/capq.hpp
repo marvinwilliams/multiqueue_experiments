@@ -7,7 +7,7 @@ extern "C" {
 #include "capq/gc/gc.h"
 }
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #include "cxxopts.hpp"
 
@@ -43,8 +43,8 @@ class CAPQ {
     static constexpr key_type sentinel = std::numeric_limits<key_type>::max();
 
    public:
-    using handle_type = util::SelfHandle<CAPQ>;
-    using settings_type = util::EmptySettings;
+    using handle_type = base::SelfHandle<CAPQ>;
+    using settings_type = base::EmptySettings;
 
     explicit CAPQ(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/) {
         ::_init_gc_subsystem();

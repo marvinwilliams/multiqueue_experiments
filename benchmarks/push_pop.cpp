@@ -1,7 +1,7 @@
 #include "util/benchmark.hpp"
 #include "util/memory_stats.hpp"
 #include "util/thread_coordination.hpp"
-#include "wrapper/selector.hpp"
+#include "wrapper/util/selector.hpp"
 
 #include <cxxopts.hpp>
 

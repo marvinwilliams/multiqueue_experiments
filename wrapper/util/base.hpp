@@ -4,7 +4,7 @@
 
 #include <optional>
 
-namespace wrapper::util {
+namespace wrapper::base {
 struct PairFirst {
     template <typename Pair>
     static constexpr auto const& get(Pair const& p) noexcept {
@@ -61,4 +61,4 @@ struct EmptySettings {
     }
 };
 
-}  // namespace wrapper::util
+}  // namespace wrapper::base

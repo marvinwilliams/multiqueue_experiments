@@ -2,7 +2,7 @@
 
 #include "wrapper/priority.hpp"
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #include <cxxopts.hpp>
 
@@ -28,8 +28,8 @@ class TBBFIFO {
     pq_type pq_;
 
    public:
-    using handle_type = util::SelfHandle<TBBFIFO>;
-    using settings_type = util::EmptySettings;
+    using handle_type = base::SelfHandle<TBBFIFO>;
+    using settings_type = base::EmptySettings;
     TBBFIFO(int /*num_threads*/, std::size_t /*initial_capacity*/, settings_type const& /*options*/) {
     }
 

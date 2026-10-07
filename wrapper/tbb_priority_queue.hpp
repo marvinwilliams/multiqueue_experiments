@@ -1,6 +1,6 @@
 #pragma once
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #include <cxxopts.hpp>
 
@@ -19,7 +19,7 @@ class TBBPriorityQueue {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<key_type>, std::less<key_type>>;
-    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
+    using value_compare = base::ValueCompare<value_type, base::PairFirst, key_compare>;
 
    private:
     using pq_type = tbb::concurrent_priority_queue<value_type, value_compare>;
@@ -27,8 +27,8 @@ class TBBPriorityQueue {
     pq_type pq_;
 
    public:
-    using handle_type = util::SelfHandle<TBBPriorityQueue>;
-    using settings_type = util::EmptySettings;
+    using handle_type = base::SelfHandle<TBBPriorityQueue>;
+    using settings_type = base::EmptySettings;
     TBBPriorityQueue(int /*unused*/, std::size_t initial_capacity, settings_type const& /*unused*/)
         : pq_(initial_capacity, value_compare{key_compare{}}) {
     }

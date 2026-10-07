@@ -1,7 +1,7 @@
 #pragma once
 
 #include "StealingMultiQueue.hpp"
-#include "util.hpp"
+#include "util/base.hpp"
 
 
 #include <atomic>
@@ -19,7 +19,7 @@ class StealingMQ {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
+    using value_compare = base::ValueCompare<value_type, base::PairFirst, key_compare>;
 
 #ifdef SMQ_STEAL_PROB
     static constexpr std::size_t StealProb = SMQ_STEAL_PROB;
@@ -63,7 +63,7 @@ class StealingMQ {
 
    public:
     using handle_type = Handle;
-    using settings_type = util::EmptySettings;
+    using settings_type = base::EmptySettings;
 
    private:
     pq_type pq_;

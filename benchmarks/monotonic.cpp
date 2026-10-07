@@ -1,7 +1,11 @@
 #include "util/benchmark.hpp"
 #include "util/memory_stats.hpp"
 #include "util/thread_coordination.hpp"
-#include "wrapper/selector.hpp"
+#include "wrapper/util/selector.hpp"
+
+#ifdef LOG_OPERATIONS
+#include "tools/quality.hpp"
+#endif
 
 #include <cxxopts.hpp>
 
@@ -38,7 +42,7 @@ struct Settings {
     int timeout_s = 0;
     int sleep_us = 0;
 #ifdef LOG_OPERATIONS
-    std::filesystem::path log_file = "operation_log.txt";
+    std::filesystem::path log_file;
 #endif
     benchmark::Papi papi;
 
@@ -59,7 +63,7 @@ struct Settings {
             ("t,timeout", "Timeout in seconds", cxxopts::value<int>(timeout_s), "NUMBER")
             ("q,sleep", "Time in microseconds to wait between operations", cxxopts::value<int>(sleep_us), "NUMBER")
 #ifdef LOG_OPERATIONS
-            ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(log_file), "PATH")
+            ("l,log-file", "File to write the operation log to (quality is always computed)", cxxopts::value<std::filesystem::path>(log_file), "PATH")
 #endif
             // clang-format on
             ;
@@ -113,16 +117,10 @@ struct Settings {
             return false;
         }
 #ifdef LOG_OPERATIONS
-        if (log_file.empty()) {
-            std::cerr << "Error: Log file name must not be empty\n";
-            return false;
-        }
-        auto out = std::ofstream(log_file);
-        if (out.fail()) {
+        if (!log_file.empty() && std::ofstream(log_file).fail()) {
             std::cerr << "Error: Could not open file " << log_file << " for writing\n";
             return false;
         }
-        out.close();
 #endif
         if (!papi.validate()) {
             return false;
@@ -152,7 +150,7 @@ struct Settings {
         }
         out << "Seed: " << seed << '\n';
 #ifdef LOG_OPERATIONS
-        out << "Log file: " << log_file << '\n';
+        out << "Log file: " << (log_file.empty() ? "none" : log_file.string()) << '\n';
 #endif
         papi.write_human_readable(out);
     }
@@ -200,43 +198,45 @@ struct ThreadData {
 };
 
 #ifdef LOG_OPERATIONS
-void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
+// Orders all operations by time; pushes are timestamped after and pops before the operation, so a pop may precede
+// its push in the log
+quality::Log build_log(std::vector<ThreadData> const& thread_data) {
     std::vector<ThreadData::PushLog> pushes;
-    pushes.reserve(std::accumulate(thread_data.begin(), thread_data.end(), 0UL,
-                                   [](std::size_t sum, auto const& e) { return sum + e.pushes.size(); }));
     std::vector<ThreadData::PopLog> pops;
-    pops.reserve(std::accumulate(thread_data.begin(), thread_data.end(), 0UL,
-                                 [](std::size_t sum, auto const& e) { return sum + e.pops.size(); }));
     for (auto const& e : thread_data) {
         pushes.insert(pushes.end(), e.pushes.begin(), e.pushes.end());
         pops.insert(pops.end(), e.pops.begin(), e.pops.end());
     }
     std::sort(pushes.begin(), pushes.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
+    std::sort(pops.begin(), pops.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
     auto max_value = std::accumulate(pushes.begin(), pushes.end(), value_type{0},
                                      [](value_type m, auto const& e) { return std::max(m, e.element.second); });
     std::vector<std::size_t> push_index(pushes.empty() ? 0 : static_cast<std::size_t>(max_value) + 1);
+    quality::Log log;
+    log.keys.reserve(pushes.size());
     for (std::size_t i = 0; i < pushes.size(); ++i) {
         push_index[pushes[i].element.second] = i;
+        log.keys.push_back(static_cast<quality::Log::key_type>(pushes[i].element.first));
     }
-    std::sort(pops.begin(), pops.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-    out << pushes.size() << ' ' << pops.size() << '\n';
-    std::size_t i = 0;
+    log.pops.reserve(pops.size());
+    std::size_t pushes_before = 0;
     for (auto const& pop : pops) {
-        while ((i != pushes.size() && pushes[i].tick < pop.tick)) {
-            out << '+' << pushes[i].element.first << '\n';
-            ++i;
+        while (pushes_before != pushes.size() && pushes[pushes_before].tick < pop.tick) {
+            ++pushes_before;
         }
-        out << '-' << push_index[static_cast<std::size_t>(pop.val)] << '\n';
+        log.pops.push_back({pushes_before, push_index[static_cast<std::size_t>(pop.val)]});
     }
-    for (; i < pushes.size(); ++i) {
-        out << '+' << pushes[i].element.first << '\n';
-    }
+    return log;
 }
 #endif
 
 struct SharedData {
     std::vector<long long> updates;
     std::atomic_llong counter{0};
+#ifdef LOG_OPERATIONS
+    std::size_t invalid_pops = 0;
+    quality::Summary quality_summary;
+#endif
     memory_stats::Snapshot memory_start;
     memory_stats::Snapshot memory_end;
     std::vector<ThreadData> thread_data;
@@ -259,6 +259,12 @@ void write_result_json(Settings const& settings, SharedData const& data, std::os
             results.object("memory", [&data](json::Object& memory) {
                 memory_stats::write_json(memory, {{"start", data.memory_start}, {"end", data.memory_end}});
             });
+#ifdef LOG_OPERATIONS
+            results.object("quality", [&data](json::Object& q) {
+                q.entry("invalid_pops", data.invalid_pops);
+                data.quality_summary.write_json(q);
+            });
+#endif
             results.array("thread_data", data.thread_data.begin(), data.thread_data.end(),
                           [](std::ostream& out2, ThreadData const& thread_data) {
                               json::Object obj{out2};
@@ -443,10 +449,19 @@ void run_benchmark(Settings const& settings) {
     });
 
 #ifdef LOG_OPERATIONS
-    std::clog << "Writing logs...\n";
-    std::ofstream log_out(settings.log_file);  // assumed to be valid
-    write_log(shared_data.thread_data, log_out);
-    log_out.close();
+    std::clog << "Replaying operations...\n";
+    auto log = build_log(shared_data.thread_data);
+    if (!settings.log_file.empty()) {
+        std::ofstream log_out(settings.log_file);
+        quality::write_log(log, log_out);
+    }
+    shared_data.invalid_pops = log.invalid_pops();
+    try {
+        shared_data.quality_summary = quality::summarize(quality::replay(log));
+    } catch (std::exception const& e) {
+        std::cerr << "Error: Replaying the operation log failed: " << e.what() << '\n';
+        std::exit(EXIT_FAILURE);
+    }
 #endif
     std::clog << "Done\n";
     std::clog << '\n';

@@ -11,7 +11,7 @@ extern "C" {
 #undef min
 #undef max
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #include <cxxopts.hpp>
 
@@ -141,7 +141,7 @@ class Spraylist {
 
    public:
     using handle_type = Handle;
-    using settings_type = util::EmptySettings;
+    using settings_type = base::EmptySettings;
 
     Spraylist(int num_threads, std::size_t initial_capacity, settings_type const& /*unused*/)
         : num_threads_(num_threads) {

@@ -3,7 +3,7 @@
 #include "util/memory_stats.hpp"
 #include "util/parallel_search.hpp"
 #include "util/thread_coordination.hpp"
-#include "wrapper/selector.hpp"
+#include "wrapper/util/selector.hpp"
 
 #include <cxxopts.hpp>
 

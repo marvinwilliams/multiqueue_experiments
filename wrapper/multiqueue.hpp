@@ -4,13 +4,15 @@
 #include "multiqueue/multiqueue.hpp"
 #include "multiqueue/utils.hpp"
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #ifdef MQ_USE_STD_PQ
 #include <queue>
 #include <vector>
 #elif defined MQ_USE_BTREE
 #include "tlx_btree.hpp"
+#elif defined MQ_USE_MERGE_HEAP
+#include "util/merge_heap.hpp"
 #endif
 
 #if defined MQ_MODE_RANDOM || defined MQ_MODE_RANDOM_STRICT
@@ -28,6 +30,8 @@
 #endif
 
 #include <cxxopts.hpp>
+
+#include <type_traits>
 
 #include <ostream>
 #include <utility>
@@ -142,6 +146,114 @@ class BTreeWrapper {
 };
 #endif
 
+#ifdef MQ_USE_MERGE_HEAP
+#ifdef MQ_MERGE_HEAP_NODE_SIZE
+static constexpr std::size_t merge_heap_node_size = MQ_MERGE_HEAP_NODE_SIZE;
+#else
+static constexpr std::size_t merge_heap_node_size = 64;
+#endif
+
+// merge_heap pops the key ordered first by its comparator, the library pops the largest key by `Compare`
+template <typename Key, typename Value, typename KeyOfValue, typename Compare>
+class MergeHeapWrapper {
+    struct ExtractKey {
+        Key const &operator()(Value const &value) const noexcept {
+            return KeyOfValue::get(value);
+        }
+    };
+
+    struct OrderedFirst {
+        [[no_unique_address]] Compare comp;
+
+        bool operator()(Key const &lhs, Key const &rhs) const noexcept {
+            return comp(rhs, lhs);
+        }
+    };
+
+    using heap_type = ::multiqueue::merge_heap<Value, Key, ExtractKey, OrderedFirst, merge_heap_node_size>;
+
+   public:
+    using key_type = Key;
+    using value_type = Value;
+    using size_type = typename heap_type::size_type;
+    using key_compare = Compare;
+    using value_compare = base::ValueCompare<Value, KeyOfValue, Compare>;
+    using reference = value_type &;
+    using const_reference = value_type const &;
+
+   private:
+    heap_type heap_;
+
+   public:
+    MergeHeapWrapper() = default;
+    explicit MergeHeapWrapper(key_compare const &comp) : heap_(OrderedFirst{comp}) {
+    }
+
+    void push(value_type const &value) {
+        heap_.push(value);
+    }
+
+    void pop() {
+        heap_.pop();
+    }
+
+    const_reference top() const {
+        return heap_.top();
+    }
+
+    [[nodiscard]] bool empty() const noexcept {
+        return heap_.empty();
+    }
+
+    [[nodiscard]] size_type size() const noexcept {
+        return heap_.size();
+    }
+
+    void clear() noexcept {
+        heap_.clear();
+    }
+
+    void reserve(size_type capacity) {
+        heap_.reserve(capacity);
+    }
+};
+#endif
+
+static_assert((insertion_buffer_size == 0) == (deletion_buffer_size == 0),
+              "Either both or none of the buffers must be disabled");
+
+// The library reserves capacity in every PQ, which the plain heaps only provide through BufferedPQ
+template <typename PQ>
+struct UnbufferedPQ : PQ {
+    using PQ::PQ;
+
+    void reserve(typename PQ::size_type capacity) {
+        this->c.reserve(capacity);
+    }
+};
+
+inline void write_pq_description(std::ostream &out) {
+#if defined MQ_USE_BTREE
+    out << "  PQ: tlx::btree" << '\n';
+#elif defined MQ_USE_MERGE_HEAP
+    out << "  PQ: merge heap" << '\n';
+    out << "  Node size: " << merge_heap_node_size << '\n';
+#else
+#ifdef MQ_USE_STD_PQ
+    out << "  PQ: std::priority_queue" << '\n';
+#else
+    out << "  PQ: d-ary heap" << '\n';
+    out << "  Heap arity: " << heap_arity << '\n';
+#endif
+    if constexpr (insertion_buffer_size == 0) {
+        out << "  Buffers: none" << '\n';
+    } else {
+        out << "  Insertion buffer size: " << insertion_buffer_size << '\n';
+        out << "  Deletion buffer size: " << deletion_buffer_size << '\n';
+    }
+#endif
+}
+
 template <bool Min, typename Key = unsigned long, typename T = Key>
 class MultiQueue {
    public:
@@ -149,19 +261,21 @@ class MultiQueue {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
+    using value_compare = base::ValueCompare<value_type, base::PairFirst, key_compare>;
 
-#ifdef MQ_USE_BTREE
-    using pq_type = BTreeWrapper<key_type, value_type, util::PairFirst, key_compare>;
+#if defined MQ_USE_BTREE
+    using pq_type = BTreeWrapper<key_type, value_type, base::PairFirst, key_compare>;
+#elif defined MQ_USE_MERGE_HEAP
+    using pq_type = MergeHeapWrapper<key_type, value_type, base::PairFirst, key_compare>;
 #else
-    using pq_type = ::multiqueue::BufferedPQ<
+    using base_pq_type =
 #ifdef MQ_USE_STD_PQ
-        std::priority_queue<value_type, std::vector<value_type>, value_compare>
+        std::priority_queue<value_type, std::vector<value_type>, value_compare>;
 #else
-        ::multiqueue::Heap<value_type, value_compare, heap_arity>
+        ::multiqueue::Heap<value_type, value_compare, heap_arity>;
 #endif
-        ,
-        insertion_buffer_size, deletion_buffer_size>;
+    using pq_type = std::conditional_t<insertion_buffer_size == 0, UnbufferedPQ<base_pq_type>,
+                                       ::multiqueue::BufferedPQ<base_pq_type, insertion_buffer_size, deletion_buffer_size>>;
 #endif
 
     using multiqueue_type = ::multiqueue::KeyValueMultiQueue<key_type, mapped_type, key_compare, Policy, pq_type>;
@@ -247,18 +361,7 @@ class MultiQueue {
         out << "MultiQueue\n";
         out << "  Mode: " << mode_name << '\n';
         out << "  Pop candidates: " << num_pop_candidates << '\n';
-#ifdef MQ_USE_BTREE
-        out << "  PQ: tlx::btree" << '\n';
-#else
-#ifdef MQ_USE_STD_PQ
-        out << "  PQ: std::priority_queue" << '\n';
-#else
-        out << "  PQ: d-ary heap" << '\n';
-        out << "  Heap arity: " << heap_arity << '\n';
-#endif
-        out << "  Insertion buffer size: " << insertion_buffer_size << '\n';
-        out << "  Deletion buffer size: " << deletion_buffer_size << '\n';
-#endif
+        write_pq_description(out);
     }
 
     auto get_handle() {

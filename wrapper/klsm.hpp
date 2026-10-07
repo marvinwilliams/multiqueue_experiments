@@ -4,7 +4,7 @@
 
 #include "k_lsm/k_lsm.h"
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #include <cxxopts.hpp>
 
@@ -36,8 +36,8 @@ class KLsm {
     static constexpr key_type sentinel_ = std::numeric_limits<key_type>::max();
 
    public:
-    using handle_type = util::SelfHandle<KLsm>;
-    using settings_type = util::EmptySettings;
+    using handle_type = base::SelfHandle<KLsm>;
+    using settings_type = base::EmptySettings;
 
    private:
     pq_type pq_{};

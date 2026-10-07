@@ -45,13 +45,21 @@ if(EXP_TUNING_TARGETS)
         STRING
         "Generate tuning targets for the specified list of number of pop pqs")
   set(EXP_TUNING_BUFFER_SIZES
-      "0;4;16;64;256;1024"
+      "0;4;16;64;256"
       CACHE STRING
-            "Generate tuning targets for the specified list of buffer sizes")
+            "Generate tuning targets for the specified list of buffer sizes (0 only combines with 0: unbuffered)")
   set(EXP_TUNING_HEAP_ARITIES
       "2;4;8;16"
       CACHE STRING
             "Generate tuning targets for the specified list of heap arities")
+  set(EXP_TUNING_MERGE_HEAP_NODE_SIZES
+      "16;32;64;128;256"
+      CACHE STRING
+            "Generate tuning targets for the specified list of merge heap node sizes")
+  set(EXP_TUNING_BENCHMARKS
+      "monotonic"
+      CACHE STRING
+            "Benchmarks to generate the tuning targets for")
 endif()
 
 if(NOT "${L1_CACHE_LINE_SIZE}" MATCHES "^[0-9]+")

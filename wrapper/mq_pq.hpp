@@ -1,6 +1,6 @@
 #pragma once
 
-#include "util.hpp"
+#include "util/base.hpp"
 #define MQ_MODE_RANDOM
 #include "wrapper/multiqueue.hpp"
 #undef MQ_MODE_RANDOM
@@ -22,7 +22,7 @@ class MultiQueuePQ {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
+    using value_compare = base::ValueCompare<value_type, base::PairFirst, key_compare>;
 
    private:
     using pq_type = typename wrapper::multiqueue::MultiQueue<Min, Key, T>::pq_type;
@@ -31,8 +31,8 @@ class MultiQueuePQ {
     pq_type pq_{};
 
    public:
-    using handle_type = util::SelfHandle<MultiQueuePQ>;
-    using settings_type = util::EmptySettings;
+    using handle_type = base::SelfHandle<MultiQueuePQ>;
+    using settings_type = base::EmptySettings;
 
     MultiQueuePQ(int /*unused*/, std::size_t initial_capacity, settings_type const& /*unused*/) {
         pq_.reserve(initial_capacity);
@@ -55,18 +55,7 @@ class MultiQueuePQ {
 
     static void write_human_readable(std::ostream& out) {
         out << "MultiQueuePQ" << '\n';
-#ifdef MQ_USE_BTREE
-        out << "  PQ: tlx::btree" << '\n';
-#else
-#ifdef MQ_USE_STD_PQ
-        out << "  PQ: std::priority_queue" << '\n';
-#else
-        out << "  PQ: d-ary heap" << '\n';
-        out << "  Heap arity: " << wrapper::multiqueue::heap_arity << '\n';
-#endif
-        out << "  Insertion buffer size: " << wrapper::multiqueue::insertion_buffer_size << '\n';
-        out << "  Deletion buffer size: " << wrapper::multiqueue::deletion_buffer_size << '\n';
-#endif
+        wrapper::multiqueue::write_pq_description(out);
     }
 
     handle_type get_handle() {

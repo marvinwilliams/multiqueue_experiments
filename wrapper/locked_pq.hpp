@@ -1,6 +1,6 @@
 #pragma once
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #include <cstddef>
 #include <mutex>
@@ -18,7 +18,7 @@ class LockedPQ {
     using mapped_type = T;
     using value_type = std::pair<key_type, mapped_type>;
     using key_compare = std::conditional_t<Min, std::greater<>, std::less<>>;
-    using value_compare = util::ValueCompare<value_type, util::PairFirst, key_compare>;
+    using value_compare = base::ValueCompare<value_type, base::PairFirst, key_compare>;
 
    private:
     using pq_type = std::priority_queue<value_type, std::vector<value_type>, value_compare>;
@@ -27,8 +27,8 @@ class LockedPQ {
     std::mutex m_;
 
    public:
-    using handle_type = util::SelfHandle<LockedPQ>;
-    using settings_type = util::EmptySettings;
+    using handle_type = base::SelfHandle<LockedPQ>;
+    using settings_type = base::EmptySettings;
 
     LockedPQ(int /*unused*/, std::size_t initial_capacity, settings_type const& /*unused*/) {
         std::vector<value_type> v{};

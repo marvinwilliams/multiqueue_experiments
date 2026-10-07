@@ -82,7 +82,7 @@ endforeach()
 
 if(EXP_TUNING_TARGETS)
   foreach(target ${TUNING_TARGETS})
-    foreach(benchmark monotonic push_pop dijkstra knapsack knapsack_float)
+    foreach(benchmark ${EXP_TUNING_BENCHMARKS})
       add_benchmark(${benchmark} ${target})
       add_dependencies(${benchmark}_tuning_all ${benchmark}_${target})
       add_dependencies(${benchmark}_log_tuning_all ${benchmark}_log_${target})

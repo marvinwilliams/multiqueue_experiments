@@ -9,7 +9,7 @@ extern "C" {
 #undef min
 #undef max
 
-#include "util.hpp"
+#include "util/base.hpp"
 
 #include <cxxopts.hpp>
 
@@ -73,7 +73,7 @@ class Linden {
 
    public:
     using handle_type = Handle;
-    using settings_type = util::EmptySettings;
+    using settings_type = base::EmptySettings;
     explicit Linden(int /*unused*/, std::size_t /*unused*/, settings_type const& /*unused*/) {
         _init_gc_subsystem();
         pq_.reset(::pq_init(32));
