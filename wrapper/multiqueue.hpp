@@ -254,6 +254,26 @@ inline void write_pq_description(std::ostream &out) {
 #endif
 }
 
+template <typename JsonObject>
+void write_pq_json(JsonObject &obj) {
+    obj.entry("pop_candidates", num_pop_candidates);
+#if defined MQ_USE_BTREE
+    obj.entry("base_pq", "btree");
+#elif defined MQ_USE_MERGE_HEAP
+    obj.entry("base_pq", "merge_heap");
+    obj.entry("node_size", merge_heap_node_size);
+#else
+#ifdef MQ_USE_STD_PQ
+    obj.entry("base_pq", "std");
+#else
+    obj.entry("base_pq", "heap");
+    obj.entry("heap_arity", heap_arity);
+#endif
+    obj.entry("insertion_buffer_size", insertion_buffer_size);
+    obj.entry("deletion_buffer_size", deletion_buffer_size);
+#endif
+}
+
 template <bool Min, typename Key = unsigned long, typename T = Key>
 class MultiQueue {
    public:
@@ -323,11 +343,13 @@ class MultiQueue {
 
         template <typename JsonObject>
         void write_json(JsonObject &obj) const {
+            obj.entry("mode", mode_name);
             obj.entry("queue_factor", factor);
             obj.entry("seed", config.seed);
             if constexpr (has_stickiness) {
                 obj.entry("stickiness", config.stickiness);
             }
+            write_pq_json(obj);
         }
     };
 

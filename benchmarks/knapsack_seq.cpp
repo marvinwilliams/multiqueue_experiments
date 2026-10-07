@@ -11,11 +11,7 @@
 #include <queue>
 #include <vector>
 
-#ifdef FLOAT_INSTANCE
-using data_type = double;
-#else
 using data_type = unsigned long;
-#endif
 
 struct Node {
     data_type upper_bound;

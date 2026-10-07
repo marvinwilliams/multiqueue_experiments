@@ -1,8 +1,28 @@
 set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
+set(MQ_CONFIG MQ_NUM_POP_PQS=${EXP_MQ_POP_CANDIDATES})
+if(EXP_MQ_PQ STREQUAL "heap")
+  list(APPEND MQ_CONFIG MQ_HEAP_ARITY=${EXP_MQ_HEAP_ARITY} MQ_INSERTION_BUFFER_SIZE=${EXP_MQ_INSERTION_BUFFER_SIZE}
+       MQ_DELETION_BUFFER_SIZE=${EXP_MQ_DELETION_BUFFER_SIZE})
+elseif(EXP_MQ_PQ STREQUAL "std")
+  list(APPEND MQ_CONFIG MQ_USE_STD_PQ MQ_INSERTION_BUFFER_SIZE=${EXP_MQ_INSERTION_BUFFER_SIZE}
+       MQ_DELETION_BUFFER_SIZE=${EXP_MQ_DELETION_BUFFER_SIZE})
+elseif(EXP_MQ_PQ STREQUAL "btree")
+  list(APPEND MQ_CONFIG MQ_USE_BTREE)
+elseif(EXP_MQ_PQ STREQUAL "merge_heap")
+  list(APPEND MQ_CONFIG MQ_USE_MERGE_HEAP MQ_MERGE_HEAP_NODE_SIZE=${EXP_MQ_MERGE_HEAP_NODE_SIZE})
+else()
+  message(FATAL_ERROR "Invalid EXP_MQ_PQ '${EXP_MQ_PQ}' (heap, std, btree, merge_heap)")
+endif()
+message(STATUS "MultiQueue configuration: ${MQ_CONFIG}")
+
+add_library(mq_base INTERFACE)
+target_link_libraries(mq_base INTERFACE multiqueue::multiqueue)
+target_compile_definitions(mq_base INTERFACE PQ_MQ)
+
 add_library(mq INTERFACE)
-target_link_libraries(mq INTERFACE multiqueue::multiqueue)
-target_compile_definitions(mq INTERFACE PQ_MQ)
+target_link_libraries(mq INTERFACE mq_base)
+target_compile_definitions(mq INTERFACE ${MQ_CONFIG})
 
 add_library(mq_random INTERFACE)
 target_compile_definitions(mq_random INTERFACE MQ_MODE_RANDOM)
@@ -29,8 +49,10 @@ target_compile_definitions(mq_stick_replace INTERFACE MQ_MODE_STICK_REPLACE)
 target_link_libraries(mq_stick_replace INTERFACE mq)
 
 add_library(mq_random_merge_heap INTERFACE)
-target_compile_definitions(mq_random_merge_heap INTERFACE MQ_MODE_RANDOM MQ_USE_MERGE_HEAP)
-target_link_libraries(mq_random_merge_heap INTERFACE mq)
+target_compile_definitions(
+  mq_random_merge_heap INTERFACE MQ_MODE_RANDOM MQ_USE_MERGE_HEAP MQ_MERGE_HEAP_NODE_SIZE=${EXP_MQ_MERGE_HEAP_NODE_SIZE}
+                                 MQ_NUM_POP_PQS=${EXP_MQ_POP_CANDIDATES})
+target_link_libraries(mq_random_merge_heap INTERFACE mq_base)
 
 list(APPEND MQ_VARIANTS mq_random mq_random_strict mq_stick_random mq_stick_swap
      mq_stick_mark mq_stick_replace mq_random_merge_heap)
@@ -38,7 +60,7 @@ list(APPEND MQ_VARIANTS mq_random mq_random_strict mq_stick_random mq_stick_swap
 if(EXP_TUNING_TARGETS)
   function(add_tuning_target name)
     add_library(${name} INTERFACE)
-    target_link_libraries(${name} INTERFACE mq)
+    target_link_libraries(${name} INTERFACE mq_base)
     target_compile_definitions(${name} INTERFACE MQ_MODE_RANDOM ${ARGN})
     set(TUNING_TARGETS
         ${TUNING_TARGETS} ${name}
@@ -115,7 +137,7 @@ target_compile_definitions(locked_pq INTERFACE PQ_LOCKED_PQ)
 
 add_library(mq_pq INTERFACE)
 target_link_libraries(mq_pq INTERFACE multiqueue::multiqueue)
-target_compile_definitions(mq_pq INTERFACE PQ_MQ_PQ)
+target_compile_definitions(mq_pq INTERFACE PQ_MQ_PQ ${MQ_CONFIG})
 
 # GENERIC_COMPETITORS also support non-integer keys (knapsack_float)
 set(GENERIC_COMPETITORS

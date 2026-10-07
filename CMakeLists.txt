@@ -38,6 +38,26 @@ set(PAGE_SIZE
     CACHE STRING "The assumed page size (bytes)")
 option(EXP_TUNING_TARGETS "Generate tuning targets" OFF)
 option(EXP_JEMALLOC "Link the benchmarks against jemalloc" OFF)
+
+set(EXP_MQ_PQ
+    "heap"
+    CACHE STRING "Base PQ of the MultiQueue (heap, std, btree, merge_heap)")
+set_property(CACHE EXP_MQ_PQ PROPERTY STRINGS heap std btree merge_heap)
+set(EXP_MQ_HEAP_ARITY
+    "8"
+    CACHE STRING "Arity of the d-ary heap")
+set(EXP_MQ_INSERTION_BUFFER_SIZE
+    "16"
+    CACHE STRING "Insertion buffer size")
+set(EXP_MQ_DELETION_BUFFER_SIZE
+    "16"
+    CACHE STRING "Deletion buffer size")
+set(EXP_MQ_MERGE_HEAP_NODE_SIZE
+    "64"
+    CACHE STRING "Node size of the merge heap")
+set(EXP_MQ_POP_CANDIDATES
+    "2"
+    CACHE STRING "Number of pop candidates")
 if(EXP_TUNING_TARGETS)
   set(EXP_TUNING_POP_PQS
       "1;2;4;8"
