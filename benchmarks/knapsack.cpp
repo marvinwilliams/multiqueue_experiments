@@ -204,9 +204,9 @@ void run_benchmark(Settings const& settings) {
     {
         json::Object root{std::cout};
         root.object("settings", [&settings](json::Object& obj) { settings.write_json(obj); });
-        root.object("instance", [&shared_data](json::Object& instance) {
-            instance.entry("num_items", shared_data.instance.size());
-            instance.entry("capacity", shared_data.instance.capacity());
+        root.object("instance", [&shared_data](json::Object& obj) {
+            obj.entry("num_items", shared_data.instance.size());
+            obj.entry("capacity", shared_data.instance.capacity());
         });
         root.object("results", [&](json::Object& results) {
             benchmark::write_timing(results, "", thread_interval);

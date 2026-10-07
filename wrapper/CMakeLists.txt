@@ -1,7 +1,5 @@
 set_directory_properties(PROPERTIES EXCLUDE_FROM_ALL TRUE)
 
-find_package(GSL)
-
 add_library(mq INTERFACE)
 target_link_libraries(mq INTERFACE multiqueue::multiqueue)
 target_compile_definitions(mq INTERFACE PQ_MQ)
@@ -116,60 +114,66 @@ add_library(smq INTERFACE)
 set_property(TARGET smq PROPERTY pq_name smq)
 target_compile_definitions(smq INTERFACE PQ_SMQ)
 
-add_library(
-  linden
-  ${KLSM_DIR}/lib/spraylist_linden/linden_common.c
-  ${KLSM_DIR}/lib/spraylist_linden/linden.c
-  ${KLSM_DIR}/lib/spraylist_linden/gc/gc.c
-  ${KLSM_DIR}/lib/spraylist_linden/gc/ptst.c)
-target_compile_options(linden PRIVATE -w -std=gnu++17)
-target_compile_definitions(linden PUBLIC INTEL
-                                         CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE} _GNU_SOURCE)
-target_include_directories(
-  linden SYSTEM
-  PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
-         ${KLSM_DIR}/lib/spraylist_linden/include)
-set_property(TARGET linden PROPERTY pq_name linden)
-target_compile_definitions(linden INTERFACE PQ_LINDEN)
-target_link_libraries(linden PUBLIC GSL::gsl)
+find_package(GSL)
 
-add_library(
-  capq STATIC
-  ${KLSM_DIR}/lib/capq/capq.c
-  ${KLSM_DIR}/lib/capq/fat_skiplist.c
-  ${KLSM_DIR}/lib/capq/qdlocksrc/locks/qd_lock.c
-  ${KLSM_DIR}/lib/capq/qdlocksrc/locks/tatas_lock.c
-  ${KLSM_DIR}/lib/capq/gc/gc.c
-  ${KLSM_DIR}/lib/capq/gc/ptst.c)
-target_include_directories(
-  capq SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
-                     ${KLSM_DIR}/lib/capq/qdlocksrc)
-target_compile_options(capq PRIVATE -w -std=gnu11)
-target_compile_definitions(capq PUBLIC INTEL
-                                        CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
-target_compile_definitions(capq INTERFACE PQ_CAPQ)
-target_link_libraries(capq PUBLIC GSL::gsl)
-
-add_library(
-  spraylist
-  ${KLSM_DIR}/lib/spraylist_linden/fraser.c
-  ${KLSM_DIR}/lib/spraylist_linden/intset.c
-  ${KLSM_DIR}/lib/spraylist_linden/linden_common.c
-  ${KLSM_DIR}/lib/spraylist_linden/linden.c
-  ${KLSM_DIR}/lib/spraylist_linden/measurements.c
-  ${KLSM_DIR}/lib/spraylist_linden/pqueue.c
-  ${KLSM_DIR}/lib/spraylist_linden/skiplist.c
-  ${KLSM_DIR}/lib/spraylist_linden/ssalloc.c)
-target_compile_options(spraylist PRIVATE -w -std=gnu17)
-target_compile_definitions(
-  spraylist PUBLIC INTEL LOCKFREE _GNU_SOURCE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
-target_include_directories(
-  spraylist SYSTEM
-  PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
-         ${KLSM_DIR}/lib/spraylist_linden/include)
-set_property(TARGET spraylist PROPERTY pq_name spraylist)
-target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
-target_link_libraries(spraylist PUBLIC GSL::gsl)
+if (GSL_FOUND)
+  add_library(
+    linden
+    ${KLSM_DIR}/lib/spraylist_linden/linden_common.c
+    ${KLSM_DIR}/lib/spraylist_linden/linden.c
+    ${KLSM_DIR}/lib/spraylist_linden/gc/gc.c
+    ${KLSM_DIR}/lib/spraylist_linden/gc/ptst.c)
+  target_compile_options(linden PRIVATE -w -std=gnu++17)
+  target_compile_definitions(linden PUBLIC INTEL
+                                           CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE} _GNU_SOURCE)
+  target_include_directories(
+    linden SYSTEM
+    PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
+           ${KLSM_DIR}/lib/spraylist_linden/include)
+  set_property(TARGET linden PROPERTY pq_name linden)
+  target_compile_definitions(linden INTERFACE PQ_LINDEN)
+  target_link_libraries(linden PUBLIC GSL::gsl)
+  
+  add_library(
+    capq STATIC
+    ${KLSM_DIR}/lib/capq/capq.c
+    ${KLSM_DIR}/lib/capq/fat_skiplist.c
+    ${KLSM_DIR}/lib/capq/qdlocksrc/locks/qd_lock.c
+    ${KLSM_DIR}/lib/capq/qdlocksrc/locks/tatas_lock.c
+    ${KLSM_DIR}/lib/capq/gc/gc.c
+    ${KLSM_DIR}/lib/capq/gc/ptst.c)
+  target_include_directories(
+    capq SYSTEM PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/capq
+                       ${KLSM_DIR}/lib/capq/qdlocksrc)
+  target_compile_options(capq PRIVATE -w -std=gnu11)
+  target_compile_definitions(capq PUBLIC INTEL
+                                          CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
+  target_compile_definitions(capq INTERFACE PQ_CAPQ)
+  target_link_libraries(capq PUBLIC GSL::gsl)
+  
+  add_library(
+    spraylist
+    ${KLSM_DIR}/lib/spraylist_linden/fraser.c
+    ${KLSM_DIR}/lib/spraylist_linden/intset.c
+    ${KLSM_DIR}/lib/spraylist_linden/linden_common.c
+    ${KLSM_DIR}/lib/spraylist_linden/linden.c
+    ${KLSM_DIR}/lib/spraylist_linden/measurements.c
+    ${KLSM_DIR}/lib/spraylist_linden/pqueue.c
+    ${KLSM_DIR}/lib/spraylist_linden/skiplist.c
+    ${KLSM_DIR}/lib/spraylist_linden/ssalloc.c)
+  target_compile_options(spraylist PRIVATE -w -std=gnu17)
+  target_compile_definitions(
+    spraylist PUBLIC INTEL LOCKFREE _GNU_SOURCE CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
+  target_include_directories(
+    spraylist SYSTEM
+    PUBLIC ${KLSM_DIR}/lib ${KLSM_DIR}/lib/spraylist_linden/atomic_ops
+           ${KLSM_DIR}/lib/spraylist_linden/include)
+  set_property(TARGET spraylist PROPERTY pq_name spraylist)
+  target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
+  target_link_libraries(spraylist PUBLIC GSL::gsl)
+else()
+  message(WARNING "GSL not found, not building linden, capq, spraylist")
+endif()
 
 find_package(TBB)
 

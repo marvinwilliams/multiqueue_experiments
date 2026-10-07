@@ -147,8 +147,8 @@ void write_result_json(Settings const& settings, SharedData const& data, std::os
                     {{"start", data.memory_start}, {"after_push", data.memory_after_push}, {"end", data.memory_end}});
             });
             results.array("thread_data", data.thread_data.begin(), data.thread_data.end(),
-                          [](std::ostream& out, ThreadData const& thread_data) {
-                              json::Object obj{out};
+                          [](std::ostream& out2, ThreadData const& thread_data) {
+                              json::Object obj{out2};
                               thread_data.write_json(obj);
                           });
         });
