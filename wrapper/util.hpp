@@ -34,6 +34,8 @@ class SelfHandle {
     }
 
    public:
+    using value_type = typename PQ::value_type;
+
     bool push(typename PQ::value_type const& value) {
         pq_->push(value);
         return true;
@@ -54,8 +56,8 @@ struct EmptySettings {
     static void write_human_readable(std::ostream& /*unused*/) {
     }
 
-    static void write_json(std::ostream& out) {
-        out << '{' << '}';
+    template <typename JsonObject>
+    static void write_json(JsonObject& /*unused*/) {
     }
 };
 

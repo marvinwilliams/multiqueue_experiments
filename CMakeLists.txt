@@ -37,6 +37,7 @@ set(PAGE_SIZE
     ${DEFAULT_PAGE_SIZE}
     CACHE STRING "The assumed page size (bytes)")
 option(EXP_TUNING_TARGETS "Generate tuning targets" OFF)
+option(EXP_JEMALLOC "Link the benchmarks against jemalloc" OFF)
 if(EXP_TUNING_TARGETS)
   set(EXP_TUNING_POP_PQS
       "1;2;4;8"
@@ -62,7 +63,18 @@ endif()
 
 set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)
 
-add_subdirectory(multiqueue)
+include(FetchContent)
+FetchContent_Declare(
+  multiqueue
+  GIT_REPOSITORY git@github.com:marvinwilliams/multiqueue_experimental.git
+  GIT_TAG e67a6186e46f099e337144ba7d1eac7e5850f2f4)
+set(MULTIQUEUE_BUILD_TESTS OFF)
+set(MULTIQUEUE_BUILD_BENCHMARKS OFF)
+FetchContent_MakeAvailable(multiqueue)
+if(FETCHCONTENT_SOURCE_DIR_MULTIQUEUE)
+  message(STATUS "Using local multiqueue: ${FETCHCONTENT_SOURCE_DIR_MULTIQUEUE}")
+endif()
+
 add_subdirectory(wrapper)
 add_subdirectory(benchmarks)
 add_subdirectory(tools)

@@ -10,14 +10,6 @@ add_library(mq_random INTERFACE)
 target_compile_definitions(mq_random INTERFACE MQ_MODE_RANDOM)
 target_link_libraries(mq_random INTERFACE mq)
 
-add_library(mq_random_move_to_worse INTERFACE)
-target_compile_definitions(mq_random_move_to_worse INTERFACE MQ_MODE_RANDOM_WORSE)
-target_link_libraries(mq_random_move_to_worse INTERFACE mq)
-
-add_library(mq_stick_random_move_to_worse INTERFACE)
-target_compile_definitions(mq_stick_random_move_to_worse INTERFACE MQ_MODE_STICK_RANDOM_WORSE)
-target_link_libraries(mq_stick_random_move_to_worse INTERFACE mq)
-
 add_library(mq_random_strict INTERFACE)
 target_compile_definitions(mq_random_strict INTERFACE MQ_MODE_RANDOM_STRICT)
 target_link_libraries(mq_random_strict INTERFACE mq)
@@ -34,13 +26,12 @@ add_library(mq_stick_mark INTERFACE)
 target_compile_definitions(mq_stick_mark INTERFACE MQ_MODE_STICK_MARK)
 target_link_libraries(mq_stick_mark INTERFACE mq)
 
-add_library(mq_stick_parametric INTERFACE)
-target_compile_definitions(mq_stick_parametric
-                           INTERFACE MQ_MODE_STICK_PARAMETRIC)
-target_link_libraries(mq_stick_parametric INTERFACE mq)
+add_library(mq_stick_replace INTERFACE)
+target_compile_definitions(mq_stick_replace INTERFACE MQ_MODE_STICK_REPLACE)
+target_link_libraries(mq_stick_replace INTERFACE mq)
 
-list(APPEND MQ_VARIANTS mq_random mq_random_move_to_worse mq_stick_random_move_to_worse mq_random_strict mq_stick_random
-     mq_stick_swap mq_stick_mark)
+list(APPEND MQ_VARIANTS mq_random mq_random_strict mq_stick_random mq_stick_swap
+     mq_stick_mark mq_stick_replace)
 
 if(EXP_TUNING_TARGETS)
   foreach(i ${EXP_TUNING_POP_PQS})

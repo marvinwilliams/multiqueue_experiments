@@ -16,8 +16,10 @@ extern "C" {
 #include <cxxopts.hpp>
 
 #include <cstdint>
+#include <cstring>
 #include <limits>
 #include <mutex>
+#include <new>
 #include <optional>
 #include <ostream>
 #include <utility>
@@ -45,8 +47,12 @@ class Spraylist {
 
     class Handle {
         friend Spraylist;
+
+       public:
+        using value_type = typename Spraylist::value_type;
+
+       private:
         ::sl_intset_t* pq_;
-        // No unique_ptr because of alignment
         ::thread_data_t* data_;
 
         explicit Handle(::sl_intset_t& pq, ::thread_data_t* data) : pq_{&pq}, data_{std::move(data)} {
@@ -54,7 +60,7 @@ class Spraylist {
 
        public:
         ~Handle() {
-            delete data_;
+            delete_thread_data(data_);
         }
 
         Handle(Handle const&) = delete;
@@ -64,8 +70,8 @@ class Spraylist {
             data_ = std::exchange(other.data_, nullptr);
         }
         Handle& operator=(Handle&& other) noexcept {
-            pq_ = std::exchange(other.pq_, nullptr);
-            data_ = std::exchange(other.data_, nullptr);
+            std::swap(pq_, other.pq_);
+            std::swap(data_, other.data_);
             return *this;
         }
 
@@ -101,12 +107,24 @@ class Spraylist {
         }
     };
 
+    static constexpr std::size_t thread_data_alignment = alignof(::thread_data_t);
+    static constexpr std::size_t thread_data_size =
+        (sizeof(::thread_data_t) + thread_data_alignment - 1) / thread_data_alignment * thread_data_alignment;
+
+    static void delete_thread_data(::thread_data_t* thread_data) noexcept {
+        if (thread_data != nullptr) {
+            ::operator delete(thread_data, std::align_val_t{thread_data_alignment});
+        }
+    }
+
     [[nodiscard]] ::thread_data_t* new_thread_data() const {
         static std::mutex m;
         auto l = std::scoped_lock(m);
         ::ssalloc_init(num_threads_);
         seeds = ::seed_rand();
-        auto thread_data = new thread_data_t;
+        auto* thread_data =
+            static_cast<::thread_data_t*>(::operator new(thread_data_size, std::align_val_t{thread_data_alignment}));
+        std::memset(thread_data, 0, thread_data_size);
         thread_data->seed = static_cast<unsigned int>(::rand());
         thread_data->seed2 = static_cast<unsigned int>(::rand());
         thread_data->nb_threads = static_cast<unsigned int>(num_threads_);

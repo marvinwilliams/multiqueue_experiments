@@ -57,12 +57,12 @@ void knapsack(Settings const& settings) noexcept {
     long long processed_nodes{0};
     std::size_t sum_sizes{0};
     std::size_t max_size{0};
-    KnapsackInstance<data_type> instance;
     std::clog << "Reading instance...\n";
+    KnapsackInstance<data_type> instance;
     try {
         instance = KnapsackInstance<data_type>(settings.instance_file);
-    } catch (std::exception const& e) {
-        std::cerr << "Error reading instance file: " << e.what() << '\n';
+    } catch (std::runtime_error const& e) {
+        std::cerr << "Error: " << settings.instance_file.string() << ": " << e.what() << '\n';
         std::exit(EXIT_FAILURE);
     }
     std::clog << "Instance has " << instance.size() << " items and " << std::fixed << instance.capacity()
@@ -109,21 +109,24 @@ void knapsack(Settings const& settings) noexcept {
               << std::chrono::duration<double>(t_end - t_start).count() << '\n';
     std::clog << "Solution: " << best_value << '\n';
     std::clog << "Processed nodes: " << processed_nodes << '\n';
-    std::clog << "Average PQ size: " << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes) << '\n';
+    auto average_pq_size =
+        processed_nodes == 0 ? 0.0 : static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes);
+    std::clog << "Average PQ size: " << average_pq_size << '\n';
     std::clog << "Max PQ size: " << max_size << '\n';
 
     {
         json::Object root{std::cout};
-        root.object("settings", [&settings](json::Object& obj) { write_settings_json(settings, obj); });
+        root.object("settings", [&settings](json::Object& obj) { settings.write_json(obj); });
         root.object("instance", [&instance](json::Object& obj) {
             obj.entry("num_items", instance.size());
             obj.entry("capacity", instance.capacity());
         });
         root.object("results", [&](json::Object& results) {
-            results.entry("time_ns", std::chrono::nanoseconds{t_end - t_start}.count());
+            results.array("thread_start_offset_ns", std::vector<long long>{0});
+            results.array("thread_end_offset_ns", std::vector<long long>{std::chrono::nanoseconds{t_end - t_start}.count()});
             results.entry("processed_nodes", processed_nodes);
             results.entry("solution", best_value);
-            results.entry("average_pq_size", static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes));
+            results.entry("average_pq_size", average_pq_size);
             results.entry("max_pq_size", max_size);
         });
     }
@@ -154,7 +157,7 @@ int main(int argc, char* argv[]) {
             std::cerr << cmd.help() << '\n';
             return EXIT_SUCCESS;
         }
-    } catch (cxxopts::OptionParseException const& e) {
+    } catch (cxxopts::OptionException const& e) {
         std::cerr << "Error parsing command line: " << e.what() << '\n';
         std::cerr << "Use --help for usage information" << '\n';
         return EXIT_FAILURE;

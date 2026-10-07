@@ -1,21 +1,19 @@
 #include "util/benchmark.hpp"
 #include "util/knapsack_instance.hpp"
-#include "util/selector.hpp"
-#include "util/termination_detection.hpp"
+#include "util/memory_stats.hpp"
+#include "util/parallel_search.hpp"
 #include "util/thread_coordination.hpp"
+#include "wrapper/selector.hpp"
 
 #include <cxxopts.hpp>
 
 #include <atomic>
 #include <cassert>
-#include <chrono>
 #include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <memory>
-#include <numeric>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -61,8 +59,8 @@ struct Settings {
         base_settings.register_cmd_options(cmd);
         pq_settings.register_cmd_options(cmd);
         // clang-format off
-    cmd.add_options()
-        ("instance", "Instance file", cxxopts::value<std::filesystem::path>(instance_file), "FILE");
+        cmd.add_options()
+            ("instance", "Instance file", cxxopts::value<std::filesystem::path>(instance_file), "FILE");
         // clang-format on
         cmd.parse_positional({"instance"});
     }
@@ -94,17 +92,20 @@ struct Settings {
     }
 };
 
+struct SharedData {
+    KnapsackInstance<data_type> instance;
+    std::atomic<data_type> solution{0};
+    parallel_search::Termination termination;
+};
+
 struct Counter {
     long long pushed_nodes{0};
     long long processed_nodes{0};
     long long ignored_nodes{0};
-};
 
-struct SharedData {
-    KnapsackInstance<data_type> instance;
-    std::atomic<data_type> solution{0};
-    termination_detection::TerminationDetection termination_detection;
-    std::atomic_llong missing_nodes{0};
+    long long node_count() const noexcept {
+        return pushed_nodes - processed_nodes - ignored_nodes;
+    }
 };
 
 void process_node(node_type const& node, handle_type& handle, Counter& counter, SharedData& data) {
@@ -141,82 +142,65 @@ void process_node(node_type const& node, handle_type& handle, Counter& counter, 
     ++counter.processed_nodes;
 }
 
-[[gnu::noinline]] Counter benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq,
-                                           SharedData& data) {
-    Counter counter;
+struct ThreadResult {
+    Counter counter{};
+    benchmark::Interval interval{};
+};
+
+[[gnu::noinline]] ThreadResult benchmark_thread(thread_coordination::Context& thread_context, pq_type& pq,
+                                                SharedData& data) {
+    ThreadResult result{};
     handle_type handle = pq.get_handle();
     if (thread_context.id() == 0) {
         auto [lb, ub] = data.instance.compute_bounds_linear(data.instance.capacity(), 0);
         data.solution.store(lb, std::memory_order_relaxed);
         handle.push(to_payload(ub, 0, data.instance.capacity(), 0));
-        ++counter.pushed_nodes;
+        ++result.counter.pushed_nodes;
     }
-    thread_context.synchronize();
-    while (true) {
-        std::optional<node_type> node;
-        while (data.termination_detection.repeat([&]() {
-            node = handle.try_pop();
-            return node.has_value();
-        })) {
-            process_node(*node, handle, counter, data);
-        }
-        data.missing_nodes.fetch_add(counter.pushed_nodes - counter.processed_nodes - counter.ignored_nodes,
-                                     std::memory_order_relaxed);
-        thread_context.synchronize();
-        if (data.missing_nodes.load(std::memory_order_relaxed) == 0) {
-            break;
-        }
-        thread_context.synchronize();
-        if (thread_context.id() == 0) {
-            data.missing_nodes.store(0, std::memory_order_relaxed);
-            data.termination_detection.reset();
-        }
-        thread_context.synchronize();
-    }
-    return counter;
+    result.interval = data.termination.run(
+        thread_context, handle, [&](node_type const& node) { process_node(node, handle, result.counter, data); },
+        [&result]() { return result.counter.node_count(); });
+    return result;
 }
 
 void run_benchmark(Settings const& settings) {
-    KnapsackInstance<data_type> instance;
     std::clog << "Reading instance...\n";
+    KnapsackInstance<data_type> instance;
     try {
         instance = KnapsackInstance<data_type>(settings.instance_file);
-    } catch (std::exception const& e) {
-        std::cerr << "Error reading instance file: " << e.what() << '\n';
+    } catch (std::runtime_error const& e) {
+        std::cerr << "Error: " << settings.instance_file.string() << ": " << e.what() << '\n';
         std::exit(EXIT_FAILURE);
     }
     std::clog << "Instance has " << instance.size() << " items and " << std::fixed << instance.capacity()
               << " capacity\n";
-    SharedData shared_data{std::move(instance), 0,
-                           termination_detection::TerminationDetection(settings.base_settings.num_threads)};
+    SharedData shared_data{std::move(instance), 0, parallel_search::Termination{settings.base_settings.num_threads}};
     std::vector<Counter> thread_counter(static_cast<std::size_t>(settings.base_settings.num_threads));
+    std::vector<benchmark::Interval> thread_interval(static_cast<std::size_t>(settings.base_settings.num_threads));
     auto pq = pq_type(settings.base_settings.num_threads, std::size_t(10'000'000), settings.pq_settings);
     std::clog << "Working...\n";
-    auto start_time = std::chrono::steady_clock::now();
+    auto memory_start = memory_stats::Snapshot::take();
     thread_coordination::dispatch(settings.base_settings.affinity, settings.base_settings.num_threads, [&](auto ctx) {
         auto t_id = static_cast<std::size_t>(ctx.id());
-        thread_counter[t_id] = benchmark_thread(ctx, pq, shared_data);
+        auto r = benchmark_thread(ctx, pq, shared_data);
+        thread_counter[t_id] = r.counter;
+        thread_interval[t_id] = r.interval;
     });
-    auto end_time = std::chrono::steady_clock::now();
+    auto memory_end = memory_stats::Snapshot::take();
     std::clog << "Done\n";
-    auto total_counts =
-        std::accumulate(thread_counter.begin(), thread_counter.end(), Counter{}, [](auto sum, auto const& counter) {
-            sum.pushed_nodes += counter.pushed_nodes;
-            sum.processed_nodes += counter.processed_nodes;
-            sum.ignored_nodes += counter.ignored_nodes;
-            return sum;
-        });
+    Counter summed{};
+    for (auto const& c : thread_counter) {
+        summed.pushed_nodes += c.pushed_nodes;
+        summed.processed_nodes += c.processed_nodes;
+        summed.ignored_nodes += c.ignored_nodes;
+    }
+    assert(summed.node_count() == 0);
     std::clog << '\n';
     std::clog << "= Results =\n";
-    std::clog << "Time (s): " << std::fixed << std::setprecision(3)
-              << std::chrono::duration<double>(end_time - start_time).count() << '\n';
+    std::clog << "Time (s): " << std::fixed << std::setprecision(3) << benchmark::seconds(thread_interval) << '\n';
     std::clog << "Solution: " << shared_data.solution.load() << '\n';
-    std::clog << "Processed nodes: " << total_counts.processed_nodes << '\n';
-    std::clog << "Ignored nodes: " << total_counts.ignored_nodes << '\n';
-    if (total_counts.processed_nodes + total_counts.ignored_nodes != total_counts.pushed_nodes) {
-        std::cerr << "Warning: Not all nodes were popped\n";
-        std::cerr << "Probably the priority queue discards duplicate keys\n";
-    }
+    std::clog << "Processed nodes: " << summed.processed_nodes << '\n';
+    std::clog << "Ignored nodes: " << summed.ignored_nodes << '\n';
     {
         json::Object root{std::cout};
         root.object("settings", [&settings](json::Object& obj) { settings.write_json(obj); });
@@ -225,9 +209,12 @@ void run_benchmark(Settings const& settings) {
             instance.entry("capacity", shared_data.instance.capacity());
         });
         root.object("results", [&](json::Object& results) {
-            results.entry("time_ns", std::chrono::nanoseconds{end_time - start_time}.count());
-            results.entry("processed_nodes", total_counts.processed_nodes);
-            results.entry("ignored_nodes", total_counts.ignored_nodes);
+            benchmark::write_timing(results, "", thread_interval);
+            results.object("memory", [&](json::Object& memory) {
+                memory_stats::write_json(memory, {{"start", memory_start}, {"end", memory_end}});
+            });
+            results.entry("processed_nodes", summed.processed_nodes);
+            results.entry("ignored_nodes", summed.ignored_nodes);
             results.entry("solution", shared_data.solution.load());
         });
     }
@@ -235,34 +222,5 @@ void run_benchmark(Settings const& settings) {
 }
 
 int main(int argc, char* argv[]) {
-    benchmark::write_header<pq_type>(argc, argv, std::clog);
-
-    cxxopts::Options cmd(argv[0]);
-    cmd.add_options()("h,help", "Print this help");
-    Settings settings{};
-    settings.register_cmd_options(cmd);
-
-    try {
-        auto args = cmd.parse(argc, argv);
-        if (args.count("help") > 0) {
-            std::cerr << cmd.help() << '\n';
-            return EXIT_SUCCESS;
-        }
-    } catch (cxxopts::OptionParseException const& e) {
-        std::cerr << "Error parsing command line: " << e.what() << '\n';
-        std::cerr << "Use --help for usage information" << '\n';
-        return EXIT_FAILURE;
-    }
-
-    std::clog << "= Settings =\n";
-    settings.write_human_readable(std::clog);
-    std::clog << '\n';
-
-    if (!settings.validate()) {
-        return EXIT_FAILURE;
-    }
-
-    std::clog << "= Running benchmark =\n";
-    run_benchmark(settings);
-    return EXIT_SUCCESS;
+    return benchmark::run<pq_type, Settings>(argc, argv, run_benchmark);
 }

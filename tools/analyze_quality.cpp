@@ -1,6 +1,7 @@
 #include "replay_tree.hpp"
 
 #include <cstddef>
+#include <cstdlib>
 #include <iostream>
 #include <vector>
 
@@ -34,22 +35,35 @@ Log read_log(std::istream& in) {
     Log log;
     log.keys.reserve(num_pushes);
     log.pops.reserve(num_pops);
-    for (std::size_t i = 0; i < num_pops; ++i) {
-        in.ignore();
-        while (in.get() == '+') {
+    char op{};
+    while (in >> op) {
+        if (op == '+') {
             Log::key_type key;  // NOLINT
             in >> key;
             log.keys.push_back(key);
-            in.ignore();
+        } else if (op == '-') {
+            std::size_t index;  // NOLINT
+            in >> index;
+            std::size_t push_index = log.keys.size();
+            if (index >= log.keys.size()) {
+                ++invalid_pops;
+                push_index = index + 1;
+            }
+            log.pops.push_back({push_index, index});
+        } else {
+            std::cerr << "Invalid operation '" << op << "' in log\n";
+            std::exit(EXIT_FAILURE);
         }
-        std::size_t index;  // NOLINT
-        in >> index;
-        std::size_t push_index = log.keys.size();
-        if (index >= log.keys.size()) {
-            ++invalid_pops;
-            push_index = index + 1;
+    }
+    if (log.keys.size() != num_pushes || log.pops.size() != num_pops) {
+        std::cerr << "Wrong number of pushes or pops\n";
+        std::exit(EXIT_FAILURE);
+    }
+    for (auto const& pop : log.pops) {
+        if (pop.ref_index >= log.keys.size()) {
+            std::cerr << "Pop references nonexistent push " << pop.ref_index << '\n';
+            std::exit(EXIT_FAILURE);
         }
-        log.pops.push_back({push_index, index});
     }
     std::cerr << "Invalid pops: " << invalid_pops << '\n';
     return log;
@@ -85,7 +99,7 @@ std::vector<Metrics> replay(Log const& log) {
         if (!success) {
             std::cerr << "Failed to delete element " << pop.ref_index << " with key " << log.keys[pop.ref_index]
                       << '\n';
-            std::abort();
+            std::exit(EXIT_FAILURE);
         }
         metrics.push_back({rank, delay});
     }

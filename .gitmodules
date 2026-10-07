@@ -7,7 +7,3 @@
 [submodule "third_party/klsm"]
 	path = third_party/klsm
 	url = https://github.com/marvinwilliams/klsm.git
-[submodule "multiqueue"]
-	path = multiqueue
-	url = https://github.com/marvinwilliams/multiqueue
-	branch = devel

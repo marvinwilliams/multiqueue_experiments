@@ -33,7 +33,7 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     try {
         graph = Graph(graph_file);
     } catch (std::runtime_error const& e) {
-        std::clog << "Error: " << e.what() << '\n';
+        std::cerr << "Error: " << graph_file.string() << ": " << e.what() << '\n';
         std::exit(EXIT_FAILURE);
     }
     std::clog << "Graph has " << graph.num_nodes() << " nodes and " << graph.num_edges() << " edges\n";
@@ -97,7 +97,8 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
             obj.entry("num_edges", graph.num_edges());
         });
         root.object("results", [&](json::Object& results) {
-            results.entry("time_ns", std::chrono::nanoseconds{t_end - t_start}.count());
+            results.array("thread_start_offset_ns", std::vector<long long>{0});
+            results.array("thread_end_offset_ns", std::vector<long long>{std::chrono::nanoseconds{t_end - t_start}.count()});
             results.entry("furthest_node", furthest_node - distances.begin());
             results.entry("longest_distance", *furthest_node);
             results.entry("processed_nodes", processed_nodes);
@@ -138,7 +139,7 @@ int main(int argc, char* argv[]) {
             std::cerr << cmd.help() << '\n';
             return EXIT_SUCCESS;
         }
-    } catch (cxxopts::OptionParseException const& e) {
+    } catch (cxxopts::OptionException const& e) {
         std::cerr << "Error parsing command line: " << e.what() << '\n';
         std::cerr << "Use --help for usage information" << '\n';
         return EXIT_FAILURE;

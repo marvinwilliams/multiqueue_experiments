@@ -1,34 +1,25 @@
 #include "util/benchmark.hpp"
-#include "util/selector.hpp"
+#include "util/memory_stats.hpp"
 #include "util/thread_coordination.hpp"
+#include "wrapper/selector.hpp"
 
 #include <cxxopts.hpp>
 
-#ifdef WITH_PAPI
-#include <papi.h>
-#include <pthread.h>
-#endif
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
 #include <iomanip>
 #include <iostream>
-#include <iterator>
 #include <random>
-#include <type_traits>
 #include <utility>
 #include <vector>
 
-#ifdef __SSE2__
-#include <emmintrin.h>
-#define PAUSE _mm_pause()
-#else
-#define PAUSE void(0)
-#endif
-
 using key_type = unsigned long;
 using value_type = unsigned long;
+
+using clock_type = benchmark::clock_type;
 
 using pq_type = PQ<true, key_type, value_type>;
 using handle_type = pq_type::handle_type;
@@ -49,13 +40,12 @@ struct Settings {
 #ifdef LOG_OPERATIONS
     std::filesystem::path log_file = "operation_log.txt";
 #endif
-#ifdef WITH_PAPI
-    std::vector<std::string> papi_events;
-#endif
+    benchmark::Papi papi;
 
     void register_cmd_options(cxxopts::Options& cmd) {
         base_settings.register_cmd_options(cmd);
         pq_settings.register_cmd_options(cmd);
+        papi.register_cmd_options(cmd);
         cmd.add_options()
             // clang-format off
             ("p,prefill", "Prefill per thread", cxxopts::value<long long>(prefill_per_thread), "NUMBER")
@@ -71,9 +61,6 @@ struct Settings {
 #ifdef LOG_OPERATIONS
             ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(log_file), "PATH")
 #endif
-#ifdef WITH_PAPI
-            ("r,count-event", "Papi event to count", cxxopts::value<std::vector<std::string>>(papi_events), "STRING")
-#endif
             // clang-format on
             ;
     }
@@ -85,12 +72,12 @@ struct Settings {
         if (!pq_settings.validate()) {
             return false;
         }
-        if (prefill_per_thread < 0) {
-            std::cerr << "Error: Prefill must be nonnegative\n";
+        if (prefill_per_thread <= 0) {
+            std::cerr << "Error: Prefill must be positive\n";
             return false;
         }
-        if (iterations_per_thread < 0) {
-            std::cerr << "Error: Iterations must be nonnegative\n";
+        if (iterations_per_thread <= 0) {
+            std::cerr << "Error: Iterations must be positive\n";
             return false;
         }
         if (min_prefill <= 0) {
@@ -137,24 +124,9 @@ struct Settings {
         }
         out.close();
 #endif
-#ifdef WITH_PAPI
-        if (!papi_events.empty()) {
-            if (int ret = PAPI_library_init(PAPI_VER_CURRENT); ret != PAPI_VER_CURRENT) {
-                std::cerr << "Error: Failed to initialize PAPI library\n";
-                return false;
-            }
-            if (int ret = PAPI_thread_init(pthread_self); ret != PAPI_OK) {
-                std::cerr << "Error: Failed to initialize PAPI thread support\n";
-                return false;
-            }
-            for (auto const& name : papi_events) {
-                if (PAPI_query_named_event(name.c_str()) != PAPI_OK) {
-                    std::cerr << "Error: PAPI event '" << name << "' not available\n";
-                    return false;
-                }
-            }
+        if (!papi.validate()) {
+            return false;
         }
-#endif
         return true;
     }
 
@@ -182,16 +154,7 @@ struct Settings {
 #ifdef LOG_OPERATIONS
         out << "Log file: " << log_file << '\n';
 #endif
-#ifdef WITH_PAPI
-        out << "PAPI events: [";
-        for (std::size_t i = 0; i < papi_events.size(); ++i) {
-            out << papi_events[i];
-            if (i != papi_events.size() - 1) {
-                out << ", ";
-            }
-        }
-        out << ']' << '\n';
-#endif
+        papi.write_human_readable(out);
     }
 
     void write_json(json::Object& obj) const {
@@ -207,25 +170,22 @@ struct Settings {
         obj.entry("timeout_s", timeout_s);
         obj.entry("sleep_us", sleep_us);
         obj.entry("seed", seed);
-#ifdef WITH_PAPI
-        obj.array("papi_events", papi_events);
-#endif
+        papi.write_json(obj);
     }
 };
 
 struct ThreadData {
+    benchmark::Interval interval{};
     long long iter_count = 0;
     long long failed_pop_count = 0;
-#ifdef WITH_PAPI
     std::vector<long long> papi_event_counter{};
-#endif
 #ifdef LOG_OPERATIONS
     struct PushLog {
-        std::chrono::high_resolution_clock::time_point tick;
+        clock_type::time_point tick;
         std::pair<key_type, value_type> element;
     };
     struct PopLog {
-        std::chrono::high_resolution_clock::time_point tick;
+        clock_type::time_point tick;
         value_type val;
     };
     std::vector<PushLog> pushes;
@@ -235,9 +195,7 @@ struct ThreadData {
     void write_json(json::Object& obj) const {
         obj.entry("iterations", iter_count);
         obj.entry("failed_pops", failed_pop_count);
-#ifdef WITH_PAPI
         obj.array("papi_event_counter", papi_event_counter);
-#endif
     }
 };
 
@@ -254,7 +212,9 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
         pops.insert(pops.end(), e.pops.begin(), e.pops.end());
     }
     std::sort(pushes.begin(), pushes.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-    std::vector<std::size_t> push_index(pushes.size());
+    auto max_value = std::accumulate(pushes.begin(), pushes.end(), value_type{0},
+                                     [](value_type m, auto const& e) { return std::max(m, e.element.second); });
+    std::vector<std::size_t> push_index(pushes.empty() ? 0 : static_cast<std::size_t>(max_value) + 1);
     for (std::size_t i = 0; i < pushes.size(); ++i) {
         push_index[pushes[i].element.second] = i;
     }
@@ -277,17 +237,28 @@ void write_log(std::vector<ThreadData> const& thread_data, std::ostream& out) {
 struct SharedData {
     std::vector<long long> updates;
     std::atomic_llong counter{0};
-    std::chrono::steady_clock::time_point start_time;
-    std::chrono::steady_clock::time_point end_time;
+    memory_stats::Snapshot memory_start;
+    memory_stats::Snapshot memory_end;
     std::vector<ThreadData> thread_data;
 };
+
+std::vector<benchmark::Interval> intervals(SharedData const& data) {
+    std::vector<benchmark::Interval> result;
+    for (auto const& t : data.thread_data) {
+        result.push_back(t.interval);
+    }
+    return result;
+}
 
 void write_result_json(Settings const& settings, SharedData const& data, std::ostream& out) {
     {
         json::Object root{out};
         root.object("settings", [&settings](json::Object& obj) { settings.write_json(obj); });
         root.object("results", [&data](json::Object& results) {
-            results.entry("time_ns", std::chrono::nanoseconds{data.end_time - data.start_time}.count());
+            benchmark::write_timing(results, "", intervals(data));
+            results.object("memory", [&data](json::Object& memory) {
+                memory_stats::write_json(memory, {{"start", data.memory_start}, {"end", data.memory_end}});
+            });
             results.array("thread_data", data.thread_data.begin(), data.thread_data.end(),
                           [](std::ostream& out, ThreadData const& thread_data) {
                               json::Object obj{out};
@@ -316,12 +287,12 @@ class Context : public thread_coordination::Context {
 #ifdef LOG_OPERATIONS
     void push(std::pair<key_type, value_type> const& e) {
         handle_.push(e);
-        auto tick = std::chrono::high_resolution_clock::now();
+        auto tick = clock_type::now();
         thread_data_.pushes.push_back({tick, e});
     }
 
     auto try_pop() {
-        auto tick = std::chrono::high_resolution_clock::now();
+        auto tick = clock_type::now();
         auto retval = handle_.try_pop();
         if (retval) {
             thread_data_.pops.push_back({tick, retval->second});
@@ -358,21 +329,21 @@ class Context : public thread_coordination::Context {
 
 [[gnu::noinline]] void work_loop(Context& context) {
     auto timeout = [t = std::chrono::seconds{context.settings().timeout_s},
-                    start = context.shared_data().start_time]() {
+                    start = context.thread_data().interval.start]() {
         if (t == std::chrono::seconds::zero()) {
             return false;
         }
-        return std::chrono::steady_clock::now() > start + t;
+        return clock_type::now() > start + t;
     };
     auto sleep = [s = std::chrono::microseconds{context.settings().sleep_us}]() {
         if (s == std::chrono::microseconds::zero()) {
             return;
         }
-        auto now = std::chrono::steady_clock::now();
+        auto now = clock_type::now();
         auto sleep_until = now + s;
         do {
-            PAUSE;
-            now = std::chrono::steady_clock::now();
+            thread_coordination::cpu_relax();
+            now = clock_type::now();
         } while (now < sleep_until);
     };
     auto offset =
@@ -404,40 +375,8 @@ class Context : public thread_coordination::Context {
     }
 }
 
-#ifdef WITH_PAPI
-int prepare_papi(Settings const& settings) {
-    if (int ret = PAPI_register_thread(); ret != PAPI_OK) {
-        throw std::runtime_error{"Failed to register thread for PAPI"};
-    }
-    int event_set = PAPI_NULL;
-    if (int ret = PAPI_create_eventset(&event_set); ret != PAPI_OK) {
-        throw std::runtime_error{"Failed to create PAPI event set"};
-    }
-    for (auto const& name : settings.papi_events) {
-        auto event = PAPI_NULL;
-        if (PAPI_event_name_to_code(name.c_str(), &event) != PAPI_OK) {
-            throw std::runtime_error{"Failed to resolve PAPI event '" + name + '\''};
-        }
-        if (PAPI_add_event(event_set, event) != PAPI_OK) {
-            throw std::runtime_error{"Failed to add PAPI event '" + name + '\''};
-        }
-    }
-    return event_set;
-}
-#endif
-
 void benchmark_thread(Context context) {
-#ifdef WITH_PAPI
-    int event_set = PAPI_NULL;
-    if (!context.settings().papi_events.empty()) {
-        context.thread_data().papi_event_counter.resize(context.settings().papi_events.size());
-        try {
-            event_set = prepare_papi(context.settings());
-        } catch (std::exception const& e) {
-            context.write(std::cerr) << e.what() << '\n';
-        }
-    }
-#endif
+    auto event_set = context.settings().papi.create_event_set();
 #ifdef LOG_OPERATIONS
     context.thread_data().pushes.reserve(
         static_cast<std::size_t>(context.settings().prefill_per_thread + 2 * context.settings().iterations_per_thread));
@@ -474,39 +413,30 @@ void benchmark_thread(Context context) {
     if (context.id() == 0) {
         std::clog << "Working...\n";
     }
-#ifdef WITH_PAPI
-    if (!context.settings().papi_events.empty()) {
-        if (int ret = PAPI_start(event_set); ret != PAPI_OK) {
-            context.write(std::cerr) << "Failed to start performance counters\n";
-        }
-    }
-#endif
     if (context.id() == 0) {
-        context.shared_data().start_time = std::chrono::high_resolution_clock::now();
+        context.shared_data().memory_start = memory_stats::Snapshot::take();
     }
     context.synchronize();
+    context.settings().papi.start(event_set);
+    context.spin_synchronize();
+    context.thread_data().interval.start = clock_type::now();
     work_loop(context);
+    context.thread_data().interval.end = clock_type::now();
+    context.settings().papi.stop(event_set, context.thread_data().papi_event_counter);
     context.synchronize();
     if (context.id() == 0) {
-        context.shared_data().end_time = std::chrono::high_resolution_clock::now();
+        context.shared_data().memory_end = memory_stats::Snapshot::take();
     }
-#ifdef WITH_PAPI
-    if (!context.settings().papi_events.empty()) {
-        if (int ret = PAPI_stop(event_set, context.thread_data().papi_event_counter.data()); ret != PAPI_OK) {
-            context.write(std::cerr) << "Failed to stop performance counters\n";
-        }
-    }
-#endif
     context.shared_data().thread_data[static_cast<std::size_t>(context.id())] = std::move(context.thread_data());
 }
 
 void run_benchmark(Settings const& settings) {
     SharedData shared_data;
-    shared_data.updates.resize(static_cast<std::size_t>(settings.iterations_per_thread * settings.num_threads));
-    shared_data.thread_data.resize(static_cast<std::size_t>(settings.num_threads));
+    auto num_threads = settings.base_settings.num_threads;
+    shared_data.updates.resize(static_cast<std::size_t>(settings.iterations_per_thread * num_threads));
+    shared_data.thread_data.resize(static_cast<std::size_t>(num_threads));
     auto pq =
-        pq_type(settings.num_threads, static_cast<std::size_t>(settings.prefill_per_thread * settings.num_threads),
-                settings.pq_settings);
+        pq_type(num_threads, static_cast<std::size_t>(settings.prefill_per_thread * num_threads), settings.pq_settings);
 
     thread_coordination::dispatch(settings.base_settings.affinity, settings.base_settings.num_threads, [&](auto ctx) {
         benchmark_thread(Context(std::move(ctx), pq.get_handle(), shared_data, settings));
@@ -521,40 +451,11 @@ void run_benchmark(Settings const& settings) {
     std::clog << "Done\n";
     std::clog << '\n';
     std::clog << "= Results =\n";
-    std::clog << "Time (s): " << std::fixed << std::setprecision(3)
-              << std::chrono::duration<double>(shared_data.end_time - shared_data.start_time).count() << '\n';
+    std::clog << "Time (s): " << std::fixed << std::setprecision(3) << benchmark::seconds(intervals(shared_data))
+              << '\n';
     write_result_json(settings, shared_data, std::cout);
 }
 
 int main(int argc, char* argv[]) {
-    benchmark::write_header<pq_type>(argc, argv, std::clog);
-
-    cxxopts::Options cmd(argv[0]);
-    cmd.add_options()("h,help", "Print this help", cxxopts::value<bool>());
-    Settings settings{};
-    settings.register_cmd_options(cmd);
-
-    try {
-        auto args = cmd.parse(argc, argv);
-        if (args.count("help") > 0) {
-            std::clog << cmd.help() << '\n';
-            return EXIT_SUCCESS;
-        }
-    } catch (std::exception const& e) {
-        std::cerr << "Error parsing command line: " << e.what() << '\n';
-        std::cerr << "Use --help for usage information" << '\n';
-        return EXIT_FAILURE;
-    }
-
-    std::clog << "= Settings =\n";
-    write_settings_human_readable(settings, std::clog);
-    std::clog << '\n';
-
-    if (!validate_settings(settings)) {
-        return EXIT_FAILURE;
-    }
-
-    std::clog << "= Running benchmark =\n";
-    run_benchmark(settings);
-    return EXIT_SUCCESS;
+    return benchmark::run<pq_type, Settings>(argc, argv, run_benchmark);
 }

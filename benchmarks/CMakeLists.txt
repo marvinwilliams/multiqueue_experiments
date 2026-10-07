@@ -1,8 +1,3 @@
-add_library(threading STATIC util/threading.cpp)
-target_include_directories(threading PUBLIC "${CMAKE_SOURCE_DIR}/util")
-target_link_libraries(threading PUBLIC Threads::Threads)
-target_compile_features(threading PUBLIC cxx_std_17)
-
 add_library(benchmark_base INTERFACE)
 target_include_directories(benchmark_base INTERFACE "." "..")
 target_include_directories(benchmark_base SYSTEM
@@ -11,10 +6,18 @@ target_compile_definitions(benchmark_base
                            INTERFACE L1_CACHE_LINE_SIZE=${L1_CACHE_LINE_SIZE})
 target_compile_definitions(benchmark_base INTERFACE PAGE_SIZE=${PAGE_SIZE})
 target_compile_features(benchmark_base INTERFACE cxx_std_17)
-target_link_libraries(benchmark_base INTERFACE threading)
+target_link_libraries(benchmark_base INTERFACE Threads::Threads)
 if(PAPI_FOUND)
   target_link_libraries(benchmark_base INTERFACE PAPI::PAPI)
   target_compile_definitions(benchmark_base INTERFACE WITH_PAPI)
+endif()
+if(EXP_JEMALLOC)
+  find_library(JEMALLOC_LIBRARY jemalloc)
+  if(NOT JEMALLOC_LIBRARY)
+    message(FATAL_ERROR "EXP_JEMALLOC is set, but jemalloc was not found")
+  endif()
+  target_link_libraries(benchmark_base INTERFACE ${JEMALLOC_LIBRARY})
+  target_compile_definitions(benchmark_base INTERFACE WITH_JEMALLOC)
 endif()
 
 add_library(monotonic_base INTERFACE)

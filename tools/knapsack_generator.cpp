@@ -117,7 +117,7 @@ int main(int argc, char* argv[]) {
             std::cerr << options.help() << std::endl;
             return EXIT_SUCCESS;
         }
-    } catch (cxxopts::OptionParseException const& e) {
+    } catch (cxxopts::OptionException const& e) {
         std::cerr << e.what() << std::endl;
         return EXIT_FAILURE;
     }

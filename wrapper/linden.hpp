@@ -51,6 +51,11 @@ class Linden {
 
     class Handle {
         friend Linden;
+
+       public:
+        using value_type = typename Linden::value_type;
+
+       private:
         Linden* pq_;
 
         explicit Handle(Linden& pq) : pq_{&pq} {

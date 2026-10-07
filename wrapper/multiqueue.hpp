@@ -15,25 +15,20 @@
 
 #if defined MQ_MODE_RANDOM || defined MQ_MODE_RANDOM_STRICT
 #include "multiqueue/modes/random.hpp"
-#elif defined MQ_MODE_RANDOM_WORSE
-#include "multiqueue/modes/random_move_worse.hpp"
 #elif defined MQ_MODE_STICK_RANDOM
 #include "multiqueue/modes/stick_random.hpp"
-#elif defined MQ_MODE_STICK_RANDOM_WORSE
-#include "multiqueue/modes/stick_random_move_to_worse.hpp"
 #elif defined MQ_MODE_STICK_SWAP
 #include "multiqueue/modes/stick_swap.hpp"
 #elif defined MQ_MODE_STICK_MARK
 #include "multiqueue/modes/stick_mark.hpp"
-#elif defined MQ_MODE_STICK_PARAMETRIC
-#include "multiqueue/modes/stick_parametric.hpp"
+#elif defined MQ_MODE_STICK_REPLACE
+#include "multiqueue/modes/stick_replace.hpp"
 #else
 #error "No valid mode specified"
 #endif
 
 #include <cxxopts.hpp>
 
-#include <iomanip>
 #include <ostream>
 #include <utility>
 
@@ -67,14 +62,6 @@ static constexpr unsigned int heap_arity = 8;
 using mode_type = ::multiqueue::mode::Random<num_pop_candidates, true>;
 static constexpr auto mode_name = "random";
 static constexpr bool has_stickiness = false;
-#elif defined MQ_MODE_RANDOM_WORSE
-using mode_type = ::multiqueue::mode::RandomMoveWorse<num_pop_candidates, false>;
-static constexpr auto mode_name = "random_worse";
-static constexpr bool has_stickiness = false;
-#elif defined MQ_MODE_STICK_RANDOM_WORSE
-using mode_type = ::multiqueue::mode::StickRandomMTW<num_pop_candidates>;
-static constexpr auto mode_name = "stick_random_worse";
-static constexpr bool has_stickiness = true;
 #elif defined MQ_MODE_RANDOM_STRICT
 using mode_type = ::multiqueue::mode::Random<num_pop_candidates, false>;
 static constexpr auto mode_name = "random_strict";
@@ -91,9 +78,9 @@ static constexpr bool has_stickiness = true;
 using mode_type = ::multiqueue::mode::StickMark<num_pop_candidates>;
 static constexpr auto mode_name = "stick_mark";
 static constexpr bool has_stickiness = true;
-#elif defined MQ_MODE_STICK_PARAMETRIC
-using mode_type = ::multiqueue::mode::StickParametric<num_pop_candidates>;
-static constexpr auto mode_name = "stick_parametric";
+#elif defined MQ_MODE_STICK_REPLACE
+using mode_type = ::multiqueue::mode::StickReplace<num_pop_candidates>;
+static constexpr auto mode_name = "stick_replace";
 static constexpr bool has_stickiness = true;
 #endif
 
@@ -192,7 +179,7 @@ class MultiQueue {
             cmd.add_options()("mq-seed", "Seed for the multiqueue", cxxopts::value<int>(config.seed), "NUMBER");
             if constexpr (has_stickiness) {
                 cmd.add_options()("k,stickiness",
-                                  "Additional operations the selected queues are used for (0 reselects every "
+                                  "Number of operations the selected queues are used for (1 reselects every "
                                   "operation)",
                                   cxxopts::value<int>(config.stickiness), "NUMBER");
             }
@@ -204,10 +191,8 @@ class MultiQueue {
                 return false;
             }
             if constexpr (has_stickiness) {
-                // A stickiness of n uses the selected queues for n additional
-                // operations, so 0 (reselect every operation) is a valid setting
-                if (config.stickiness < 0) {
-                    std::cerr << "Error: Stickiness must not be negative\n";
+                if (config.stickiness <= 0) {
+                    std::cerr << "Error: Stickiness must be positive\n";
                     return false;
                 }
             }
@@ -222,15 +207,13 @@ class MultiQueue {
             }
         }
 
-        void write_json(std::ostream &out) const {
-            out << '{';
-            out << std::quoted("queue_factor") << ':' << factor << ',';
-            out << std::quoted("seed") << ':' << config.seed;
+        template <typename JsonObject>
+        void write_json(JsonObject &obj) const {
+            obj.entry("queue_factor", factor);
+            obj.entry("seed", config.seed);
             if constexpr (has_stickiness) {
-                out << ',';
-                out << std::quoted("stickiness") << ':' << config.stickiness;
+                obj.entry("stickiness", config.stickiness);
             }
-            out << '}';
         }
     };
 
@@ -240,6 +223,8 @@ class MultiQueue {
         }
 
        public:
+        using value_type = typename multiqueue_type::value_type;
+
         bool push(typename multiqueue_type::value_type const &value) {
             multiqueue_type::handle_type::push(value);
             return true;

@@ -38,6 +38,11 @@ class StealingMQ {
     class Handle {
         friend StealingMQ;
 
+       public:
+        using value_type = typename StealingMQ::value_type;
+
+       private:
+
         pq_type* pq_;
         int id_;
 

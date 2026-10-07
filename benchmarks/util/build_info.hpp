@@ -25,5 +25,10 @@ static std::ostream& write_build_info(std::ostream& out) {
 #else
     out << "  PAPI unsupported\n";
 #endif
+#if defined WITH_JEMALLOC
+    out << "  jemalloc\n";
+#else
+    out << "  System allocator\n";
+#endif
     return out;
 }
