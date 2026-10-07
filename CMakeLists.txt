@@ -67,7 +67,7 @@ include(FetchContent)
 FetchContent_Declare(
   multiqueue
   GIT_REPOSITORY git@github.com:marvinwilliams/multiqueue_experimental.git
-  GIT_TAG e67a6186e46f099e337144ba7d1eac7e5850f2f4)
+  GIT_TAG 44e44385c1568a7f4ef3e46f69c196ceff563dca)
 set(MULTIQUEUE_BUILD_TESTS OFF)
 set(MULTIQUEUE_BUILD_BENCHMARKS OFF)
 FetchContent_MakeAvailable(multiqueue)
