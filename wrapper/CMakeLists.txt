@@ -110,6 +110,25 @@ add_library(smq INTERFACE)
 set_property(TARGET smq PROPERTY pq_name smq)
 target_compile_definitions(smq INTERFACE PQ_SMQ)
 
+add_library(locked_pq INTERFACE)
+target_compile_definitions(locked_pq INTERFACE PQ_LOCKED_PQ)
+
+add_library(mq_pq INTERFACE)
+target_link_libraries(mq_pq INTERFACE multiqueue::multiqueue)
+target_compile_definitions(mq_pq INTERFACE PQ_MQ_PQ)
+
+# GENERIC_COMPETITORS also support non-integer keys (knapsack_float)
+set(GENERIC_COMPETITORS
+    ${MQ_VARIANTS}
+    klsm4
+    klsm256
+    klsm1024
+    klsm4096
+    smq
+    locked_pq
+    mq_pq)
+set(COMPETITORS ${GENERIC_COMPETITORS})
+
 find_package(GSL)
 
 if (GSL_FOUND)
@@ -167,6 +186,8 @@ if (GSL_FOUND)
   set_property(TARGET spraylist PROPERTY pq_name spraylist)
   target_compile_definitions(spraylist INTERFACE PQ_SPRAYLIST)
   target_link_libraries(spraylist PUBLIC GSL::gsl)
+
+  list(APPEND COMPETITORS linden capq spraylist)
 else()
   message(WARNING "GSL not found, not building linden, capq, spraylist")
 endif()
@@ -175,42 +196,18 @@ find_package(TBB)
 
 if(TBB_FOUND)
   add_library(tbb_pq INTERFACE)
-  target_link_libraries(tbb_pq INTERFACE tbb)
+  target_link_libraries(tbb_pq INTERFACE TBB::tbb)
   target_compile_definitions(tbb_pq INTERFACE PQ_TBB_PQ)
+
+  list(APPEND COMPETITORS tbb_pq)
+  list(APPEND GENERIC_COMPETITORS tbb_pq)
 else()
   message(WARNING "TBB not found, not building TBB priority queue")
 endif()
 
-add_library(locked_pq INTERFACE)
-target_compile_definitions(locked_pq INTERFACE PQ_LOCKED_PQ)
-
-add_library(mq_pq INTERFACE)
-target_link_libraries(mq_pq INTERFACE multiqueue::multiqueue)
-target_compile_definitions(mq_pq INTERFACE PQ_MQ_PQ)
-
 set(COMPETITORS
-    ${MQ_VARIANTS}
-    klsm4
-    klsm256
-    klsm1024
-    klsm4096
-    smq
-    linden
-    capq
-    spraylist
-    tbb_pq
-    locked_pq
-    mq_pq
+    ${COMPETITORS}
     PARENT_SCOPE)
-
 set(GENERIC_COMPETITORS
-    ${MQ_VARIANTS}
-    klsm4
-    klsm256
-    klsm1024
-    klsm4096
-    smq
-    tbb_pq
-    locked_pq
-    mq_pq
+    ${GENERIC_COMPETITORS}
     PARENT_SCOPE)
