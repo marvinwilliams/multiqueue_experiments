@@ -209,13 +209,23 @@ void run_benchmark(Settings const& settings) {
             obj.entry("capacity", shared_data.instance.capacity());
         });
         root.object("results", [&](json::Object& results) {
-            benchmark::write_timing(results, "", thread_interval);
+            results.entry("time_ns", benchmark::time_ns(thread_interval));
+            results.entry("pushed_nodes", summed.pushed_nodes);
             results.object("memory", [&](json::Object& memory) {
                 memory_stats::write_json(memory, {{"start", memory_start}, {"end", memory_end}});
             });
             results.entry("processed_nodes", summed.processed_nodes);
             results.entry("ignored_nodes", summed.ignored_nodes);
             results.entry("solution", shared_data.solution.load());
+            auto origin = benchmark::span(thread_interval).start;
+            results.array("thread_data", thread_counter.begin(), thread_counter.end(),
+                          [&, t = std::size_t{0}](std::ostream& out, Counter const& counter) mutable {
+                              json::Object obj{out};
+                              benchmark::write_interval(obj, "", thread_interval[t++], origin);
+                              obj.entry("pushed_nodes", counter.pushed_nodes);
+                              obj.entry("processed_nodes", counter.processed_nodes);
+                              obj.entry("ignored_nodes", counter.ignored_nodes);
+                          });
         });
     }
     std::cout << '\n';

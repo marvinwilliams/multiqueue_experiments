@@ -63,7 +63,7 @@ struct Settings {
             ("t,timeout", "Timeout in seconds", cxxopts::value<int>(timeout_s), "NUMBER")
             ("q,sleep", "Time in microseconds to wait between operations", cxxopts::value<int>(sleep_us), "NUMBER")
 #ifdef LOG_OPERATIONS
-            ("l,log-file", "File to write the operation log to (quality is always computed)", cxxopts::value<std::filesystem::path>(log_file), "PATH")
+            ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(log_file), "PATH")
 #endif
             // clang-format on
             ;
@@ -190,16 +190,15 @@ struct ThreadData {
     std::vector<PopLog> pops;
 #endif
 
-    void write_json(json::Object& obj) const {
+    void write_json(json::Object& obj, clock_type::time_point origin, benchmark::Papi const& papi) const {
+        benchmark::write_interval(obj, "", interval, origin);
         obj.entry("iterations", iter_count);
         obj.entry("failed_pops", failed_pop_count);
-        obj.array("papi_event_counter", papi_event_counter);
+        papi.write_counters(obj, "papi", papi_event_counter);
     }
 };
 
 #ifdef LOG_OPERATIONS
-// Orders all operations by time; pushes are timestamped after and pops before the operation, so a pop may precede
-// its push in the log
 quality::Log build_log(std::vector<ThreadData> const& thread_data) {
     std::vector<ThreadData::PushLog> pushes;
     std::vector<ThreadData::PopLog> pops;
@@ -221,7 +220,7 @@ quality::Log build_log(std::vector<ThreadData> const& thread_data) {
     log.pops.reserve(pops.size());
     std::size_t pushes_before = 0;
     for (auto const& pop : pops) {
-        while (pushes_before != pushes.size() && pushes[pushes_before].tick < pop.tick) {
+        while (pushes_before != pushes.size() && pushes[pushes_before].tick <= pop.tick) {
             ++pushes_before;
         }
         log.pops.push_back({pushes_before, push_index[static_cast<std::size_t>(pop.val)]});
@@ -254,8 +253,20 @@ void write_result_json(Settings const& settings, SharedData const& data, std::os
     {
         json::Object root{out};
         root.object("settings", [&settings](json::Object& obj) { settings.write_json(obj); });
-        root.object("results", [&data](json::Object& results) {
-            benchmark::write_timing(results, "", intervals(data));
+        root.object("results", [&](json::Object& results) {
+            auto thread_intervals = intervals(data);
+            long long iterations = 0;
+            long long failed_pops = 0;
+            std::vector<long long> papi_counters;
+            for (auto const& t : data.thread_data) {
+                iterations += t.iter_count;
+                failed_pops += t.failed_pop_count;
+                settings.papi.accumulate(papi_counters, t.papi_event_counter);
+            }
+            results.entry("time_ns", benchmark::time_ns(thread_intervals));
+            results.entry("iterations", iterations);
+            results.entry("failed_pops", failed_pops);
+            settings.papi.write_counters(results, "papi", papi_counters);
             results.object("memory", [&data](json::Object& memory) {
                 memory_stats::write_json(memory, {{"start", data.memory_start}, {"end", data.memory_end}});
             });
@@ -265,10 +276,11 @@ void write_result_json(Settings const& settings, SharedData const& data, std::os
                 data.quality_summary.write_json(q);
             });
 #endif
+            auto origin = benchmark::span(thread_intervals).start;
             results.array("thread_data", data.thread_data.begin(), data.thread_data.end(),
-                          [](std::ostream& out2, ThreadData const& thread_data) {
+                          [&](std::ostream& out2, ThreadData const& thread_data) {
                               json::Object obj{out2};
-                              thread_data.write_json(obj);
+                              thread_data.write_json(obj, origin, settings.papi);
                           });
         });
     }
@@ -292,14 +304,14 @@ class Context : public thread_coordination::Context {
 
 #ifdef LOG_OPERATIONS
     void push(std::pair<key_type, value_type> const& e) {
-        handle_.push(e);
         auto tick = clock_type::now();
+        handle_.push(e);
         thread_data_.pushes.push_back({tick, e});
     }
 
     auto try_pop() {
-        auto tick = clock_type::now();
         auto retval = handle_.try_pop();
+        auto tick = clock_type::now();
         if (retval) {
             thread_data_.pops.push_back({tick, retval->second});
         }

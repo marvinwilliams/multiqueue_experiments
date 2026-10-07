@@ -108,12 +108,15 @@ struct ThreadData {
     std::vector<long long> push_papi_event_counter{};
     std::vector<long long> pop_papi_event_counter{};
 
-    void write_json(json::Object& obj) const {
+    void write_json(json::Object& obj, clock_type::time_point push_origin, clock_type::time_point pop_origin,
+                    benchmark::Papi const& papi) const {
+        benchmark::write_interval(obj, "push_", push_interval, push_origin);
+        benchmark::write_interval(obj, "pop_", pop_interval, pop_origin);
         obj.entry("pushes", push_count);
         obj.entry("pops", pop_count);
         obj.entry("failed_pops", failed_pop_count);
-        obj.array("push_papi_event_counter", push_papi_event_counter);
-        obj.array("pop_papi_event_counter", pop_papi_event_counter);
+        papi.write_counters(obj, "push_papi", push_papi_event_counter);
+        papi.write_counters(obj, "pop_papi", pop_papi_event_counter);
     }
 };
 
@@ -138,18 +141,39 @@ void write_result_json(Settings const& settings, SharedData const& data, std::os
     {
         json::Object root{out};
         root.object("settings", [&settings](json::Object& obj) { settings.write_json(obj); });
-        root.object("results", [&data](json::Object& results) {
-            benchmark::write_timing(results, "push_", intervals(data, &ThreadData::push_interval));
-            benchmark::write_timing(results, "pop_", intervals(data, &ThreadData::pop_interval));
+        root.object("results", [&](json::Object& results) {
+            auto push_intervals = intervals(data, &ThreadData::push_interval);
+            auto pop_intervals = intervals(data, &ThreadData::pop_interval);
+            long long pushes = 0;
+            long long pops = 0;
+            long long failed_pops = 0;
+            std::vector<long long> push_papi;
+            std::vector<long long> pop_papi;
+            for (auto const& t : data.thread_data) {
+                pushes += t.push_count;
+                pops += t.pop_count;
+                failed_pops += t.failed_pop_count;
+                settings.papi.accumulate(push_papi, t.push_papi_event_counter);
+                settings.papi.accumulate(pop_papi, t.pop_papi_event_counter);
+            }
+            results.entry("push_time_ns", benchmark::time_ns(push_intervals));
+            results.entry("pop_time_ns", benchmark::time_ns(pop_intervals));
+            results.entry("pushes", pushes);
+            results.entry("pops", pops);
+            results.entry("failed_pops", failed_pops);
+            settings.papi.write_counters(results, "push_papi", push_papi);
+            settings.papi.write_counters(results, "pop_papi", pop_papi);
             results.object("memory", [&data](json::Object& memory) {
                 memory_stats::write_json(
                     memory,
                     {{"start", data.memory_start}, {"after_push", data.memory_after_push}, {"end", data.memory_end}});
             });
+            auto push_origin = benchmark::span(push_intervals).start;
+            auto pop_origin = benchmark::span(pop_intervals).start;
             results.array("thread_data", data.thread_data.begin(), data.thread_data.end(),
-                          [](std::ostream& out2, ThreadData const& thread_data) {
+                          [&](std::ostream& out2, ThreadData const& thread_data) {
                               json::Object obj{out2};
-                              thread_data.write_json(obj);
+                              thread_data.write_json(obj, push_origin, pop_origin, settings.papi);
                           });
         });
     }

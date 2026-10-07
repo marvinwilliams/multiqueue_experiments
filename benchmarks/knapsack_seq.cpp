@@ -122,8 +122,7 @@ void knapsack(Settings const& settings) noexcept {
             obj.entry("capacity", instance.capacity());
         });
         root.object("results", [&](json::Object& results) {
-            results.array("thread_start_offset_ns", std::vector<long long>{0});
-            results.array("thread_end_offset_ns", std::vector<long long>{std::chrono::nanoseconds{t_end - t_start}.count()});
+            results.entry("time_ns", std::chrono::nanoseconds{t_end - t_start}.count());
             results.entry("processed_nodes", processed_nodes);
             results.entry("solution", best_value);
             results.entry("average_pq_size", average_pq_size);

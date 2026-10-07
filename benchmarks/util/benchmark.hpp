@@ -47,13 +47,19 @@ inline double seconds(std::vector<Interval> const& intervals) {
     return std::chrono::duration<double>(s.end - s.start).count();
 }
 
-inline void write_timing(json::Object& obj, std::string const& prefix, std::vector<Interval> const& intervals) {
+inline long long nanoseconds(clock_type::duration d) {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(d).count();
+}
+
+inline long long time_ns(std::vector<Interval> const& intervals) {
     auto s = span(intervals);
-    auto ns = [](clock_type::duration d) { return std::chrono::duration_cast<std::chrono::nanoseconds>(d).count(); };
-    obj.array(prefix + "thread_start_offset_ns", intervals.begin(), intervals.end(),
-              [&](std::ostream& out, Interval const& i) { out << ns(i.start - s.start); });
-    obj.array(prefix + "thread_end_offset_ns", intervals.begin(), intervals.end(),
-              [&](std::ostream& out, Interval const& i) { out << ns(i.end - s.start); });
+    return nanoseconds(s.end - s.start);
+}
+
+inline void write_interval(json::Object& obj, std::string const& prefix, Interval const& interval,
+                           clock_type::time_point origin) {
+    obj.entry(prefix + "start_time", nanoseconds(interval.start - origin));
+    obj.entry(prefix + "end_time", nanoseconds(interval.end - origin));
 }
 
 struct BaseSettings {
@@ -242,6 +248,25 @@ class Papi {
             abort_with("Failed to stop performance counters");
         }
     }
+
+    void accumulate(std::vector<long long>& total, std::vector<long long> const& counters) const {
+        total.resize(events.size());
+        for (std::size_t i = 0; i < counters.size() && i < total.size(); ++i) {
+            total[i] += counters[i];
+        }
+    }
+
+    // Writes the counters as an object {event: count}; nothing if no events are counted
+    void write_counters(json::Object& obj, std::string const& name, std::vector<long long> const& counters) const {
+        if (events.empty()) {
+            return;
+        }
+        obj.object(name, [&](json::Object& o) {
+            for (std::size_t i = 0; i < events.size() && i < counters.size(); ++i) {
+                o.entry(events[i], counters[i]);
+            }
+        });
+    }
 };
 #else
 class Papi {
@@ -267,6 +292,13 @@ class Papi {
     }
 
     void stop(int /*event_set*/, std::vector<long long>& /*counters*/) const {
+    }
+
+    void accumulate(std::vector<long long>& /*total*/, std::vector<long long> const& /*counters*/) const {
+    }
+
+    void write_counters(json::Object& /*obj*/, std::string const& /*name*/,
+                        std::vector<long long> const& /*counters*/) const {
     }
 };
 

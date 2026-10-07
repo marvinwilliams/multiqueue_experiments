@@ -97,8 +97,7 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
             obj.entry("num_edges", graph.num_edges());
         });
         root.object("results", [&](json::Object& results) {
-            results.array("thread_start_offset_ns", std::vector<long long>{0});
-            results.array("thread_end_offset_ns", std::vector<long long>{std::chrono::nanoseconds{t_end - t_start}.count()});
+            results.entry("time_ns", std::chrono::nanoseconds{t_end - t_start}.count());
             results.entry("furthest_node", furthest_node - distances.begin());
             results.entry("longest_distance", *furthest_node);
             results.entry("processed_nodes", processed_nodes);

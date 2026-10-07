@@ -47,7 +47,6 @@ inline void write_log(Log const& log, std::ostream& out) {
     }
 }
 
-// Throws std::runtime_error if a pop references an element that is not in the replayed queue
 inline std::vector<Metrics> replay(Log const& log) {
     struct HeapElement {
         Log::key_type key;
