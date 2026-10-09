@@ -94,39 +94,51 @@ if(EXP_TUNING_TARGETS)
       PARENT_SCOPE)
 endif()
 
-set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|AMD64)$")
+  set(x86_default ON)
+else()
+  set(x86_default OFF)
+endif()
+option(EXP_X86_COMPETITORS "Build the x86-only competitors klsm, linden, capq and spraylist" ${x86_default})
+if(NOT EXP_X86_COMPETITORS)
+  message(WARNING "Not building klsm, linden, capq, spraylist")
+endif()
 
-add_library(klsm ${KLSM_DIR}/src/util/thread_local_ptr.cpp)
-target_include_directories(klsm SYSTEM INTERFACE ${KLSM_DIR}/src
-                                                 ${KLSM_DIR}/src/util)
-add_library(klsm4 INTERFACE)
-target_link_libraries(klsm4 INTERFACE klsm)
-set_property(TARGET klsm4 PROPERTY pq_name klsm4)
-target_compile_definitions(
-  klsm4
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=4)
-add_library(klsm256 INTERFACE)
-target_link_libraries(klsm256 INTERFACE klsm)
-set_property(TARGET klsm256 PROPERTY pq_name klsm256)
-target_compile_definitions(
-  klsm256
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=256)
-add_library(klsm1024 INTERFACE)
-target_link_libraries(klsm1024 INTERFACE klsm)
-set_property(TARGET klsm1024 PROPERTY pq_name klsm1024)
-target_compile_definitions(
-  klsm1024
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=1024)
-add_library(klsm4096 INTERFACE)
-target_link_libraries(klsm4096 INTERFACE klsm)
-set_property(TARGET klsm4096 PROPERTY pq_name klsm4096)
-target_compile_definitions(
-  klsm4096
-  INTERFACE PQ_KLSM
-  INTERFACE KLSM_K=4096)
+if(EXP_X86_COMPETITORS)
+  set(KLSM_DIR "${CMAKE_SOURCE_DIR}/third_party/klsm")
+
+  add_library(klsm ${KLSM_DIR}/src/util/thread_local_ptr.cpp)
+  target_include_directories(klsm SYSTEM INTERFACE ${KLSM_DIR}/src
+                                                   ${KLSM_DIR}/src/util)
+  add_library(klsm4 INTERFACE)
+  target_link_libraries(klsm4 INTERFACE klsm)
+  set_property(TARGET klsm4 PROPERTY pq_name klsm4)
+  target_compile_definitions(
+    klsm4
+    INTERFACE PQ_KLSM
+    INTERFACE KLSM_K=4)
+  add_library(klsm256 INTERFACE)
+  target_link_libraries(klsm256 INTERFACE klsm)
+  set_property(TARGET klsm256 PROPERTY pq_name klsm256)
+  target_compile_definitions(
+    klsm256
+    INTERFACE PQ_KLSM
+    INTERFACE KLSM_K=256)
+  add_library(klsm1024 INTERFACE)
+  target_link_libraries(klsm1024 INTERFACE klsm)
+  set_property(TARGET klsm1024 PROPERTY pq_name klsm1024)
+  target_compile_definitions(
+    klsm1024
+    INTERFACE PQ_KLSM
+    INTERFACE KLSM_K=1024)
+  add_library(klsm4096 INTERFACE)
+  target_link_libraries(klsm4096 INTERFACE klsm)
+  set_property(TARGET klsm4096 PROPERTY pq_name klsm4096)
+  target_compile_definitions(
+    klsm4096
+    INTERFACE PQ_KLSM
+    INTERFACE KLSM_K=4096)
+endif()
 
 add_library(smq INTERFACE)
 set_property(TARGET smq PROPERTY pq_name smq)
@@ -139,21 +151,19 @@ add_library(mq_pq INTERFACE)
 target_link_libraries(mq_pq INTERFACE multiqueue::multiqueue)
 target_compile_definitions(mq_pq INTERFACE PQ_MQ_PQ ${MQ_CONFIG})
 
-# GENERIC_COMPETITORS also support non-integer keys (knapsack_float)
 set(GENERIC_COMPETITORS
     ${MQ_VARIANTS}
-    klsm4
-    klsm256
-    klsm1024
-    klsm4096
     smq
     locked_pq
     mq_pq)
+if(EXP_X86_COMPETITORS)
+  list(APPEND GENERIC_COMPETITORS klsm4 klsm256 klsm1024 klsm4096)
+endif()
 set(COMPETITORS ${GENERIC_COMPETITORS})
 
 find_package(GSL)
 
-if (GSL_FOUND)
+if(EXP_X86_COMPETITORS AND GSL_FOUND)
   add_library(
     linden
     ${KLSM_DIR}/lib/spraylist_linden/linden_common.c
@@ -211,7 +221,7 @@ if (GSL_FOUND)
 
   list(APPEND COMPETITORS linden capq spraylist)
 else()
-  message(WARNING "GSL not found, not building linden, capq, spraylist")
+  message(WARNING "GSL not found or not x86-64, not building linden, capq, spraylist")
 endif()
 
 find_package(TBB)

@@ -11,7 +11,6 @@
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <unistd.h>
-#include <x86intrin.h>
 #include <atomic>
 #include <cassert>
 #include <filesystem>
@@ -19,6 +18,8 @@
 #include <iostream>
 #include <limits>
 #include <memory>
+#include <stdexcept>
+#include <string>
 #include <vector>
 
 using pq_type = PQ<true, unsigned long, unsigned long>;
@@ -29,12 +30,14 @@ struct Settings {
     benchmark::BaseSettings base_settings{};
     pq_type::settings_type pq_settings{};
     std::filesystem::path graph_file;
+    std::string source = "0";
 
     void register_cmd_options(cxxopts::Options& cmd) {
         base_settings.register_cmd_options(cmd);
         // clang-format off
         cmd.add_options()
-            ("graph", "The input graph", cxxopts::value<std::filesystem::path>(graph_file), "PATH");
+            ("graph", "The input graph", cxxopts::value<std::filesystem::path>(graph_file), "PATH")
+            ("source", "Source node: 0-based index or max-degree", cxxopts::value<std::string>(source), "NODE");
         // clang-format on
         pq_settings.register_cmd_options(cmd);
         cmd.parse_positional({"graph"});
@@ -57,12 +60,14 @@ struct Settings {
         base_settings.write_human_readable(out);
         pq_settings.write_human_readable(out);
         out << "Graph: " << graph_file << '\n';
+        out << "Source: " << source << '\n';
     }
 
     void write_json(json::Object& obj) const {
         base_settings.write_json(obj);
         obj.object("pq", [this](json::Object& o) { pq_settings.write_json(o); });
         obj.entry("graph", graph_file);
+        obj.entry("source", source);
     }
 };
 
@@ -73,6 +78,7 @@ struct alignas(L1_CACHE_LINE_SIZE) AtomicDistance {
 struct SharedData {
     Graph graph;
     std::vector<AtomicDistance> distances;
+    std::size_t source{};
     parallel_search::Termination termination;
 };
 
@@ -118,8 +124,8 @@ struct ThreadResult {
     ThreadResult result{};
     auto handle = pq.get_handle();
     if (thread_context.id() == 0) {
-        data.distances[0].value = 0;
-        handle.push({0, 0});
+        data.distances[data.source].value = 0;
+        handle.push({0, data.source});
         ++result.counter.pushed_nodes;
     }
     result.interval = data.termination.run(
@@ -130,7 +136,7 @@ struct ThreadResult {
 
 void run_benchmark(Settings const& settings) {
     std::clog << "Reading graph...\n";
-    SharedData shared_data{{}, {}, parallel_search::Termination{settings.base_settings.num_threads}};
+    SharedData shared_data{{}, {}, 0, parallel_search::Termination{settings.base_settings.num_threads}};
     try {
         shared_data.graph = Graph(settings.graph_file);
     } catch (std::runtime_error const& e) {
@@ -141,8 +147,15 @@ void run_benchmark(Settings const& settings) {
         std::cerr << "Error: " << settings.graph_file.string() << ": Graph has no nodes\n";
         std::exit(EXIT_FAILURE);
     }
+    try {
+        shared_data.source = shared_data.graph.source(settings.source);
+    } catch (std::logic_error const& e) {
+        std::cerr << "Error: --source " << settings.source << ": " << e.what() << '\n';
+        std::exit(EXIT_FAILURE);
+    }
     std::clog << "Graph has " << shared_data.graph.num_nodes() << " nodes and " << shared_data.graph.num_edges()
-              << " edges\n";
+              << " edges, source " << shared_data.source << " has degree " << shared_data.graph.degree(shared_data.source)
+              << '\n';
     shared_data.distances = std::vector<AtomicDistance>(shared_data.graph.num_nodes());
 
     std::vector<Counter> thread_counter(static_cast<std::size_t>(settings.base_settings.num_threads));
@@ -191,6 +204,8 @@ void run_benchmark(Settings const& settings) {
         root.object("graph", [&shared_data](json::Object& graph) {
             graph.entry("num_nodes", shared_data.graph.num_nodes());
             graph.entry("num_edges", shared_data.graph.num_edges());
+            graph.entry("source", shared_data.source);
+            graph.entry("source_degree", shared_data.graph.degree(shared_data.source));
         });
         root.object("results", [&](json::Object& results) {
             results.entry("time_ns", benchmark::time_ns(thread_interval));

@@ -27,7 +27,7 @@ struct Node {
     }
 };
 
-void dijkstra(std::filesystem::path const& graph_file) noexcept {
+void dijkstra(std::filesystem::path const& graph_file, std::string const& source_spec) noexcept {
     std::clog << "Reading graph...\n";
     Graph graph;
     try {
@@ -36,7 +36,15 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
         std::cerr << "Error: " << graph_file.string() << ": " << e.what() << '\n';
         std::exit(EXIT_FAILURE);
     }
-    std::clog << "Graph has " << graph.num_nodes() << " nodes and " << graph.num_edges() << " edges\n";
+    std::size_t source = 0;
+    try {
+        source = graph.source(source_spec);
+    } catch (std::logic_error const& e) {
+        std::cerr << "Error: --source " << source_spec << ": " << e.what() << '\n';
+        std::exit(EXIT_FAILURE);
+    }
+    std::clog << "Graph has " << graph.num_nodes() << " nodes and " << graph.num_edges() << " edges, source " << source
+              << " has degree " << graph.degree(source) << '\n';
     std::vector<long long> distances(graph.num_nodes(), std::numeric_limits<long long>::max());
     long long processed_nodes{0};
     long long ignored_nodes{0};
@@ -47,8 +55,8 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
     std::priority_queue<Node, std::vector<Node>, std::greater<>> pq({}, std::move(container));
     std::clog << "Working...\n";
     auto t_start = std::chrono::steady_clock::now();
-    distances[0] = 0;
-    pq.push({0, 0});
+    distances[source] = 0;
+    pq.push({0, source});
     while (!pq.empty()) {
         sum_sizes += pq.size();
         max_size = std::max(max_size, pq.size());
@@ -91,10 +99,15 @@ void dijkstra(std::filesystem::path const& graph_file) noexcept {
 
     {
         json::Object root{std::cout};
-        root.object("settings", [&graph_file](json::Object& obj) { obj.entry("graph_file", graph_file); });
-        root.object("graph", [&graph](json::Object& obj) {
+        root.object("settings", [&](json::Object& obj) {
+            obj.entry("graph_file", graph_file);
+            obj.entry("source", source_spec);
+        });
+        root.object("graph", [&](json::Object& obj) {
             obj.entry("num_nodes", graph.num_nodes());
             obj.entry("num_edges", graph.num_edges());
+            obj.entry("source", source);
+            obj.entry("source_degree", graph.degree(source));
         });
         root.object("results", [&](json::Object& results) {
             results.entry("time_ns", std::chrono::nanoseconds{t_end - t_start}.count());
@@ -125,10 +138,12 @@ int main(int argc, char* argv[]) {
 
     cxxopts::Options cmd(argv[0]);
     std::filesystem::path graph_file;
+    std::string source = "0";
     // clang-format off
     cmd.add_options()
         ("h,help", "Print this help")
-        ("graph", "The input graph", cxxopts::value<std::filesystem::path>(graph_file), "PATH");
+        ("graph", "The input graph", cxxopts::value<std::filesystem::path>(graph_file), "PATH")
+        ("source", "Source node: 0-based index or max-degree", cxxopts::value<std::string>(source), "NODE");
     // clang-format on
     cmd.parse_positional({"graph"});
 
@@ -146,9 +161,10 @@ int main(int argc, char* argv[]) {
 
     std::clog << "= Settings =\n";
     std::clog << "Graph: " << graph_file << '\n';
+    std::clog << "Source: " << source << '\n';
     std::clog << '\n';
 
     std::clog << "= Running benchmark =\n";
-    dijkstra(graph_file);
+    dijkstra(graph_file, source);
     return EXIT_SUCCESS;
 }
