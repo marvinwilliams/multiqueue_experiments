@@ -123,6 +123,7 @@ struct ThreadData {
 struct SharedData {
     std::vector<key_type> keys;
     std::atomic_llong counter{0};
+    std::atomic_llong completed{0};
     memory_stats::Snapshot memory_start;
     memory_stats::Snapshot memory_after_push;
     memory_stats::Snapshot memory_end;
@@ -255,30 +256,40 @@ class Context : public thread_coordination::Context {
 [[gnu::noinline]] void pop(Context& context) {
     if (context.id() == 0) {
         context.shared_data().counter.store(0, std::memory_order_relaxed);
+        context.shared_data().completed.store(0, std::memory_order_relaxed);
     }
     auto max = context.settings().elements_per_thread * context.settings().base_settings.num_threads;
     context.synchronize();
     context.settings().papi.start(context.thread_data().event_set);
     context.spin_synchronize();
+    auto& reserved = context.shared_data().counter;
+    auto& completed = context.shared_data().completed;
+    auto reserve = [&] {
+        auto current = reserved.load(std::memory_order_relaxed);
+        while (current < max) {
+            auto count = std::min(context.settings().batch_size, max - current);
+            if (reserved.compare_exchange_weak(current, current + count, std::memory_order_relaxed)) {
+                return count;
+            }
+        }
+        return 0LL;
+    };
     context.thread_data().pop_interval.start = clock_type::now();
-    while (true) {
-        long long deletions{0};
-        while (context.try_pop()) {
-            ++deletions;
+    while (completed.load(std::memory_order_relaxed) < max) {
+        auto count = reserve();
+        if (count == 0) {
+            continue;
         }
-        if (deletions == 0) {
-            auto current = context.shared_data().counter.load(std::memory_order_relaxed);
-            if (current >= max) {
-                break;
-            }
-        } else {
-            context.thread_data().pop_count += deletions;
-            auto current = context.shared_data().counter.fetch_add(deletions, std::memory_order_relaxed) + deletions;
-            if (current >= max) {
-                break;
-            }
+        long long popped{0};
+        while (popped < count && context.try_pop()) {
+            ++popped;
         }
-        ++context.thread_data().failed_pop_count;
+        if (popped < count) {
+            ++context.thread_data().failed_pop_count;
+            reserved.fetch_sub(count - popped, std::memory_order_relaxed);
+        }
+        completed.fetch_add(popped, std::memory_order_relaxed);
+        context.thread_data().pop_count += popped;
     }
     context.thread_data().pop_interval.end = clock_type::now();
     context.settings().papi.stop(context.thread_data().event_set, context.thread_data().pop_papi_event_counter);
@@ -296,20 +307,13 @@ void benchmark_thread(Context context) {
     }
     std::seed_seq seed{context.settings().seed, context.id()};
     std::default_random_engine rng(seed);
+    auto key_distribution = std::uniform_int_distribution<key_type>(
+        1, static_cast<key_type>((context.settings().prefill_per_thread + context.settings().elements_per_thread) *
+                                 context.settings().base_settings.num_threads));
     context.synchronize();
-    std::generate(prefill.begin(), prefill.end(),
-                  [&rng, min = 1UL,
-                   max = static_cast<key_type>(context.settings().elements_per_thread *
-                                               context.settings().base_settings.num_threads)]() {
-                      return std::uniform_int_distribution<key_type>(min, max)(rng);
-                  });
+    std::generate(prefill.begin(), prefill.end(), [&] { return key_distribution(rng); });
     std::generate_n(context.shared_data().keys.begin() + context.id() * context.settings().elements_per_thread,
-                    context.settings().elements_per_thread,
-                    [&rng, min = 1UL,
-                     max = static_cast<key_type>(context.settings().elements_per_thread *
-                                                 context.settings().base_settings.num_threads)]() {
-                        return std::uniform_int_distribution<key_type>(min, max)(rng);
-                    });
+                    context.settings().elements_per_thread, [&] { return key_distribution(rng); });
     context.synchronize();
     if (context.id() == 0) {
         std::clog << "Prefilling...\n";
