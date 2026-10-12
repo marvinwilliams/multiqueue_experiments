@@ -43,6 +43,8 @@ struct Settings {
     int sleep_us = 0;
 #ifdef LOG_OPERATIONS
     std::filesystem::path log_file;
+    std::size_t history_windows = 256;
+    std::size_t trace_length = 0;
 #endif
     benchmark::Papi papi;
 
@@ -64,6 +66,8 @@ struct Settings {
             ("q,sleep", "Time in microseconds to wait between operations", cxxopts::value<int>(sleep_us), "NUMBER")
 #ifdef LOG_OPERATIONS
             ("l,log-file", "File to write the operation log to", cxxopts::value<std::filesystem::path>(log_file), "PATH")
+            ("history-windows", "Number of windows of the quality history", cxxopts::value<std::size_t>(history_windows), "NUMBER")
+            ("trace-length", "Number of consecutive pops of thread 0 in the quality trace", cxxopts::value<std::size_t>(trace_length), "NUMBER")
 #endif
             // clang-format on
             ;
@@ -151,6 +155,8 @@ struct Settings {
         out << "Seed: " << seed << '\n';
 #ifdef LOG_OPERATIONS
         out << "Log file: " << (log_file.empty() ? "none" : log_file.string()) << '\n';
+        out << "History windows: " << history_windows << '\n';
+        out << "Trace length: " << trace_length << '\n';
 #endif
         papi.write_human_readable(out);
     }
@@ -168,6 +174,10 @@ struct Settings {
         obj.entry("timeout_s", timeout_s);
         obj.entry("sleep_us", sleep_us);
         obj.entry("seed", seed);
+#ifdef LOG_OPERATIONS
+        obj.entry("history_windows", history_windows);
+        obj.entry("trace_length", trace_length);
+#endif
         papi.write_json(obj);
     }
 };
@@ -200,14 +210,20 @@ struct ThreadData {
 
 #ifdef LOG_OPERATIONS
 quality::Log build_log(std::vector<ThreadData> const& thread_data) {
+    struct MergedPopLog : ThreadData::PopLog {
+        std::size_t thread;
+    };
     std::vector<ThreadData::PushLog> pushes;
-    std::vector<ThreadData::PopLog> pops;
-    for (auto const& e : thread_data) {
-        pushes.insert(pushes.end(), e.pushes.begin(), e.pushes.end());
-        pops.insert(pops.end(), e.pops.begin(), e.pops.end());
+    std::vector<MergedPopLog> pops;
+    for (std::size_t t = 0; t < thread_data.size(); ++t) {
+        pushes.insert(pushes.end(), thread_data[t].pushes.begin(), thread_data[t].pushes.end());
+        for (auto const& pop : thread_data[t].pops) {
+            pops.push_back({pop, t});
+        }
     }
     std::sort(pushes.begin(), pushes.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-    std::sort(pops.begin(), pops.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
+    std::sort(pops.begin(), pops.end(),
+              [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
     auto max_value = std::accumulate(pushes.begin(), pushes.end(), value_type{0},
                                      [](value_type m, auto const& e) { return std::max(m, e.element.second); });
     std::vector<std::size_t> push_index(pushes.empty() ? 0 : static_cast<std::size_t>(max_value) + 1);
@@ -223,7 +239,7 @@ quality::Log build_log(std::vector<ThreadData> const& thread_data) {
         while (pushes_before != pushes.size() && pushes[pushes_before].tick <= pop.tick) {
             ++pushes_before;
         }
-        log.pops.push_back({pushes_before, push_index[static_cast<std::size_t>(pop.val)]});
+        log.pops.push_back({pushes_before, push_index[static_cast<std::size_t>(pop.val)], pop.thread});
     }
     return log;
 }
@@ -469,7 +485,9 @@ void run_benchmark(Settings const& settings) {
     }
     shared_data.invalid_pops = log.invalid_pops();
     try {
-        shared_data.quality_summary = quality::summarize(quality::replay(log));
+        auto metrics = quality::replay(log);
+        shared_data.quality_summary = quality::summarize(metrics, settings.history_windows);
+        shared_data.quality_summary.trace = quality::trace(log, metrics, 0, settings.trace_length);
     } catch (std::exception const& e) {
         std::cerr << "Error: Replaying the operation log failed: " << e.what() << '\n';
         std::exit(EXIT_FAILURE);

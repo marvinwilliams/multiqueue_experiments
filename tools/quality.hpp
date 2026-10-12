@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <iterator>
 #include <ostream>
 #include <stdexcept>
 #include <string>
@@ -22,6 +23,7 @@ struct Log {
     struct Pop {
         std::size_t pushes_before;
         std::size_t push_index;
+        std::size_t thread = 0;
     };
     std::vector<key_type> keys;
     std::vector<Pop> pops;
@@ -124,24 +126,140 @@ inline Distribution distribution(std::vector<std::size_t> values) {
     return d;
 }
 
+struct Bin {
+    std::size_t lo;
+    std::size_t hi;
+    std::size_t count;
+};
+
+// Exact bins below 8, then 4 bins per power of two
+inline std::size_t bin_shift(std::size_t value) noexcept {
+    std::size_t shift = 0;
+    while ((value >> shift) >= 8) {
+        ++shift;
+    }
+    return shift;
+}
+
+inline std::vector<Bin> histogram(std::vector<std::size_t> values) {
+    std::sort(values.begin(), values.end());
+    std::vector<Bin> bins;
+    for (auto v : values) {
+        if (bins.empty() || v >= bins.back().hi) {
+            auto shift = bin_shift(v);
+            auto lo = (v >> shift) << shift;
+            bins.push_back({lo, lo + (std::size_t{1} << shift), 0});
+        }
+        ++bins.back().count;
+    }
+    return bins;
+}
+
+struct Window {
+    std::size_t first_pop;
+    std::size_t pops;
+    Distribution rank_error;
+    Distribution delay;
+};
+
+struct Trace {
+    std::size_t thread = 0;
+    std::size_t first = 0;
+    std::vector<Metrics> metrics;
+};
+
 struct Summary {
     Distribution rank_error;
     Distribution delay;
+    std::vector<Bin> rank_error_histogram;
+    std::vector<Bin> delay_histogram;
+    std::vector<Window> history;
+    Trace trace;
 
     template <typename JsonObject>
     void write_json(JsonObject& obj) const {
-        obj.object("rank_error", [this](JsonObject& o) { rank_error.write_json(o); });
-        obj.object("delay", [this](JsonObject& o) { delay.write_json(o); });
+        auto write_bin = [](std::ostream& out, Bin const& b) { out << '[' << b.lo << ',' << b.hi << ',' << b.count << ']'; };
+        obj.object("rank_error", [&](JsonObject& o) {
+            rank_error.write_json(o);
+            o.array("histogram", rank_error_histogram.begin(), rank_error_histogram.end(), write_bin);
+        });
+        obj.object("delay", [&](JsonObject& o) {
+            delay.write_json(o);
+            o.array("histogram", delay_histogram.begin(), delay_histogram.end(), write_bin);
+        });
+        obj.array("history", history.begin(), history.end(), [](std::ostream& out, Window const& w) {
+            JsonObject o{out};
+            o.entry("first_pop", w.first_pop);
+            o.entry("pops", w.pops);
+            o.object("rank_error", [&w](JsonObject& d) { w.rank_error.write_json(d); });
+            o.object("delay", [&w](JsonObject& d) { w.delay.write_json(d); });
+        });
+        obj.object("trace", [this](JsonObject& o) {
+            o.entry("thread", trace.thread);
+            o.entry("first", trace.first);
+            o.array("rank_error", trace.metrics.begin(), trace.metrics.end(),
+                    [](std::ostream& out, Metrics const& m) { out << m.rank_error; });
+            o.array("delay", trace.metrics.begin(), trace.metrics.end(),
+                    [](std::ostream& out, Metrics const& m) { out << m.delay; });
+        });
     }
 };
 
-inline Summary summarize(std::vector<Metrics> const& metrics) {
-    std::vector<std::size_t> values(metrics.size());
+inline std::vector<std::size_t> rank_errors(std::vector<Metrics>::const_iterator first,
+                                            std::vector<Metrics>::const_iterator last) {
+    std::vector<std::size_t> values;
+    values.reserve(static_cast<std::size_t>(last - first));
+    std::transform(first, last, std::back_inserter(values), [](Metrics const& m) { return m.rank_error; });
+    return values;
+}
+
+inline std::vector<std::size_t> delays(std::vector<Metrics>::const_iterator first,
+                                       std::vector<Metrics>::const_iterator last) {
+    std::vector<std::size_t> values;
+    values.reserve(static_cast<std::size_t>(last - first));
+    std::transform(first, last, std::back_inserter(values), [](Metrics const& m) { return m.delay; });
+    return values;
+}
+
+inline std::vector<Window> history(std::vector<Metrics> const& metrics, std::size_t num_windows) {
+    std::vector<Window> windows;
+    num_windows = std::min(num_windows, metrics.size());
+    for (std::size_t w = 0; w < num_windows; ++w) {
+        auto first = metrics.size() * w / num_windows;
+        auto last = metrics.size() * (w + 1) / num_windows;
+        auto begin = metrics.begin() + static_cast<std::ptrdiff_t>(first);
+        auto end = metrics.begin() + static_cast<std::ptrdiff_t>(last);
+        windows.push_back({first, last - first, distribution(rank_errors(begin, end)), distribution(delays(begin, end))});
+    }
+    return windows;
+}
+
+inline Trace trace(Log const& log, std::vector<Metrics> const& metrics, std::size_t thread, std::size_t length) {
+    Trace t;
+    t.thread = thread;
+    std::vector<std::size_t> indices;
+    for (std::size_t i = 0; i < log.pops.size(); ++i) {
+        if (log.pops[i].thread == thread) {
+            indices.push_back(i);
+        }
+    }
+    length = std::min(length, indices.size());
+    t.first = (indices.size() - length) / 2;
+    for (std::size_t i = t.first; i < t.first + length; ++i) {
+        t.metrics.push_back(metrics[indices[i]]);
+    }
+    return t;
+}
+
+inline Summary summarize(std::vector<Metrics> const& metrics, std::size_t num_windows = 0) {
     Summary s;
-    std::transform(metrics.begin(), metrics.end(), values.begin(), [](Metrics const& m) { return m.rank_error; });
+    auto values = rank_errors(metrics.begin(), metrics.end());
     s.rank_error = distribution(values);
-    std::transform(metrics.begin(), metrics.end(), values.begin(), [](Metrics const& m) { return m.delay; });
-    s.delay = distribution(std::move(values));
+    s.rank_error_histogram = histogram(std::move(values));
+    values = delays(metrics.begin(), metrics.end());
+    s.delay = distribution(values);
+    s.delay_histogram = histogram(std::move(values));
+    s.history = history(metrics, num_windows);
     return s;
 }
 
