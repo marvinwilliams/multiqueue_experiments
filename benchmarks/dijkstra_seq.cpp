@@ -94,7 +94,8 @@ void dijkstra(std::filesystem::path const& graph_file, std::string const& source
     std::clog << "Longest distance: " << *furthest_node << '\n';
     std::clog << "Processed nodes: " << processed_nodes << '\n';
     std::clog << "Ignored nodes: " << ignored_nodes << '\n';
-    std::clog << "Average PQ size: " << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes) << '\n';
+    std::clog << "Average PQ size: "
+              << static_cast<double>(sum_sizes) / static_cast<double>(processed_nodes + ignored_nodes) << '\n';
     std::clog << "Max PQ size: " << max_size << '\n';
 
     {
