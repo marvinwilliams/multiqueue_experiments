@@ -222,8 +222,7 @@ quality::Log build_log(std::vector<ThreadData> const& thread_data) {
         }
     }
     std::sort(pushes.begin(), pushes.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
-    std::sort(pops.begin(), pops.end(),
-              [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
+    std::sort(pops.begin(), pops.end(), [](auto const& lhs, auto const& rhs) { return lhs.tick < rhs.tick; });
     auto max_value = std::accumulate(pushes.begin(), pushes.end(), value_type{0},
                                      [](value_type m, auto const& e) { return std::max(m, e.element.second); });
     std::vector<std::size_t> push_index(pushes.empty() ? 0 : static_cast<std::size_t>(max_value) + 1);
@@ -412,9 +411,12 @@ class Context : public thread_coordination::Context {
 void benchmark_thread(Context context) {
     auto event_set = context.settings().papi.create_event_set();
 #ifdef LOG_OPERATIONS
-    context.thread_data().pushes.reserve(
+    // Touch pages to avoid pagefault
+    context.thread_data().pushes.resize(
         static_cast<std::size_t>(context.settings().prefill_per_thread + 2 * context.settings().iterations_per_thread));
-    context.thread_data().pops.reserve(static_cast<std::size_t>(2 * context.settings().iterations_per_thread));
+    context.thread_data().pushes.clear();
+    context.thread_data().pops.resize(static_cast<std::size_t>(2 * context.settings().iterations_per_thread));
+    context.thread_data().pops.clear();
 #endif
 
     std::vector<key_type> prefill(static_cast<std::size_t>(context.settings().prefill_per_thread));
